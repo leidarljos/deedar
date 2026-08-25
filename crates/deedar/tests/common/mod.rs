@@ -4,14 +4,14 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use deed::{Body, DeedId};
-use deeder::{Client, CreateRequest};
+use deedar::{Client, CreateRequest};
 
 pub fn tmp_url() -> String {
     let n = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("time")
         .as_nanos();
-    let dir = std::env::temp_dir().join(format!("deeder-suite-{n}"));
+    let dir = std::env::temp_dir().join(format!("deedar-suite-{n}"));
     std::fs::create_dir_all(&dir).unwrap();
     format!("file://{}", dir.display())
 }

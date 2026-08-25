@@ -41,9 +41,9 @@ pub struct Evidence {
 /// The work plus its identity. The next unit opens it by `id`.
 ///
 /// ```text
-/// deeder.create --> Deed { id, kind, body, sources, producedBy }
+/// deedar.create --> Deed { id, kind, body, sources, producedBy }
 /// next work --input id
-/// deeder.trail(id) walks sources that name other deeds
+/// deedar.trail(id) walks sources that name other deeds
 /// ```
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

@@ -1,4 +1,4 @@
-# deeder Cap'n protocol. Writer and client speak these types.
+# deedar Cap'n protocol. Writer and client speak these types.
 # Schema id is the session identity for this file generation.
 #
 #   Client.create|get|list|trail|evidence|delete|leave|timestamp|current
@@ -171,7 +171,7 @@ struct CreateParams {
   supersedes @7 :Text; # empty means none
 }
 
-interface Deeder {
+interface Deedar {
   create @0 (params :CreateParams) -> (deed :Deed, evidence :Evidence);
   get @1 (id :Text) -> (deed :Deed);
   list @2 () -> (deeds :List(Deed));

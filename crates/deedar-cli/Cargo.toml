@@ -1,16 +1,16 @@
 [package]
-name = "deeder-cli"
+name = "deedar-cli"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
 rust-version.workspace = true
-description = "Operator path: deeder create/get/list/trail/evidence/delete/leave/timestamp/current/migrate"
+description = "Operator path: deedar create/get/list/trail/evidence/delete/leave/timestamp/current/migrate"
 
 [[bin]]
-name = "deeder"
+name = "deedar"
 path = "src/main.rs"
 
 [dependencies]
 deed.workspace = true
-deeder.workspace = true
+deedar.workspace = true

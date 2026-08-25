@@ -2,8 +2,8 @@
 resolver = "2"
 members = [
     "crates/deed",
-    "crates/deeder",
-    "crates/deeder-cli",
+    "crates/deedar",
+    "crates/deedar-cli",
 ]
 
 [workspace.package]
@@ -15,7 +15,7 @@ rust-version = "1.85"
 
 [workspace.dependencies]
 deed = { path = "crates/deed" }
-deeder = { path = "crates/deeder" }
+deedar = { path = "crates/deedar" }
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.10"
 hmac = "0.12"

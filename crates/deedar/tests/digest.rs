@@ -1,12 +1,12 @@
 use deed::{Body, DeedId, Error};
-use deeder::{deed_digest, Client, CreateRequest};
+use deedar::{deed_digest, Client, CreateRequest};
 
 fn tmp_url() -> String {
     let n = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .expect("time")
         .as_nanos();
-    let dir = std::env::temp_dir().join(format!("deeder-digest-{n}"));
+    let dir = std::env::temp_dir().join(format!("deedar-digest-{n}"));
     std::fs::create_dir_all(&dir).unwrap();
     format!("file://{}", dir.display())
 }
@@ -30,7 +30,7 @@ fn file_req(id: &str, path: std::path::PathBuf) -> CreateRequest {
 #[test]
 fn get_and_resolve_accept_slug_deed_digest_and_product_path() {
     let url = tmp_url();
-    let root = deeder::store_dir(&url).unwrap();
+    let root = deedar::store_dir(&url).unwrap();
     let sitting = root.join("sitting.txt");
     std::fs::write(&sitting, b"digest sitting\n").unwrap();
 
@@ -71,7 +71,7 @@ fn get_and_resolve_accept_slug_deed_digest_and_product_path() {
 #[test]
 fn product_path_shared_by_two_deeds_does_not_pick_one() {
     let url = tmp_url();
-    let root = deeder::store_dir(&url).unwrap();
+    let root = deedar::store_dir(&url).unwrap();
     let a_path = root.join("a.txt");
     let b_path = root.join("b.txt");
     std::fs::write(&a_path, b"same bytes\n").unwrap();

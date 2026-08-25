@@ -1,25 +1,25 @@
-# deeder
+# deedar
 
-A unit of work produces something. deeder records it as a **deed**:
+A unit of work produces something. deedar records it as a **deed**:
 here is the work, this is its identity, take it. The next unit
 opens that deed by `id`.
 
-deeder is the writer. A deed is the noun. `quote`, `patch`, `set`
+deedar is the writer. A deed is the noun. `quote`, `patch`, `set`
 and the rest are kinds — handlers and bodies — not the object. The
 object is always a deed (`deed-quote-rfc2094-nll`).
 
-`DEEDER_URL` is the contract. There is no daemon. Clients speak
-`schema/deeder.capnp`: `create`, `get`, `list`, `trail`, `evidence`,
+`DEEDAR_URL` is the contract. There is no daemon. Clients speak
+`schema/deedar.capnp`: `create`, `get`, `list`, `trail`, `evidence`,
 `delete`, `leave`, `timestamp`, `current`. `get` accepts a slug or a
 unique `sha256:` of the deed or of one product path. Next work
-takes deed ids as `--input`; they become `sources`. `deeder migrate`
+takes deed ids as `--input`; they become `sources`. `deedar migrate`
 (and `FsStore::open`) write `{store}/layout` when that file is
 missing.
 
 ```
 work happens
      |
-deeder.create --> deed + evidence
+deedar.create --> deed + evidence
                        |
         get / list ----+--> a viewer paints face
         next work -----+--> --input ids --> trail
@@ -92,16 +92,16 @@ Each kind is a handler. The body is what the next unit needs.
 - Mint `id` as an accession. After create the deed is frozen. A
   later take mints a new deed and records the old accession in
   `sources`. `--supersedes <id>` also writes `{new}.supersedes` and
-  `{prior}.successor` sidecar files; `deeder current <id>` walks
+  `{prior}.successor` sidecar files; `deedar current <id>` walks
   those to the tip. `get` of the old id still returns that frozen
   deed. Delete writes a tombstone.
-- `{store}/layout` is `1` after `open` or `deeder migrate`. A store
+- `{store}/layout` is `1` after `open` or `deedar migrate`. A store
   without that file still opens; `open` writes the file.
 - Put product bytes in write-once storage. Name those addresses in
   `paths` and in every kind body that points at a file.
-- deeder issues **evidence** at create: a keyed hash over the
+- deedar issues **evidence** at create: a keyed hash over the
   canonical deed (paths, `producedBy`, `grants` included) and a
-  clock the create caller does not supply. `deeder evidence <id>`
+  clock the create caller does not supply. `deedar evidence <id>`
   checks: not tombstoned, each `sha256:` path still hashes, keyed
   hash matches, and every deed `sources` names can itself be
   evidenced. A configured host key requires a host sidecar and a
@@ -109,10 +109,10 @@ Each kind is a handler. The body is what the next unit needs.
   if a body path is not a readable file.
 - `leave` copies write-once product bytes for `file`, `set`, and
   `clip` into `dest/{id}/` and writes `manifest.json`
-  (`claim_generator=deeder`, deed id, kind, hash of the
+  (`claim_generator=deedar`, deed id, kind, hash of the
   concatenated leaving bytes). The same sitting writes an RFC 3161
   TimeStampReq over the evidence bytes (`{id}.tsq` when
-  `DEEDER_TSA` is unset; `{id}.tsr` when an authority replies). The
+  `DEEDAR_TSA` is unset; `{id}.tsr` when an authority replies). The
   frozen deed and keyed-hash evidence stay put. Other kinds refuse.
   `get` and `evidence` do not require a manifest.
 
@@ -123,7 +123,7 @@ Other tools can name a deed. They do not store the product.
 ```
 unit of work
   |
-  +-- deeder.create --> deed id --> next unit --input
+  +-- deedar.create --> deed id --> next unit --input
   +-- claimdag complete can name the id
   +-- packset Remember: can cite the id
   +-- vissue heading can cite the id

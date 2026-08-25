@@ -39,9 +39,9 @@ fn create_frame_keeps_supersedes() {
     let prior = DeedId::parse("deed-quote-first").unwrap();
     let mut req = quote("deed-quote-later", "later take", "https://example.com/b");
     req.supersedes = Some(prior.clone());
-    let bytes = deeder::encode_request(&deeder::Request::Create(Box::new(req))).unwrap();
-    match deeder::decode_request(&bytes).unwrap() {
-        deeder::Request::Create(got) => {
+    let bytes = deedar::encode_request(&deedar::Request::Create(Box::new(req))).unwrap();
+    match deedar::decode_request(&bytes).unwrap() {
+        deedar::Request::Create(got) => {
             assert_eq!(got.supersedes.as_ref(), Some(&prior));
         }
         _ => panic!("expected create frame"),

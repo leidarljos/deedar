@@ -6,28 +6,28 @@ use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use deed::{Body, DeedId, Error};
-use deeder::{Client, CreateRequest};
+use deedar::{Client, CreateRequest};
 
 static ENV: Mutex<()> = Mutex::new(());
 
 fn isolate() -> (std::sync::MutexGuard<'static, ()>, String, PathBuf) {
     let guard = ENV.lock().unwrap_or_else(|e| e.into_inner());
-    // SAFETY: ENV is held for the whole sitting that reads DEEDER_HOST_KEY.
+    // SAFETY: ENV is held for the whole sitting that reads DEEDAR_HOST_KEY.
     unsafe {
-        std::env::remove_var("DEEDER_HOST_KEY");
+        std::env::remove_var("DEEDAR_HOST_KEY");
     }
     let n = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("time")
         .as_nanos();
-    let parent = std::env::temp_dir().join(format!("deeder-host-{n}"));
+    let parent = std::env::temp_dir().join(format!("deedar-host-{n}"));
     let store = parent.join("store");
     fs::create_dir_all(&store).unwrap();
     (guard, format!("file://{}", store.display()), parent)
 }
 
 fn sidecar(url: &str, id: &str) -> PathBuf {
-    deeder::store_dir(url)
+    deedar::store_dir(url)
         .unwrap()
         .join("deeds")
         .join(format!("{id}.host"))
@@ -90,9 +90,9 @@ fn create_with_host_key_env_writes_sidecar() {
     let (_guard, url, parent) = isolate();
     let key = parent.join("lane.host");
     write_key(&key, 9);
-    // SAFETY: ENV is held for the whole sitting that reads DEEDER_HOST_KEY.
+    // SAFETY: ENV is held for the whole sitting that reads DEEDAR_HOST_KEY.
     unsafe {
-        std::env::set_var("DEEDER_HOST_KEY", &key);
+        std::env::set_var("DEEDAR_HOST_KEY", &key);
     }
     let mut client = open(&url);
     let id = DeedId::parse("deed-quote-host").unwrap();
@@ -120,9 +120,9 @@ fn tampered_host_sidecar_fails_evidence() {
     let (_guard, url, parent) = isolate();
     let key = parent.join("lane.host");
     write_key(&key, 3);
-    // SAFETY: ENV is held for the whole sitting that reads DEEDER_HOST_KEY.
+    // SAFETY: ENV is held for the whole sitting that reads DEEDAR_HOST_KEY.
     unsafe {
-        std::env::set_var("DEEDER_HOST_KEY", &key);
+        std::env::set_var("DEEDAR_HOST_KEY", &key);
     }
     let mut client = open(&url);
     let id = DeedId::parse("deed-quote-host").unwrap();
@@ -160,9 +160,9 @@ fn hmac_only_deed_survives_later_host_key() {
     write_key(&parent.join("host.key"), 7);
     let key = parent.join("lane.host");
     write_key(&key, 11);
-    // SAFETY: ENV is held for the whole sitting that reads DEEDER_HOST_KEY.
+    // SAFETY: ENV is held for the whole sitting that reads DEEDAR_HOST_KEY.
     unsafe {
-        std::env::set_var("DEEDER_HOST_KEY", &key);
+        std::env::set_var("DEEDAR_HOST_KEY", &key);
     }
     let mut client = open(&url);
     let got = client.get(&id).expect("open and get still work");
@@ -181,9 +181,9 @@ fn missing_host_sidecar_fails_when_host_key_is_configured() {
     let (_guard, url, parent) = isolate();
     let key = parent.join("lane.host");
     write_key(&key, 5);
-    // SAFETY: ENV is held for the whole sitting that reads DEEDER_HOST_KEY.
+    // SAFETY: ENV is held for the whole sitting that reads DEEDAR_HOST_KEY.
     unsafe {
-        std::env::set_var("DEEDER_HOST_KEY", &key);
+        std::env::set_var("DEEDAR_HOST_KEY", &key);
     }
     let mut client = open(&url);
     let id = DeedId::parse("deed-quote-host").unwrap();
@@ -205,13 +205,13 @@ fn missing_host_sidecar_fails_when_host_key_is_configured() {
 fn store_signature_cannot_stand_in_for_host_when_keys_match() {
     let (_guard, url, parent) = isolate();
     let client = open(&url);
-    let writer = deeder::store_dir(&url).unwrap().join("writer.key");
+    let writer = deedar::store_dir(&url).unwrap().join("writer.key");
     let host_key = parent.join("same-as-writer.key");
     fs::copy(&writer, &host_key).unwrap();
     drop(client);
-    // SAFETY: ENV is held for the whole sitting that reads DEEDER_HOST_KEY.
+    // SAFETY: ENV is held for the whole sitting that reads DEEDAR_HOST_KEY.
     unsafe {
-        std::env::set_var("DEEDER_HOST_KEY", &host_key);
+        std::env::set_var("DEEDAR_HOST_KEY", &host_key);
     }
     let mut client = open(&url);
     let id = DeedId::parse("deed-quote-host").unwrap();

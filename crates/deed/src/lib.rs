@@ -1,7 +1,7 @@
 //! A named product of a unit of work: a deed the next unit opens by id.
 //!
 //! ```text
-//! work happens --> deeder.create --> deed id
+//! work happens --> deedar.create --> deed id
 //!                                       |
 //!                    get / list / face -+
 //!                    evidence ----------+

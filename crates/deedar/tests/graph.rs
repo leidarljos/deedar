@@ -5,7 +5,7 @@ mod common;
 use std::fs;
 
 use deed::{DeedId, Error, Source};
-use deeder::{encode_response, Response};
+use deedar::{encode_response, Response};
 
 use common::{file, open, quote, tmp_url, write_blob};
 
@@ -37,7 +37,7 @@ fn evidence_fails_when_a_source_record_is_tampered() {
     let mut mutated = client.get(&first.id).unwrap();
     mutated.name = "mutated".into();
     fs::write(
-        deeder::store_dir(&url)
+        deedar::store_dir(&url)
             .unwrap()
             .join("deeds")
             .join("deed-quote-first.cap"),
@@ -83,7 +83,7 @@ fn evidence_fails_when_a_source_is_missing() {
 #[test]
 fn evidence_fails_when_a_source_product_is_tampered() {
     let url = tmp_url();
-    let root = deeder::store_dir(&url).unwrap();
+    let root = deedar::store_dir(&url).unwrap();
     let blob = write_blob(&root, "note.md", b"a short note\n");
     let mut client = open(&url);
     let (first, _) = client.create(file("deed-file-note", blob)).unwrap();
@@ -95,7 +95,7 @@ fn evidence_fails_when_a_source_product_is_tampered() {
         .and_then(|s| s.strip_prefix("sha256:"))
         .expect("write-once");
     fs::write(
-        deeder::store_dir(&url).unwrap().join("bytes").join(hex),
+        deedar::store_dir(&url).unwrap().join("bytes").join(hex),
         b"changed",
     )
     .unwrap();

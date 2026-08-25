@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use deed::{Body, DeedId};
-use deeder::{imprint_hash, timestamp_req, Client, CreateRequest};
+use deedar::{imprint_hash, timestamp_req, Client, CreateRequest};
 
 const SHA256_OID: &[u8] = &[0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01];
 
@@ -14,7 +14,7 @@ fn tmp_url() -> String {
         .duration_since(UNIX_EPOCH)
         .expect("time")
         .as_nanos();
-    let dir = std::env::temp_dir().join(format!("deeder-ts-{n}"));
+    let dir = std::env::temp_dir().join(format!("deedar-ts-{n}"));
     fs::create_dir_all(&dir).unwrap();
     format!("file://{}", dir.display())
 }
@@ -43,11 +43,11 @@ fn file(id: &str, path: PathBuf) -> CreateRequest {
 
 fn offline() {
     assert!(
-        std::env::var("DEEDER_TSA")
+        std::env::var("DEEDAR_TSA")
             .ok()
             .filter(|s| !s.is_empty())
             .is_none(),
-        "tests must not call a timestamp authority; unset DEEDER_TSA"
+        "tests must not call a timestamp authority; unset DEEDAR_TSA"
     );
 }
 
@@ -69,7 +69,7 @@ fn timestamp_req_contains_sha256_oid_and_hash() {
 fn timestamp_without_tsa_writes_tsq_and_evidence_still_succeeds() {
     offline();
     let url = tmp_url();
-    let root = deeder::store_dir(&url).unwrap();
+    let root = deedar::store_dir(&url).unwrap();
     let blob = write_blob(&root, "note.txt", b"lane timestamp");
     let mut client = Client::open(&url).unwrap();
     let id = DeedId::parse("deed-file-note").unwrap();
@@ -86,7 +86,7 @@ fn timestamp_without_tsa_writes_tsq_and_evidence_still_succeeds() {
 fn get_after_timestamp_still_works() {
     offline();
     let url = tmp_url();
-    let root = deeder::store_dir(&url).unwrap();
+    let root = deedar::store_dir(&url).unwrap();
     let blob = write_blob(&root, "note.txt", b"lane timestamp");
     let mut client = Client::open(&url).unwrap();
     let id = DeedId::parse("deed-file-note").unwrap();

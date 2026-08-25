@@ -5,16 +5,16 @@ mod common;
 use std::fs;
 
 use deed::{DeedId, Error};
-use deeder::{encode_response, Response};
+use deedar::{encode_response, Response};
 
 use common::{file, open, quote, tmp_url, write_blob};
 
 fn deeds_dir(url: &str) -> std::path::PathBuf {
-    deeder::store_dir(url).unwrap().join("deeds")
+    deedar::store_dir(url).unwrap().join("deeds")
 }
 
 fn bytes_dir(url: &str) -> std::path::PathBuf {
-    deeder::store_dir(url).unwrap().join("bytes")
+    deedar::store_dir(url).unwrap().join("bytes")
 }
 
 fn hex_of(deed_paths: &[std::path::PathBuf]) -> String {
@@ -68,7 +68,7 @@ fn flipped_evidence_bytes_fail_evidence() {
 #[test]
 fn flipped_product_bytes_fail_evidence() {
     let url = tmp_url();
-    let root = deeder::store_dir(&url).unwrap();
+    let root = deedar::store_dir(&url).unwrap();
     let blob = write_blob(&root, "note.md", b"a short note\n");
     let mut client = open(&url);
     let (deed, _) = client.create(file("deed-file-note", blob)).unwrap();
@@ -83,7 +83,7 @@ fn flipped_product_bytes_fail_evidence() {
 #[test]
 fn missing_product_bytes_fail_evidence() {
     let url = tmp_url();
-    let root = deeder::store_dir(&url).unwrap();
+    let root = deedar::store_dir(&url).unwrap();
     let blob = write_blob(&root, "note.md", b"a short note\n");
     let mut client = open(&url);
     let (deed, _) = client.create(file("deed-file-note", blob)).unwrap();

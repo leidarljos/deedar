@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use deed::{Body, Deed, DeedId, FormField, Grant, Kind, MailMessageId, Measure, Source, Step};
-use deeder::{Client, CreateRequest, StoreUrl};
+use deedar::{Client, CreateRequest, StoreUrl};
 
 fn main() -> ExitCode {
     match run(env::args().skip(1).collect()) {
@@ -14,7 +14,7 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(e) => {
-            eprintln!("deeder: {e}");
+            eprintln!("deedar: {e}");
             ExitCode::from(1)
         }
     }
@@ -95,14 +95,14 @@ fn run(args: Vec<String>) -> Result<String, String> {
         )),
         Some(other) => Err(format!("unknown command {other}")),
         None => Err(
-            "usage: deeder [--url FILE] create|get|list|trail|evidence|delete|leave|timestamp|current|migrate"
+            "usage: deedar [--url FILE] create|get|list|trail|evidence|delete|leave|timestamp|current|migrate"
                 .into(),
         ),
     }
 }
 
 fn take_url(args: &[String]) -> Result<(String, Vec<String>), String> {
-    let mut url = env::var("DEEDER_URL").unwrap_or_default();
+    let mut url = env::var("DEEDAR_URL").unwrap_or_default();
     let mut rest = Vec::new();
     let mut i = 0;
     while i < args.len() {
@@ -115,7 +115,7 @@ fn take_url(args: &[String]) -> Result<(String, Vec<String>), String> {
         i += 1;
     }
     if url.is_empty() {
-        return Err("set DEEDER_URL or pass --url".into());
+        return Err("set DEEDAR_URL or pass --url".into());
     }
     Ok((url, rest))
 }
@@ -462,7 +462,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .expect("time")
             .as_nanos();
-        let dir = std::env::temp_dir().join(format!("deeder-cli-{n}"));
+        let dir = std::env::temp_dir().join(format!("deedar-cli-{n}"));
         std::fs::create_dir_all(&dir).expect("dir");
         format!("file://{}", dir.display())
     }
@@ -540,11 +540,11 @@ mod tests {
         .expect("create quote");
         assert!(created.contains("deed-quote-digest-alias"), "{created}");
 
-        let mut client = deeder::Client::open(&url).expect("open");
+        let mut client = deedar::Client::open(&url).expect("open");
         let deed = client
             .get(&deed::DeedId::parse("deed-quote-digest-alias").unwrap())
             .expect("load");
-        let digest = deeder::deed_digest(&deed);
+        let digest = deedar::deed_digest(&deed);
         let got = run(vec!["--url".into(), url, "get".into(), digest]).expect("get digest");
         assert!(got.contains("deed-quote-digest-alias"), "{got}");
         assert!(

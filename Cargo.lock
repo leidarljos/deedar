@@ -75,7 +75,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "deeder"
+name = "deedar"
 version = "0.1.0"
 dependencies = [
  "deed",
@@ -85,11 +85,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "deeder-cli"
+name = "deedar-cli"
 version = "0.1.0"
 dependencies = [
  "deed",
- "deeder",
+ "deedar",
 ]
 
 [[package]]

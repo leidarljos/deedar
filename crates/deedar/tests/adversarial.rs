@@ -3,7 +3,7 @@
 mod common;
 
 use deed::{DeedId, Error, Source};
-use deeder::{decode_request, encode_request, Request};
+use deedar::{decode_request, encode_request, Request};
 use std::fs;
 use std::os::unix::fs::symlink;
 
@@ -38,7 +38,7 @@ fn javascript_url_is_rejected() {
 #[test]
 fn directory_as_file_path_is_rejected() {
     let url = tmp_url();
-    let root = deeder::store_dir(&url).unwrap();
+    let root = deedar::store_dir(&url).unwrap();
     let mut client = open(&url);
     let err = client
         .create(file("deed-file-note", root.clone()))
@@ -63,10 +63,10 @@ fn recreate_after_delete_stays_frozen() {
 #[test]
 fn writer_key_wrong_length_refuses_open() {
     let url = tmp_url();
-    let root = deeder::store_dir(&url).unwrap();
+    let root = deedar::store_dir(&url).unwrap();
     open(&url);
     fs::write(root.join("writer.key"), [0u8; 8]).unwrap();
-    let err = match deeder::Client::open(&url) {
+    let err = match deedar::Client::open(&url) {
         Err(e) => e,
         Ok(_) => panic!("short key opened"),
     };
@@ -76,7 +76,7 @@ fn writer_key_wrong_length_refuses_open() {
 #[test]
 fn replacing_writer_key_fails_existing_evidence() {
     let url = tmp_url();
-    let root = deeder::store_dir(&url).unwrap();
+    let root = deedar::store_dir(&url).unwrap();
     let mut client = open(&url);
     client
         .create(quote("deed-quote-item", "excerpt", "https://example.com/a"))
@@ -132,13 +132,13 @@ fn two_deeds_citing_each_other_do_not_loop() {
     first
         .sources
         .push(Source::deed(DeedId::parse("deed-quote-two").unwrap()));
-    let cap = deeder::store_dir(&url)
+    let cap = deedar::store_dir(&url)
         .unwrap()
         .join("deeds")
         .join("deed-quote-one.cap");
     fs::write(
         &cap,
-        deeder::encode_response(&deeder::Response::Deed(first)).unwrap(),
+        deedar::encode_response(&deedar::Response::Deed(first)).unwrap(),
     )
     .unwrap();
     let trail = client
@@ -150,7 +150,7 @@ fn two_deeds_citing_each_other_do_not_loop() {
 #[test]
 fn garbage_request_bytes_are_rejected() {
     let url = tmp_url();
-    let mut store = deeder::FsStore::open(deeder::store_dir(&url).unwrap()).unwrap();
+    let mut store = deedar::FsStore::open(deedar::store_dir(&url).unwrap()).unwrap();
     let err = store.handle(b"not-capn").expect_err("garbage");
     assert!(matches!(err, Error::Decode(_)), "{err}");
 }
@@ -158,13 +158,13 @@ fn garbage_request_bytes_are_rejected() {
 #[test]
 fn symlink_to_a_file_is_ingested_as_that_file() {
     let url = tmp_url();
-    let root = deeder::store_dir(&url).unwrap();
+    let root = deedar::store_dir(&url).unwrap();
     let target = write_blob(&root, "real.txt", b"payload");
     let link = root.join("alias.txt");
     symlink(&target, &link).unwrap();
     let mut client = open(&url);
     let (deed, _) = client.create(file("deed-file-note", link)).unwrap();
-    assert!(deed.paths.iter().all(deeder::is_write_once_addr));
+    assert!(deed.paths.iter().all(deedar::is_write_once_addr));
     client
         .evidence(&DeedId::parse("deed-file-note").unwrap())
         .unwrap();

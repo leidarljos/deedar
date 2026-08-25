@@ -3,18 +3,18 @@
 mod common;
 
 use deed::{DeedId, Error};
-use deeder::{imprint_hash, timestamp_req};
+use deedar::{imprint_hash, timestamp_req};
 use sha2::{Digest, Sha256};
 
 use common::{file, open, quote, tmp_url, write_blob};
 
 fn offline() {
     assert!(
-        std::env::var("DEEDER_TSA")
+        std::env::var("DEEDAR_TSA")
             .ok()
             .filter(|s| !s.is_empty())
             .is_none(),
-        "tests must not call a timestamp authority; unset DEEDER_TSA"
+        "tests must not call a timestamp authority; unset DEEDAR_TSA"
     );
 }
 
@@ -39,7 +39,7 @@ fn hash_field(manifest: &str) -> &str {
 fn leave_copies_bytes_and_writes_a_matching_manifest() {
     offline();
     let url = tmp_url();
-    let root = deeder::store_dir(&url).unwrap();
+    let root = deedar::store_dir(&url).unwrap();
     let sitting = write_blob(&root, "sitting.txt", b"credentials sitting\n");
     let mut client = open(&url);
     let id = DeedId::parse("deed-file-note").unwrap();
@@ -62,7 +62,7 @@ fn leave_copies_bytes_and_writes_a_matching_manifest() {
     let want = hex_encode(&Sha256::digest(&concat));
     let manifest = std::fs::read_to_string(out.join("manifest.json")).unwrap();
     assert_eq!(hash_field(&manifest), want);
-    assert!(manifest.contains("\"claim_generator\": \"deeder\""));
+    assert!(manifest.contains("\"claim_generator\": \"deedar\""));
     assert!(manifest.contains(&format!("\"deed\": \"{id}\"")));
     assert!(manifest.contains("\"kind\": \"file\""));
 
@@ -83,7 +83,7 @@ fn leave_copies_bytes_and_writes_a_matching_manifest() {
 fn leave_requests_timestamp_over_evidence_bytes() {
     offline();
     let url = tmp_url();
-    let root = deeder::store_dir(&url).unwrap();
+    let root = deedar::store_dir(&url).unwrap();
     let sitting = write_blob(&root, "sitting.txt", b"leave timestamp sitting\n");
     let mut client = open(&url);
     let id = DeedId::parse("deed-file-note").unwrap();
@@ -108,7 +108,7 @@ fn leave_requests_timestamp_over_evidence_bytes() {
 #[test]
 fn leave_of_a_quote_is_invalid_body() {
     let url = tmp_url();
-    let dest = deeder::store_dir(&url).unwrap().join("left");
+    let dest = deedar::store_dir(&url).unwrap().join("left");
     let mut client = open(&url);
     let (deed, _) = client
         .create(quote("deed-quote-item", "excerpt", "https://example.com/a"))
@@ -120,7 +120,7 @@ fn leave_of_a_quote_is_invalid_body() {
 #[test]
 fn get_and_evidence_succeed_without_leave() {
     let url = tmp_url();
-    let root = deeder::store_dir(&url).unwrap();
+    let root = deedar::store_dir(&url).unwrap();
     let sitting = write_blob(&root, "sitting.txt", b"credentials sitting\n");
     let mut client = open(&url);
     let id = DeedId::parse("deed-file-note").unwrap();

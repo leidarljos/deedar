@@ -11,11 +11,11 @@ use sha2::Sha256;
 type HmacSha256 = Hmac<Sha256>;
 
 /// Domain tag so a store HMAC is never a valid host check.
-const HOST_DOMAIN: &[u8] = b"deeder.host.v1";
+const HOST_DOMAIN: &[u8] = b"deedar.host.v1";
 
-/// `DEEDER_HOST_KEY` if set, else `{store}/../host.key`.
+/// `DEEDAR_HOST_KEY` if set, else `{store}/../host.key`.
 pub fn host_key_path(store_dir: &Path) -> PathBuf {
-    match env::var_os("DEEDER_HOST_KEY") {
+    match env::var_os("DEEDAR_HOST_KEY") {
         Some(value) if !value.is_empty() => PathBuf::from(value),
         _ => store_dir.join("..").join("host.key"),
     }

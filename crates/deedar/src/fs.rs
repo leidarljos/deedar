@@ -203,7 +203,7 @@ impl FsStore {
         let bytes =
             fs::read(self.evidence_path(id)).map_err(|_| Error::Evidence("missing".into()))?;
         let req = timestamp_req(&imprint_hash(&bytes));
-        match std::env::var("DEEDER_TSA") {
+        match std::env::var("DEEDAR_TSA") {
             Ok(url) if !url.is_empty() => {
                 let body = post_query(&url, &req)?;
                 let dest = self.tsr_path(id);

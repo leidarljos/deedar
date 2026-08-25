@@ -2,14 +2,14 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use deed::{Body, DeedId, Error, FormField, Grant, Kind, MailMessageId, Measure, Source, Step};
-use deeder::{encode_response, is_write_once_addr, Client, CreateRequest, FsStore, Response};
+use deedar::{encode_response, is_write_once_addr, Client, CreateRequest, FsStore, Response};
 
 fn tmp_url() -> String {
     let n = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("time")
         .as_nanos();
-    let dir = std::env::temp_dir().join(format!("deeder-store-{n}"));
+    let dir = std::env::temp_dir().join(format!("deedar-store-{n}"));
     std::fs::create_dir_all(&dir).unwrap();
     format!("file://{}", dir.display())
 }
@@ -36,7 +36,7 @@ fn req(id: &str, name: &str, body: Body) -> CreateRequest {
 #[test]
 fn create_get_list_trail_delete_for_every_kind() {
     let url = tmp_url();
-    let root = deeder::store_dir(&url).unwrap();
+    let root = deedar::store_dir(&url).unwrap();
     let letter = write_blob(&root, "letter.pdf", b"%PDF-letter");
     let shot = write_blob(&root, "museum.jpg", b"jpeg-bytes");
     let diff = write_blob(&root, "parser.rs", b"fn parse() {}");
@@ -378,7 +378,7 @@ fn writer_stamps_agent_and_clock_not_caller_time() {
 #[test]
 fn capnp_client_round_trip_quote_and_clip() {
     let url = tmp_url();
-    let root = deeder::store_dir(&url).unwrap();
+    let root = deedar::store_dir(&url).unwrap();
     let wav = write_blob(&root, "sting.wav", b"RIFF");
     let mut client = Client::open(&url).unwrap();
     let (quote, _) = client
@@ -440,7 +440,7 @@ fn capnp_client_round_trip_quote_and_clip() {
 #[test]
 fn open_file_url_round_trips() {
     let url = tmp_url();
-    let root = deeder::store_dir(&url).unwrap();
+    let root = deedar::store_dir(&url).unwrap();
     let note = write_blob(&root, "note.md", b"a short note\n");
     let mut a = Client::open(&url).unwrap();
     a.create(req(
@@ -486,7 +486,7 @@ fn quote_without_urls_is_rejected() {
 #[test]
 fn evidence_accepts_fresh_file_and_rejects_changed_bytes() {
     let url = tmp_url();
-    let root = deeder::store_dir(&url).unwrap();
+    let root = deedar::store_dir(&url).unwrap();
     let letter = write_blob(&root, "letter.pdf", b"%PDF-letter");
     let mut client = Client::open(&url).unwrap();
     let id = DeedId::parse("deed-file-letter").unwrap();
@@ -535,7 +535,7 @@ fn evidence_rejects_a_changed_deed_record() {
     client.evidence(&id).expect("fresh");
     let mut changed = client.get(&id).unwrap();
     changed.name = "tampered".into();
-    let cap = deeder::store_dir(&url)
+    let cap = deedar::store_dir(&url)
         .unwrap()
         .join("deeds")
         .join("deed-quote-heatpump.cap");
@@ -613,7 +613,7 @@ fn list_fails_on_a_corrupt_deed_file() {
             },
         ))
         .unwrap();
-    let cap = deeder::store_dir(&url)
+    let cap = deedar::store_dir(&url)
         .unwrap()
         .join("deeds")
         .join("deed-quote-heatpump.cap");
@@ -670,7 +670,7 @@ fn fs_store_direct_create_uses_same_writer() {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let dir = std::env::temp_dir().join(format!("deeder-fs-{n}"));
+    let dir = std::env::temp_dir().join(format!("deedar-fs-{n}"));
     let mut store = FsStore::open(&dir).unwrap();
     let (d, _) = store
         .create(req(

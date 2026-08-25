@@ -27,7 +27,7 @@ fn copy_tree(src: &Path, dst: &Path) {
 fn copy_without_layout_still_gets_trail_evidence_list() {
     let url = tmp_url();
     let id = DeedId::parse("deed-file-compat").unwrap();
-    let root = deeder::store_dir(&url).unwrap();
+    let root = deedar::store_dir(&url).unwrap();
     let sitting = write_blob(&root, "compat.txt", b"old store sitting\n");
     let mut client = open(&url);
     client.create(file("deed-file-compat", sitting)).unwrap();
@@ -36,7 +36,7 @@ fn copy_without_layout_still_gets_trail_evidence_list() {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let dest = std::env::temp_dir().join(format!("deeder-compat-{n}"));
+    let dest = std::env::temp_dir().join(format!("deedar-compat-{n}"));
     copy_tree(&root, &dest);
     let layout = dest.join("layout");
     if layout.exists() {
@@ -45,7 +45,7 @@ fn copy_without_layout_still_gets_trail_evidence_list() {
     assert!(!layout.exists());
 
     let copy_url = format!("file://{}", dest.display());
-    let mut opened = deeder::Client::open(&copy_url).expect("open copy");
+    let mut opened = deedar::Client::open(&copy_url).expect("open copy");
     let got = opened.get(&id).expect("get");
     assert_eq!(got.id, id);
     let trail = opened.trail(&id).expect("trail");

@@ -1,4 +1,4 @@
-//! Cap'n-shaped encode/decode of schema/deeder.capnp.
+//! Cap'n-shaped encode/decode of schema/deedar.capnp.
 //! Field numbers match the schema ordinals.
 
 use std::path::PathBuf;
@@ -190,7 +190,7 @@ fn wrap(payload: &[u8]) -> Result<Vec<u8>> {
 
 fn unwrap(bytes: &[u8]) -> Result<&[u8]> {
     if bytes.len() < 16 || &bytes[..8] != MAGIC {
-        return Err(Error::Decode("not a deeder Cap'n frame".into()));
+        return Err(Error::Decode("not a deedar Cap'n frame".into()));
     }
     let rev = u32::from_le_bytes(bytes[8..12].try_into().unwrap());
     if rev != REV {

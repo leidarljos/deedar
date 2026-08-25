@@ -36,12 +36,12 @@ fn open_writes_layout_and_gets_a_pre_layout_deed() {
         ))
         .unwrap();
 
-    let src = deeder::store_dir(&url).unwrap();
+    let src = deedar::store_dir(&url).unwrap();
     let n = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let dest = std::env::temp_dir().join(format!("deeder-pre-layout-{n}"));
+    let dest = std::env::temp_dir().join(format!("deedar-pre-layout-{n}"));
     copy_tree(&src, &dest);
     let layout = dest.join("layout");
     if layout.exists() {
@@ -50,7 +50,7 @@ fn open_writes_layout_and_gets_a_pre_layout_deed() {
     assert!(!layout.exists());
 
     let copy_url = format!("file://{}", dest.display());
-    let mut opened = deeder::Client::open(&copy_url).expect("open copy");
+    let mut opened = deedar::Client::open(&copy_url).expect("open copy");
     let got = opened.get(&id).expect("get pre-layout id");
     assert_eq!(got.id.as_str(), "deed-quote-heatpump");
     assert_eq!(fs::read_to_string(&layout).expect("layout"), "1\n");

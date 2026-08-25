@@ -1,10 +1,10 @@
 //! One-writer deed store. Clients speak the Cap'n schema via [`Client`].
 //!
 //! ```text
-//! just deeder / any client
+//! just deedar / any client
 //!           |
 //!      Client::create|get|list|trail|evidence|delete|leave|timestamp|current|migrate
-//!           |  Cap'n  (schema/deeder.capnp)
+//!           |  Cap'n  (schema/deedar.capnp)
 //!           v
 //!        FsStore  -- write-once bytes + frozen deed + evidence
 //! ```
@@ -46,7 +46,7 @@ pub struct CreateRequest {
     pub supersedes: Option<DeedId>,
 }
 
-/// Cap'n client. Same path the `deeder` command uses.
+/// Cap'n client. Same path the `deedar` command uses.
 pub struct Client {
     store: FsStore,
 }

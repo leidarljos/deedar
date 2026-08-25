@@ -38,7 +38,7 @@ pub fn leave(store: &mut FsStore, id: &DeedId, dest: &Path) -> Result<PathBuf> {
     }
     let hash = hex_encode(&Sha256::digest(&concat));
     let manifest = format!(
-        "{{\n  \"claim_generator\": \"deeder\",\n  \"deed\": \"{}\",\n  \"kind\": \"{}\",\n  \"hash\": \"{hash}\"\n}}\n",
+        "{{\n  \"claim_generator\": \"deedar\",\n  \"deed\": \"{}\",\n  \"kind\": \"{}\",\n  \"hash\": \"{hash}\"\n}}\n",
         deed.id,
         deed.kind.token(),
     );
