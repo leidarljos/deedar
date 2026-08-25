@@ -1,0 +1,21 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/deed",
+    "crates/deeder",
+    "crates/deeder-cli",
+]
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+version = "0.1.0"
+publish = false
+rust-version = "1.85"
+
+[workspace.dependencies]
+deed = { path = "crates/deed" }
+deeder = { path = "crates/deeder" }
+serde = { version = "1", features = ["derive"] }
+sha2 = "0.10"
+hmac = "0.12"
