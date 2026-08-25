@@ -6,6 +6,7 @@ use deed::{walk_trail, Body, Deed, DeedId, Draft, Error, Evidence, ProducedBy, R
 use hmac::{Hmac, Mac};
 use sha2::{Digest, Sha256};
 
+use crate::timestamp::{imprint_hash, post_query, timestamp_req};
 use crate::wire::{self, Request, Response};
 use crate::CreateRequest;
 
@@ -15,6 +16,7 @@ type HmacSha256 = Hmac<Sha256>;
 pub struct FsStore {
     dir: PathBuf,
     key: [u8; 32],
+    host_key: Option<[u8; 32]>,
 }
 
 impl FsStore {
@@ -22,6 +24,7 @@ impl FsStore {
         let dir = dir.as_ref();
         fs::create_dir_all(dir.join("bytes")).map_err(|e| Error::Io(e.to_string()))?;
         fs::create_dir_all(dir.join("deeds")).map_err(|e| Error::Io(e.to_string()))?;
+        crate::migrate::ensure_layout(dir)?;
         let key_path = dir.join("writer.key");
         let key = if key_path.exists() {
             let bytes = fs::read(&key_path).map_err(|e| Error::Io(e.to_string()))?;
@@ -39,6 +42,7 @@ impl FsStore {
         Ok(Self {
             dir: dir.to_path_buf(),
             key,
+            host_key: crate::host::load(dir)?,
         })
     }
 
@@ -73,11 +77,39 @@ impl FsStore {
                 Ok(ev) => Response::Evidence(ev),
                 Err(e) => Response::Err(e.to_string()),
             },
+            Request::Leave { id, dest } => match self.leave(&id, &dest) {
+                Ok(_) => Response::Ok,
+                Err(e) => Response::Err(e.to_string()),
+            },
+            Request::Timestamp(id) => match self.timestamp(&id) {
+                Ok(_) => Response::Ok,
+                Err(e) => Response::Err(e.to_string()),
+            },
+            Request::Current(id) => match self.current(&id) {
+                Ok(d) => Response::Deed(d),
+                Err(e) => Response::Err(e.to_string()),
+            },
         };
         wire::encode_response(&resp)
     }
 
     pub fn create(&mut self, req: CreateRequest) -> Result<(Deed, Evidence)> {
+        if let Some(id) = &req.id {
+            if self.deed_path(id).exists() || self.tomb_path(id).exists() {
+                return Err(Error::Frozen(id.to_string()));
+            }
+        }
+        if let Some(prior) = &req.supersedes {
+            if req.id.as_ref() == Some(prior) {
+                return Err(Error::InvalidBody("supersedes self".into()));
+            }
+            if !self.deed_path(prior).exists() {
+                return Err(Error::NotFound(prior.to_string()));
+            }
+            if self.successor_path(prior).exists() {
+                return Err(Error::Frozen(prior.to_string()));
+            }
+        }
         let mut body = req.body;
         self.ingest_body(&mut body)?;
         let draft = Draft {
@@ -85,10 +117,10 @@ impl FsStore {
             name: req.name,
             sources: req.sources,
             produced_by: ProducedBy {
-                agent_id: req.seat_agent_id,
-                activity_id: req.seat_activity_id,
+                agent_id: req.agent_id,
+                activity_id: req.activity_id,
             },
-            grants: req.policy_grants,
+            grants: req.grants,
             body,
         };
         let deed = Deed::from_draft(draft)?;
@@ -103,6 +135,13 @@ impl FsStore {
             evidence: evidence.clone(),
         })?;
         atomic_write(&self.evidence_path(&deed.id), &eframe)?;
+        if let Some(host_key) = &self.host_key {
+            let mac = crate::host::sign(host_key, &wire::deed_bytes(&deed), evidence.unix_time)?;
+            atomic_write(&crate::host::sidecar(&self.dir, &deed.id), &mac)?;
+        }
+        if let Some(prior) = req.supersedes {
+            self.record_supersedes(&deed.id, &prior)?;
+        }
         Ok((deed, evidence))
     }
 
@@ -112,7 +151,12 @@ impl FsStore {
         }
         let bytes = fs::read(self.deed_path(id)).map_err(|_| Error::NotFound(id.to_string()))?;
         match wire::decode_response(&bytes)? {
-            Response::Deed(d) => Ok(d),
+            Response::Deed(d) => {
+                if d.id != *id {
+                    return Err(Error::Decode(format!("accession {id} holds {}", d.id)));
+                }
+                Ok(d)
+            }
             _ => Err(Error::Decode("expected deed frame".into())),
         }
     }
@@ -131,9 +175,7 @@ impl FsStore {
                 if self.tomb_path(&id).exists() {
                     continue;
                 }
-                if let Ok(d) = self.get(&id) {
-                    out.push(d);
-                }
+                out.push(self.get(&id)?);
             }
         }
         out.sort_by(|a, b| a.id.as_str().cmp(b.id.as_str()));
@@ -156,15 +198,51 @@ impl FsStore {
         walk_trail(&start, |next| self.get(next))
     }
 
+    pub fn timestamp(&mut self, id: &DeedId) -> Result<PathBuf> {
+        self.get(id)?;
+        let bytes =
+            fs::read(self.evidence_path(id)).map_err(|_| Error::Evidence("missing".into()))?;
+        let req = timestamp_req(&imprint_hash(&bytes));
+        match std::env::var("DEEDER_TSA") {
+            Ok(url) if !url.is_empty() => {
+                let body = post_query(&url, &req)?;
+                let dest = self.tsr_path(id);
+                atomic_write(&dest, &body)?;
+                Ok(dest)
+            }
+            _ => {
+                let dest = self.tsq_path(id);
+                atomic_write(&dest, &req)?;
+                Ok(dest)
+            }
+        }
+    }
+
     pub fn evidence(&self, id: &DeedId) -> Result<Evidence> {
-        let deed = self.get(id)?;
-        let ev = self.load_evidence(id)?;
-        self.check_paths(&deed)?;
-        self.check_signature(&deed, &ev)?;
+        let trail = self.trail(id)?;
+        let mut tip = None;
+        for deed in &trail {
+            let ev = self.evidence_local(deed)?;
+            if deed.id == *id {
+                tip = Some(ev);
+            }
+        }
+        tip.ok_or_else(|| Error::Evidence("trail missing tip".into()))
+    }
+
+    fn evidence_local(&self, deed: &Deed) -> Result<Evidence> {
+        let ev = self.load_evidence(&deed.id)?;
+        self.check_paths(deed)?;
+        self.check_signature(deed, &ev)?;
+        self.check_host(deed, &ev)?;
         if ev.deed_id != deed.id || ev.produced_by != deed.produced_by || ev.grants != deed.grants {
             return Err(Error::Evidence("record does not match deed".into()));
         }
         Ok(ev)
+    }
+
+    pub fn leave(&mut self, id: &DeedId, dest: &Path) -> Result<PathBuf> {
+        crate::leave::leave(self, id, dest)
     }
 
     fn load_evidence(&self, id: &DeedId) -> Result<Evidence> {
@@ -204,6 +282,18 @@ impl FsStore {
             .map_err(|_| Error::Evidence("keyed hash".into()))
     }
 
+    fn check_host(&self, deed: &Deed, ev: &Evidence) -> Result<()> {
+        let Some(key) = &self.host_key else {
+            return Ok(());
+        };
+        let path = crate::host::sidecar(&self.dir, &deed.id);
+        if !path.exists() {
+            return Err(Error::Evidence("host sidecar".into()));
+        }
+        let signature = fs::read(&path).map_err(|e| Error::Io(e.to_string()))?;
+        crate::host::verify(key, &wire::deed_bytes(deed), ev.unix_time, &signature)
+    }
+
     fn ingest_body(&self, body: &mut Body) -> Result<()> {
         let originals = body.paths();
         for path in originals {
@@ -220,11 +310,10 @@ impl FsStore {
     }
 
     fn ingest_path(&self, path: &Path) -> Result<PathBuf> {
-        let bytes = if path.is_file() {
-            fs::read(path).map_err(|e| Error::Io(e.to_string()))?
-        } else {
-            format!("path={}", path.display()).into_bytes()
-        };
+        if !path.is_file() {
+            return Err(Error::Io(format!("{} is not a file", path.display())));
+        }
+        let bytes = fs::read(path).map_err(|e| Error::Io(e.to_string()))?;
         let digest = Sha256::digest(&bytes);
         let hex = hex_encode(&digest);
         let dest = self.dir.join("bytes").join(&hex);
@@ -253,7 +342,7 @@ impl FsStore {
         })
     }
 
-    fn deed_path(&self, id: &DeedId) -> PathBuf {
+    pub(crate) fn deed_path(&self, id: &DeedId) -> PathBuf {
         self.dir.join("deeds").join(format!("{id}.cap"))
     }
 
@@ -261,12 +350,20 @@ impl FsStore {
         self.dir.join("deeds").join(format!("{id}.evidence"))
     }
 
-    fn tomb_path(&self, id: &DeedId) -> PathBuf {
+    fn tsq_path(&self, id: &DeedId) -> PathBuf {
+        self.dir.join("deeds").join(format!("{id}.tsq"))
+    }
+
+    fn tsr_path(&self, id: &DeedId) -> PathBuf {
+        self.dir.join("deeds").join(format!("{id}.tsr"))
+    }
+
+    pub(crate) fn tomb_path(&self, id: &DeedId) -> PathBuf {
         self.dir.join("deeds").join(format!("{id}.tomb"))
     }
 }
 
-fn atomic_write(dest: &Path, bytes: &[u8]) -> Result<()> {
+pub(crate) fn atomic_write(dest: &Path, bytes: &[u8]) -> Result<()> {
     let tmp = dest.with_extension("tmp");
     fs::write(&tmp, bytes).map_err(|e| Error::Io(e.to_string()))?;
     fs::rename(&tmp, dest).map_err(|e| Error::Io(e.to_string()))?;

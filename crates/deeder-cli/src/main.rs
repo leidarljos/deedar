@@ -1,4 +1,4 @@
-//! Operator path: create, get, list, trail, evidence, delete.
+//! Operator path: create, get, list, trail, evidence, delete, leave, timestamp, current, migrate.
 
 use std::env;
 use std::path::PathBuf;
@@ -26,8 +26,9 @@ fn run(args: Vec<String>) -> Result<String, String> {
     match rest.first().map(String::as_str) {
         Some("create") => cmd_create(&mut client, &rest[1..]),
         Some("get") => {
-            let id =
-                DeedId::parse(rest.get(1).ok_or("get needs an id")?).map_err(|e| e.to_string())?;
+            let id = client
+                .resolve(rest.get(1).ok_or("get needs an id")?)
+                .map_err(|e| e.to_string())?;
             let d = client.get(&id).map_err(|e| e.to_string())?;
             Ok(format_one(&d))
         }
@@ -36,13 +37,15 @@ fn run(args: Vec<String>) -> Result<String, String> {
             Ok(format_list(&rows))
         }
         Some("trail") => {
-            let id = DeedId::parse(rest.get(1).ok_or("trail needs an id")?)
+            let id = client
+                .resolve(rest.get(1).ok_or("trail needs an id")?)
                 .map_err(|e| e.to_string())?;
             let rows = client.trail(&id).map_err(|e| e.to_string())?;
             Ok(format_list(&rows))
         }
         Some("evidence") => {
-            let id = DeedId::parse(rest.get(1).ok_or("evidence needs an id")?)
+            let id = client
+                .resolve(rest.get(1).ok_or("evidence needs an id")?)
                 .map_err(|e| e.to_string())?;
             let ev = client.evidence(&id).map_err(|e| e.to_string())?;
             Ok(format!(
@@ -54,17 +57,47 @@ fn run(args: Vec<String>) -> Result<String, String> {
             ))
         }
         Some("delete") => {
-            let id = DeedId::parse(rest.get(1).ok_or("delete needs an id")?)
+            let id = client
+                .resolve(rest.get(1).ok_or("delete needs an id")?)
                 .map_err(|e| e.to_string())?;
             client.delete(&id).map_err(|e| e.to_string())?;
             Ok(format!("deleted {id}\n"))
+        }
+        Some("leave") => {
+            let id = client
+                .resolve(rest.get(1).ok_or("leave needs an id")?)
+                .map_err(|e| e.to_string())?;
+            let dest = PathBuf::from(rest.get(2).ok_or("leave needs a dest dir")?);
+            let out = client.leave(&id, &dest).map_err(|e| e.to_string())?;
+            Ok(format!("{}\n", out.display()))
+        }
+        Some("timestamp") => {
+            let id = client
+                .resolve(rest.get(1).ok_or("timestamp needs an id")?)
+                .map_err(|e| e.to_string())?;
+            let path = client.timestamp(&id).map_err(|e| e.to_string())?;
+            Ok(format!("timestamp {}\n", path.display()))
+        }
+        Some("current") => {
+            let id = client
+                .resolve(rest.get(1).ok_or("current needs an id")?)
+                .map_err(|e| e.to_string())?;
+            let d = client.current(&id).map_err(|e| e.to_string())?;
+            Ok(format_one(&d))
+        }
+        Some("migrate") => {
+            client.migrate().map_err(|e| e.to_string())?;
+            Ok("layout=1\n".into())
         }
         Some("url") => Ok(format!(
             "{}\n",
             StoreUrl::parse(&url).map_err(|e| e.to_string())?.as_url()
         )),
         Some(other) => Err(format!("unknown command {other}")),
-        None => Err("usage: deeder [--url FILE] create|get|list|trail|evidence|delete".into()),
+        None => Err(
+            "usage: deeder [--url FILE] create|get|list|trail|evidence|delete|leave|timestamp|current|migrate"
+                .into(),
+        ),
     }
 }
 
@@ -105,7 +138,7 @@ fn cmd_create(client: &mut Client, args: &[String]) -> Result<String, String> {
     let mut in_reply_to = None;
     let mut subject = String::new();
     let mut title = String::new();
-    let mut agent = "seat".to_string();
+    let mut agent = String::new();
     let mut activity = None;
     let mut grants = Vec::new();
     let mut sources = Vec::new();
@@ -123,6 +156,7 @@ fn cmd_create(client: &mut Client, args: &[String]) -> Result<String, String> {
     let mut when = String::new();
     let mut where_ = String::new();
     let mut who = String::new();
+    let mut supersedes = None;
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
@@ -181,9 +215,15 @@ fn cmd_create(client: &mut Client, args: &[String]) -> Result<String, String> {
             "--when" => when = need(args, &mut i)?,
             "--where" => where_ = need(args, &mut i)?,
             "--who" => who = need(args, &mut i)?,
+            "--supersedes" => {
+                supersedes = Some(DeedId::parse(&need(args, &mut i)?).map_err(|e| e.to_string())?)
+            }
             other => return Err(format!("unknown create flag {other}")),
         }
         i += 1;
+    }
+    if agent.is_empty() {
+        return Err("--agent is required".into());
     }
     if name.is_empty() {
         name = kind.clone();
@@ -219,7 +259,7 @@ fn cmd_create(client: &mut Client, args: &[String]) -> Result<String, String> {
             tree,
             diffs,
             functionaries: if functionaries.is_empty() {
-                vec!["seat".into()]
+                vec![agent.clone()]
             } else {
                 functionaries
             },
@@ -259,10 +299,11 @@ fn cmd_create(client: &mut Client, args: &[String]) -> Result<String, String> {
             id,
             name,
             sources,
-            seat_agent_id: agent,
-            seat_activity_id: activity,
-            policy_grants: grants,
+            agent_id: agent,
+            activity_id: activity,
+            grants,
             body,
+            supersedes,
         })
         .map_err(|e| e.to_string())?;
     Ok(format_one(&deed))
@@ -475,6 +516,41 @@ mod tests {
         ])
         .expect("trail");
         assert!(trail.contains("deed-quote-rfc2094-nll"), "{trail}");
+    }
+
+    #[test]
+    fn cli_get_accepts_deed_digest() {
+        let url = tmp_url();
+        let created = run(vec![
+            "--url".into(),
+            url.clone(),
+            "create".into(),
+            "quote".into(),
+            "--id".into(),
+            "deed-quote-digest-alias".into(),
+            "--name".into(),
+            "digest alias".into(),
+            "--excerpt".into(),
+            "canonical bytes have a digest".into(),
+            "--src-url".into(),
+            "https://example.com/digest".into(),
+            "--agent".into(),
+            "reader".into(),
+        ])
+        .expect("create quote");
+        assert!(created.contains("deed-quote-digest-alias"), "{created}");
+
+        let mut client = deeder::Client::open(&url).expect("open");
+        let deed = client
+            .get(&deed::DeedId::parse("deed-quote-digest-alias").unwrap())
+            .expect("load");
+        let digest = deeder::deed_digest(&deed);
+        let got = run(vec!["--url".into(), url, "get".into(), digest]).expect("get digest");
+        assert!(got.contains("deed-quote-digest-alias"), "{got}");
+        assert!(
+            got.contains("excerpt=canonical bytes have a digest"),
+            "{got}"
+        );
     }
 
     #[test]

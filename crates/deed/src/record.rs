@@ -74,8 +74,12 @@ impl Deed {
     /// Assemble a deed from a draft. Kind, paths, and face come from the body.
     pub fn from_draft(draft: Draft) -> Result<Self> {
         draft.body.validate()?;
+        if draft.produced_by.agent_id.trim().is_empty() {
+            return Err(crate::Error::InvalidBody(
+                "producedBy agent is empty".into(),
+            ));
+        }
         let kind = draft.body.kind();
-        crate::registry::registry().require(&kind)?;
         let id = match draft.id {
             Some(id) => {
                 if !id.as_str().starts_with(&format!("deed-{}-", kind.token())) {

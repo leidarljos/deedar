@@ -5,7 +5,7 @@ use deed::{
     ProducedBy, Source, Step,
 };
 
-fn seat(name: &str, activity: Option<&str>) -> ProducedBy {
+fn agent(name: &str, activity: Option<&str>) -> ProducedBy {
     ProducedBy {
         agent_id: name.into(),
         activity_id: activity.map(str::to_string),
@@ -17,7 +17,7 @@ fn draft(id: &str, name: &str, body: Body) -> Draft {
         id: Some(DeedId::parse(id).unwrap()),
         name: name.into(),
         sources: Vec::new(),
-        produced_by: seat("reader", Some("aa02")),
+        produced_by: agent("reader", Some("aa02")),
         grants: vec![Grant::Host("www.iea.org".into())],
         body,
     }
@@ -196,6 +196,7 @@ fn rejects_bad_message_id_and_closed_kind() {
     assert!(DeedId::parse("mat-quote-heatpump").is_err());
     assert!(Kind::parse("NOPE").is_err());
     assert!(Kind::parse("waveform").is_err());
+    assert!(Kind::parse("mail-draft").is_err());
 }
 
 #[test]
@@ -210,7 +211,7 @@ fn empty_file_path_is_rejected() {
         id: None,
         name: "x".into(),
         sources: Vec::new(),
-        produced_by: seat("a", None),
+        produced_by: agent("a", None),
         grants: Vec::new(),
         body: Body::File {
             path: PathBuf::new(),
@@ -227,11 +228,10 @@ fn error_display_covers_variants() {
         Error::InvalidKind("x".into()),
         Error::InvalidUrl("x".into()),
         Error::InvalidMessageId("x".into()),
-        Error::InvalidBody("x"),
+        Error::InvalidBody("x".into()),
         Error::NotFound("x".into()),
         Error::Frozen("x".into()),
         Error::Tombstoned("x".into()),
-        Error::Cycle("x".into()),
         Error::Evidence("x".into()),
         Error::Io("x".into()),
         Error::Decode("x".into()),

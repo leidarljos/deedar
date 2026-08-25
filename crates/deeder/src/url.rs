@@ -4,7 +4,7 @@ use deed::{Error, Result};
 
 use crate::fs::FsStore;
 
-/// `DEEDER_URL` contract: `file:///abs/path` is the seat store.
+/// `DEEDER_URL` contract: `file:///abs/path` is the store.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StoreUrl {
     dir: PathBuf,

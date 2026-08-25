@@ -30,7 +30,7 @@ impl Kind {
             "set" => Some(Self::Set),
             "quote" => Some(Self::Quote),
             "patch" => Some(Self::Patch),
-            "mailDraft" | "mail-draft" => Some(Self::MailDraft),
+            "mailDraft" => Some(Self::MailDraft),
             "clip" => Some(Self::Clip),
             "page" => Some(Self::Page),
             "form" => Some(Self::Form),

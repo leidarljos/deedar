@@ -14,7 +14,6 @@ mod face;
 mod id;
 mod kind;
 mod record;
-mod registry;
 mod source;
 mod trail;
 
@@ -24,6 +23,5 @@ pub use face::Face;
 pub use id::DeedId;
 pub use kind::Kind;
 pub use record::{Deed, Draft, Evidence, Grant, ProducedBy};
-pub use registry::{registry, KindHandler, Registry};
 pub use source::Source;
 pub use trail::walk_trail;

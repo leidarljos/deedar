@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::id::DeedId;
 use crate::record::Deed;
 use crate::source::Source;
@@ -18,14 +18,9 @@ where
         if !seen.insert(id.clone()) {
             continue;
         }
-        match get(&id) {
-            Ok(next) => {
-                stack.extend(deed_sources(&next));
-                out.push(next);
-            }
-            Err(Error::NotFound(_)) | Err(Error::Tombstoned(_)) => {}
-            Err(e) => return Err(e),
-        }
+        let next = get(&id)?;
+        stack.extend(deed_sources(&next));
+        out.push(next);
     }
     Ok(out)
 }

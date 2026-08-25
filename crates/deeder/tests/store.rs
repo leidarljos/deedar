@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use deed::{Body, DeedId, FormField, Grant, Kind, MailMessageId, Measure, Source, Step};
+use deed::{Body, DeedId, Error, FormField, Grant, Kind, MailMessageId, Measure, Source, Step};
 use deeder::{encode_response, is_write_once_addr, Client, CreateRequest, FsStore, Response};
 
 fn tmp_url() -> String {
@@ -25,10 +25,11 @@ fn req(id: &str, name: &str, body: Body) -> CreateRequest {
         id: Some(DeedId::parse(id).unwrap()),
         name: name.into(),
         sources: Vec::new(),
-        seat_agent_id: "reader".into(),
-        seat_activity_id: Some("aa02".into()),
-        policy_grants: vec![Grant::Host("www.iea.org".into())],
+        agent_id: "reader".into(),
+        activity_id: Some("aa02".into()),
+        grants: vec![Grant::Host("www.iea.org".into())],
         body,
+        supersedes: None,
     }
 }
 
@@ -69,13 +70,14 @@ fn create_get_list_trail_delete_for_every_kind() {
             id: Some(DeedId::parse("deed-set-covers").unwrap()),
             name: "Cover shots".into(),
             sources: vec![Source::deed(file.id.clone())],
-            seat_agent_id: "reader".into(),
-            seat_activity_id: Some("aa02".into()),
-            policy_grants: vec![Grant::Path(PathBuf::from("/shots"))],
+            agent_id: "reader".into(),
+            activity_id: Some("aa02".into()),
+            grants: vec![Grant::Path(PathBuf::from("/shots"))],
             body: Body::Set {
                 title: "Cover shots".into(),
                 members: vec![shot],
             },
+            supersedes: None,
         })
         .expect("set");
     assert_eq!(set.kind, Kind::Set);
@@ -87,9 +89,9 @@ fn create_get_list_trail_delete_for_every_kind() {
             id: Some(DeedId::parse("deed-quote-heatpump").unwrap()),
             name: "Heat-pump piece".into(),
             sources: vec![Source::deed(set.id.clone())],
-            seat_agent_id: "reader".into(),
-            seat_activity_id: Some("aa02".into()),
-            policy_grants: vec![Grant::Host("www.theatlantic.com".into())],
+            agent_id: "reader".into(),
+            activity_id: Some("aa02".into()),
+            grants: vec![Grant::Host("www.theatlantic.com".into())],
             body: Body::Quote {
                 edition: "https://www.iea.org/energy-system/buildings/heat-pumps".into(),
                 start: 0,
@@ -97,6 +99,7 @@ fn create_get_list_trail_delete_for_every_kind() {
                 excerpt: "A heat pump moves heat; it does not make it.".into(),
                 urls: vec!["https://www.iea.org/energy-system/buildings/heat-pumps".into()],
             },
+            supersedes: None,
         })
         .expect("quote");
     assert_eq!(quote.kind, Kind::Quote);
@@ -291,9 +294,9 @@ fn later_take_is_new_accession_with_prior_in_sources() {
             id: Some(DeedId::parse("deed-quote-heatpump-v2").unwrap()),
             name: "v2".into(),
             sources: vec![Source::deed(first.id.clone())],
-            seat_agent_id: "reader".into(),
-            seat_activity_id: None,
-            policy_grants: Vec::new(),
+            agent_id: "reader".into(),
+            activity_id: None,
+            grants: Vec::new(),
             body: Body::Quote {
                 edition: "ed-1".into(),
                 start: 0,
@@ -301,6 +304,7 @@ fn later_take_is_new_accession_with_prior_in_sources() {
                 excerpt: "heat pump".into(),
                 urls: vec!["https://www.iea.org/energy-system/buildings/heat-pumps".into()],
             },
+            supersedes: None,
         })
         .unwrap();
     assert_ne!(second.id, first.id);
@@ -313,7 +317,7 @@ fn later_take_is_new_accession_with_prior_in_sources() {
 }
 
 #[test]
-fn writer_stamps_seat_and_clock_not_caller_time() {
+fn writer_stamps_agent_and_clock_not_caller_time() {
     let url = tmp_url();
     let mut client = Client::open(&url).unwrap();
     let before = SystemTime::now()
@@ -325,9 +329,9 @@ fn writer_stamps_seat_and_clock_not_caller_time() {
             id: Some(DeedId::parse("deed-quote-heatpump").unwrap()),
             name: "Heat".into(),
             sources: Vec::new(),
-            seat_agent_id: "seat-agent".into(),
-            seat_activity_id: Some("act-1".into()),
-            policy_grants: vec![Grant::Host("www.iea.org".into())],
+            agent_id: "seat-agent".into(),
+            activity_id: Some("act-1".into()),
+            grants: vec![Grant::Host("www.iea.org".into())],
             body: Body::Quote {
                 edition: "ed".into(),
                 start: 0,
@@ -335,6 +339,7 @@ fn writer_stamps_seat_and_clock_not_caller_time() {
                 excerpt: "heat".into(),
                 urls: vec!["https://www.iea.org/x".into()],
             },
+            supersedes: None,
         })
         .unwrap();
     let after = SystemTime::now()
@@ -352,9 +357,9 @@ fn writer_stamps_seat_and_clock_not_caller_time() {
             id: Some(DeedId::parse("deed-quote-second").unwrap()),
             name: "Second".into(),
             sources: Vec::new(),
-            seat_agent_id: "other".into(),
-            seat_activity_id: None,
-            policy_grants: Vec::new(),
+            agent_id: "other".into(),
+            activity_id: None,
+            grants: Vec::new(),
             body: Body::Quote {
                 edition: "ed".into(),
                 start: 0,
@@ -362,6 +367,7 @@ fn writer_stamps_seat_and_clock_not_caller_time() {
                 excerpt: "more".into(),
                 urls: vec!["https://www.iea.org/y".into()],
             },
+            supersedes: None,
         })
         .unwrap();
     assert_eq!(deed2.produced_by.agent_id, "other");
@@ -434,12 +440,14 @@ fn capnp_client_round_trip_quote_and_clip() {
 #[test]
 fn open_file_url_round_trips() {
     let url = tmp_url();
+    let root = deeder::store_dir(&url).unwrap();
+    let note = write_blob(&root, "note.md", b"a short note\n");
     let mut a = Client::open(&url).unwrap();
     a.create(req(
         "deed-file-note",
         "Note",
         Body::File {
-            path: PathBuf::from("/note.md"),
+            path: note,
             media_type: Some("text/markdown".into()),
         },
     ))
@@ -459,9 +467,9 @@ fn quote_without_urls_is_rejected() {
             id: None,
             name: "empty".into(),
             sources: Vec::new(),
-            seat_agent_id: "reader".into(),
-            seat_activity_id: None,
-            policy_grants: Vec::new(),
+            agent_id: "reader".into(),
+            activity_id: None,
+            grants: Vec::new(),
             body: Body::Quote {
                 edition: "ed".into(),
                 start: 0,
@@ -469,6 +477,7 @@ fn quote_without_urls_is_rejected() {
                 excerpt: "no sources".into(),
                 urls: Vec::new(),
             },
+            supersedes: None,
         })
         .expect_err("empty urls");
     assert!(err.to_string().contains("url"), "{err}");
@@ -533,6 +542,126 @@ fn evidence_rejects_a_changed_deed_record() {
     std::fs::write(&cap, encode_response(&Response::Deed(changed)).unwrap()).unwrap();
     let err = client.evidence(&id).expect_err("changed deed");
     assert!(err.to_string().contains("evidence"), "{err}");
+}
+
+#[test]
+fn create_rejects_a_body_path_that_is_not_a_file() {
+    let mut client = Client::open(&tmp_url()).unwrap();
+    let err = client
+        .create(req(
+            "deed-file-note",
+            "Note",
+            Body::File {
+                path: PathBuf::from("/no/such/note.md"),
+                media_type: Some("text/markdown".into()),
+            },
+        ))
+        .expect_err("missing file");
+    assert!(
+        matches!(err, Error::Io(ref s) if s.contains("not a file"))
+            || err.to_string().contains("not a file"),
+        "{err}"
+    );
+}
+
+#[test]
+fn create_of_a_frozen_id_is_frozen() {
+    let mut client = Client::open(&tmp_url()).unwrap();
+    client
+        .create(req(
+            "deed-quote-heatpump",
+            "Heat",
+            Body::Quote {
+                edition: "ed".into(),
+                start: 0,
+                end: 4,
+                excerpt: "heat".into(),
+                urls: vec!["https://www.iea.org/x".into()],
+            },
+        ))
+        .unwrap();
+    let err = client
+        .create(req(
+            "deed-quote-heatpump",
+            "Heat",
+            Body::Quote {
+                edition: "ed".into(),
+                start: 0,
+                end: 4,
+                excerpt: "heat".into(),
+                urls: vec!["https://www.iea.org/x".into()],
+            },
+        ))
+        .expect_err("frozen");
+    assert!(matches!(err, Error::Frozen(_)), "{err}");
+}
+
+#[test]
+fn list_fails_on_a_corrupt_deed_file() {
+    let url = tmp_url();
+    let mut client = Client::open(&url).unwrap();
+    client
+        .create(req(
+            "deed-quote-heatpump",
+            "Heat",
+            Body::Quote {
+                edition: "ed".into(),
+                start: 0,
+                end: 4,
+                excerpt: "heat".into(),
+                urls: vec!["https://www.iea.org/x".into()],
+            },
+        ))
+        .unwrap();
+    let cap = deeder::store_dir(&url)
+        .unwrap()
+        .join("deeds")
+        .join("deed-quote-heatpump.cap");
+    std::fs::write(&cap, b"not-a-deed").unwrap();
+    let err = client.list().expect_err("corrupt");
+    assert!(matches!(err, Error::Decode(_) | Error::Io(_)), "{err}");
+}
+
+#[test]
+fn trail_fails_when_an_input_deed_is_tombstoned() {
+    let url = tmp_url();
+    let mut client = Client::open(&url).unwrap();
+    let first = client
+        .create(req(
+            "deed-quote-heatpump",
+            "Heat",
+            Body::Quote {
+                edition: "ed".into(),
+                start: 0,
+                end: 4,
+                excerpt: "heat".into(),
+                urls: vec!["https://www.iea.org/x".into()],
+            },
+        ))
+        .unwrap()
+        .0;
+    let second = client
+        .create(CreateRequest {
+            id: Some(DeedId::parse("deed-quote-later").unwrap()),
+            name: "Later".into(),
+            sources: vec![Source::deed(first.id.clone())],
+            agent_id: "reader".into(),
+            activity_id: None,
+            grants: Vec::new(),
+            body: Body::Quote {
+                edition: "ed".into(),
+                start: 0,
+                end: 4,
+                excerpt: "more".into(),
+                urls: vec!["https://www.iea.org/y".into()],
+            },
+            supersedes: None,
+        })
+        .unwrap()
+        .0;
+    client.delete(&first.id).unwrap();
+    let err = client.trail(&second.id).expect_err("tombstoned source");
+    assert!(matches!(err, Error::Tombstoned(_)), "{err}");
 }
 
 #[test]

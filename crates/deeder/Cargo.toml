@@ -11,3 +11,7 @@ description = "One-writer deed store and Cap'n client"
 deed.workspace = true
 sha2.workspace = true
 hmac.workspace = true
+ureq.workspace = true
+
+[dev-dependencies]
+sha2.workspace = true

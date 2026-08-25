@@ -19,3 +19,4 @@ deeder = { path = "crates/deeder" }
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.10"
 hmac = "0.12"
+ureq = "2.12"

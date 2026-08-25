@@ -235,18 +235,18 @@ impl Body {
         match self {
             Self::File { path, .. } => {
                 if path.as_os_str().is_empty() {
-                    return Err(Error::InvalidBody("file path is empty"));
+                    return Err(Error::InvalidBody("file path is empty".into()));
                 }
             }
             Self::Set { title, members } => {
                 if title.trim().is_empty() {
-                    return Err(Error::InvalidBody("set title is empty"));
+                    return Err(Error::InvalidBody("set title is empty".into()));
                 }
                 if members.is_empty() {
-                    return Err(Error::InvalidBody("set has no members"));
+                    return Err(Error::InvalidBody("set has no members".into()));
                 }
                 if members.iter().any(|p| p.as_os_str().is_empty()) {
-                    return Err(Error::InvalidBody("set member path is empty"));
+                    return Err(Error::InvalidBody("set member path is empty".into()));
                 }
             }
             Self::Quote {
@@ -257,16 +257,16 @@ impl Body {
                 end,
             } => {
                 if edition.trim().is_empty() {
-                    return Err(Error::InvalidBody("quote edition is empty"));
+                    return Err(Error::InvalidBody("quote edition is empty".into()));
                 }
                 if excerpt.trim().is_empty() {
-                    return Err(Error::InvalidBody("quote excerpt is empty"));
+                    return Err(Error::InvalidBody("quote excerpt is empty".into()));
                 }
                 if urls.is_empty() {
-                    return Err(Error::InvalidBody("quote has no source urls"));
+                    return Err(Error::InvalidBody("quote has no source urls".into()));
                 }
                 if start > end {
-                    return Err(Error::InvalidBody("quote range start after end"));
+                    return Err(Error::InvalidBody("quote range start after end".into()));
                 }
                 for url in urls {
                     crate::source::Source::url(url)?;
@@ -278,21 +278,21 @@ impl Body {
                 functionaries,
             } => {
                 if tree.trim().is_empty() {
-                    return Err(Error::InvalidBody("patch tree is empty"));
+                    return Err(Error::InvalidBody("patch tree is empty".into()));
                 }
                 if diffs.is_empty() {
-                    return Err(Error::InvalidBody("patch has no diffs"));
+                    return Err(Error::InvalidBody("patch has no diffs".into()));
                 }
                 if functionaries.is_empty() {
-                    return Err(Error::InvalidBody("patch has no functionaries"));
+                    return Err(Error::InvalidBody("patch has no functionaries".into()));
                 }
             }
             Self::MailDraft { subject, path, .. } => {
                 if subject.trim().is_empty() {
-                    return Err(Error::InvalidBody("mail draft subject is empty"));
+                    return Err(Error::InvalidBody("mail draft subject is empty".into()));
                 }
                 if path.as_os_str().is_empty() {
-                    return Err(Error::InvalidBody("mail draft path is empty"));
+                    return Err(Error::InvalidBody("mail draft path is empty".into()));
                 }
             }
             Self::Clip {
@@ -303,22 +303,22 @@ impl Body {
                 duration,
             } => {
                 if sources.is_empty() {
-                    return Err(Error::InvalidBody("clip has no sources"));
+                    return Err(Error::InvalidBody("clip has no sources".into()));
                 }
                 if path.as_os_str().is_empty() {
-                    return Err(Error::InvalidBody("clip path is empty"));
+                    return Err(Error::InvalidBody("clip path is empty".into()));
                 }
                 if *out_point < *in_point {
-                    return Err(Error::InvalidBody("clip out before in"));
+                    return Err(Error::InvalidBody("clip out before in".into()));
                 }
                 if *duration < 0.0 {
-                    return Err(Error::InvalidBody("clip duration is negative"));
+                    return Err(Error::InvalidBody("clip duration is negative".into()));
                 }
             }
             Self::Page { url, snapshot } => {
                 crate::source::Source::url(url)?;
                 if snapshot.as_os_str().is_empty() {
-                    return Err(Error::InvalidBody("page snapshot is empty"));
+                    return Err(Error::InvalidBody("page snapshot is empty".into()));
                 }
             }
             Self::Form {
@@ -327,34 +327,34 @@ impl Body {
                 path,
             } => {
                 if blank.trim().is_empty() {
-                    return Err(Error::InvalidBody("form blank is empty"));
+                    return Err(Error::InvalidBody("form blank is empty".into()));
                 }
                 if fields.is_empty() {
-                    return Err(Error::InvalidBody("form has no fields"));
+                    return Err(Error::InvalidBody("form has no fields".into()));
                 }
                 if path.as_os_str().is_empty() {
-                    return Err(Error::InvalidBody("form path is empty"));
+                    return Err(Error::InvalidBody("form path is empty".into()));
                 }
             }
             Self::Table { measures } => {
                 if measures.is_empty() {
-                    return Err(Error::InvalidBody("table has no measures"));
+                    return Err(Error::InvalidBody("table has no measures".into()));
                 }
             }
             Self::Procedure { steps } => {
                 if steps.is_empty() {
-                    return Err(Error::InvalidBody("procedure has no steps"));
+                    return Err(Error::InvalidBody("procedure has no steps".into()));
                 }
             }
             Self::Event { when, where_, who } => {
                 if when.trim().is_empty() {
-                    return Err(Error::InvalidBody("event when is empty"));
+                    return Err(Error::InvalidBody("event when is empty".into()));
                 }
                 if where_.trim().is_empty() {
-                    return Err(Error::InvalidBody("event where is empty"));
+                    return Err(Error::InvalidBody("event where is empty".into()));
                 }
                 if who.trim().is_empty() {
-                    return Err(Error::InvalidBody("event who is empty"));
+                    return Err(Error::InvalidBody("event who is empty".into()));
                 }
             }
         }

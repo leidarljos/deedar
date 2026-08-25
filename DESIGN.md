@@ -10,8 +10,11 @@ object is always a deed (`deed-quote-rfc2094-nll`).
 
 `DEEDER_URL` is the contract. There is no daemon. Clients speak
 `schema/deeder.capnp`: `create`, `get`, `list`, `trail`, `evidence`,
-`delete`. Next work takes deed ids as `--input`; they become
-`sources`.
+`delete`, `leave`, `timestamp`, `current`. `get` accepts a slug or a
+unique `sha256:` of the deed or of one product path. Next work
+takes deed ids as `--input`; they become `sources`. `deeder migrate`
+(and `FsStore::open`) write `{store}/layout` when that file is
+missing.
 
 ```
 work happens
@@ -20,7 +23,11 @@ deeder.create --> deed + evidence
                        |
         get / list ----+--> a viewer paints face
         next work -----+--> --input ids --> trail
-        evidence ------+--> check the deed and its bytes
+        evidence ------+--> check the deed, its bytes, and sources
+        leave ---------+--> dest/{id} + hash sidecar
+        timestamp -----+--> RFC 3161 TimeStampReq over evidence
+        current -------+--> follow --supersedes to the tip
+        migrate -------+--> write {store}/layout when missing
 ```
 
 Any client that can open a `file://` URL and speak those verbs can
@@ -39,8 +46,8 @@ mailer, a CI job.
   that thread.
 - Hand a CI job a deed id for the artifact it must test or publish.
 
-A seat that already has claimdag, packset, or vissue can *cite* a
-deed id. Those products keep their own writers.
+claimdag, packset, or vissue can cite a deed id. Those products
+keep their own writers.
 
 ## Envelope
 
@@ -49,7 +56,7 @@ plus a typed `body` and a `face`.
 
 | Field | Job |
 |---|---|
-| `id` | Accession (`deed-<kind>-<slug>`). Frozen after create (Engelbart Journal). |
+| `id` | Accession (`deed-<kind>-<slug>`). Frozen after create (Engelbart Journal). `get` also accepts a unique `sha256:` of the canonical deed or of one product path. |
 | `kind` | Handler for what was made, with `face` (Plan 9 plumber). |
 | `paths` | Write-once addresses of the product bytes (Plan 9 Venti). |
 | `sources` | Prior deed ids, paths, or URLs. `trail` walks that graph (Bush). |
@@ -68,12 +75,12 @@ Each kind is a handler. The body is what the next unit needs.
 
 | Kind | Body the next unit needs |
 |---|---|
-| `file` | Write-once address and media type. Face follows that media type. Photo `file` carries Content Credentials (C2PA) when the file leaves this store. |
-| `set` | Title and ordered member addresses (Adobe XMP). Photo `set` carries Content Credentials when the set leaves this store. |
+| `file` | Write-once address and media type. Face follows that media type. |
+| `set` | Title and ordered member addresses. |
 | `quote` | A range in a frozen edition, plus the source URLs (Nelson transclusion). |
-| `patch` | Tree, diffs, and the functionaries who signed the step (in-toto). |
+| `patch` | Tree, diffs, and the functionaries who signed the step. |
 | `mailDraft` | Message-ID, In-Reply-To, subject, and the draft’s write-once path (RFC 5322). |
-| `clip` | Source addresses, in/out points, duration, and the rendered path. Content Credentials when the clip leaves this store. Face is `waveform`. |
+| `clip` | Source addresses, in/out points, duration, and the rendered path. Face is `waveform`. |
 | `page` | URL and snapshot address. |
 | `form` | Blank identity, field values, and the signed path. |
 | `table` | Named measures. |
@@ -84,17 +91,30 @@ Each kind is a handler. The body is what the next unit needs.
 
 - Mint `id` as an accession. After create the deed is frozen. A
   later take mints a new deed and records the old accession in
-  `sources`. Delete writes a tombstone.
+  `sources`. `--supersedes <id>` also writes `{new}.supersedes` and
+  `{prior}.successor` sidecar files; `deeder current <id>` walks
+  those to the tip. `get` of the old id still returns that frozen
+  deed. Delete writes a tombstone.
+- `{store}/layout` is `1` after `open` or `deeder migrate`. A store
+  without that file still opens; `open` writes the file.
 - Put product bytes in write-once storage. Name those addresses in
   `paths` and in every kind body that points at a file.
 - deeder issues **evidence** at create: a keyed hash over the
-  canonical deed, its write-once addresses, `producedBy`, `grants`,
-  and a clock the create caller does not supply. `deeder evidence
-  <id>` is the next sitting's check: not tombstoned, each `sha256:`
-  path still hashes, keyed hash matches.
-- When a host policy process is the writer, that process issues the
-  evidence. When a deed is copied off this machine, bind that
-  signature to an RFC 3161 timestamp.
+  canonical deed (paths, `producedBy`, `grants` included) and a
+  clock the create caller does not supply. `deeder evidence <id>`
+  checks: not tombstoned, each `sha256:` path still hashes, keyed
+  hash matches, and every deed `sources` names can itself be
+  evidenced. A configured host key requires a host sidecar and a
+  different keyed-hash construction than `writer.key`. Create fails
+  if a body path is not a readable file.
+- `leave` copies write-once product bytes for `file`, `set`, and
+  `clip` into `dest/{id}/` and writes `manifest.json`
+  (`claim_generator=deeder`, deed id, kind, hash of the
+  concatenated leaving bytes). The same sitting writes an RFC 3161
+  TimeStampReq over the evidence bytes (`{id}.tsq` when
+  `DEEDER_TSA` is unset; `{id}.tsr` when an authority replies). The
+  frozen deed and keyed-hash evidence stay put. Other kinds refuse.
+  `get` and `evidence` do not require a manifest.
 
 ## Cite
 
@@ -116,13 +136,8 @@ deed.
 
 ## Language
 
-The record library and the writer are ordinary crates. C is a fit
-when evidence and the write-once store should live in the same
-process as a C policy daemon.
+The record library and the writer are ordinary crates.
 
 ## Work
 
 - Host-issued evidence when a policy process is the writer.
-- Content Credentials when a `clip`, photo `set`, or photo `file`
-  leaves this store.
-- RFC 3161 timestamp when a deed is copied off this machine.

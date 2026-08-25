@@ -19,6 +19,9 @@ const OP_LIST: u8 = 2;
 const OP_TRAIL: u8 = 3;
 const OP_DELETE: u8 = 4;
 const OP_EVIDENCE: u8 = 5;
+const OP_LEAVE: u8 = 6;
+const OP_TIMESTAMP: u8 = 7;
+const OP_CURRENT: u8 = 8;
 const OP_DEED: u8 = 10;
 const OP_DEED_EVIDENCE: u8 = 11;
 const OP_DEEDS: u8 = 12;
@@ -33,6 +36,9 @@ pub enum Request {
     Trail(DeedId),
     Delete(DeedId),
     Evidence(DeedId),
+    Leave { id: DeedId, dest: PathBuf },
+    Timestamp(DeedId),
+    Current(DeedId),
 }
 
 pub enum Response {
@@ -68,6 +74,19 @@ pub fn encode_request(req: &Request) -> Result<Vec<u8>> {
             p.push(OP_EVIDENCE);
             put_str(&mut p, id.as_str());
         }
+        Request::Leave { id, dest } => {
+            p.push(OP_LEAVE);
+            put_str(&mut p, id.as_str());
+            put_str(&mut p, &dest.to_string_lossy());
+        }
+        Request::Timestamp(id) => {
+            p.push(OP_TIMESTAMP);
+            put_str(&mut p, id.as_str());
+        }
+        Request::Current(id) => {
+            p.push(OP_CURRENT);
+            put_str(&mut p, id.as_str());
+        }
     }
     wrap(&p)
 }
@@ -84,6 +103,16 @@ pub fn decode_request(bytes: &[u8]) -> Result<Request> {
         OP_TRAIL => Ok(Request::Trail(DeedId::parse(&take_str(rest)?.0)?)),
         OP_DELETE => Ok(Request::Delete(DeedId::parse(&take_str(rest)?.0)?)),
         OP_EVIDENCE => Ok(Request::Evidence(DeedId::parse(&take_str(rest)?.0)?)),
+        OP_LEAVE => {
+            let (id, r) = take_str(rest)?;
+            let (dest, _) = take_str(r)?;
+            Ok(Request::Leave {
+                id: DeedId::parse(&id)?,
+                dest: PathBuf::from(dest),
+            })
+        }
+        OP_TIMESTAMP => Ok(Request::Timestamp(DeedId::parse(&take_str(rest)?.0)?)),
+        OP_CURRENT => Ok(Request::Current(DeedId::parse(&take_str(rest)?.0)?)),
         _ => Err(Error::Decode(format!("bad request op {op}"))),
     }
 }
@@ -228,13 +257,14 @@ fn put_create(p: &mut Vec<u8>, c: &CreateRequest) {
     for s in &c.sources {
         put_source(p, s);
     }
-    put_str(p, &c.seat_agent_id);
-    put_str(p, c.seat_activity_id.as_deref().unwrap_or(""));
-    put_u32(p, c.policy_grants.len() as u32);
-    for g in &c.policy_grants {
+    put_str(p, &c.agent_id);
+    put_str(p, c.activity_id.as_deref().unwrap_or(""));
+    put_u32(p, c.grants.len() as u32);
+    for g in &c.grants {
         put_grant(p, g);
     }
     put_body(p, &c.body);
+    put_str(p, c.supersedes.as_ref().map(|id| id.as_str()).unwrap_or(""));
 }
 
 fn take_create(mut p: &[u8]) -> Result<CreateRequest> {
@@ -262,7 +292,17 @@ fn take_create(mut p: &[u8]) -> Result<CreateRequest> {
         grants.push(g);
         p = r;
     }
-    let (body, _) = take_body(p)?;
+    let (body, rest) = take_body(p)?;
+    let supersedes = if rest.is_empty() {
+        None
+    } else {
+        let (raw, _) = take_str(rest)?;
+        if raw.is_empty() {
+            None
+        } else {
+            Some(DeedId::parse(&raw)?)
+        }
+    };
     Ok(CreateRequest {
         id: if id.is_empty() {
             None
@@ -271,10 +311,11 @@ fn take_create(mut p: &[u8]) -> Result<CreateRequest> {
         },
         name,
         sources,
-        seat_agent_id: agent,
-        seat_activity_id: if act.is_empty() { None } else { Some(act) },
-        policy_grants: grants,
+        agent_id: agent,
+        activity_id: if act.is_empty() { None } else { Some(act) },
+        grants,
         body,
+        supersedes,
     })
 }
 
