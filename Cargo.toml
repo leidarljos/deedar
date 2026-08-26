@@ -20,3 +20,17 @@ serde = { version = "1", features = ["derive"] }
 sha2 = "0.10"
 hmac = "0.12"
 ureq = "2.12"
+
+# Workspace crates keep file/line for panic backtraces. Dependencies
+# carry no debug info. `cargo build --profile debugging` is full debug.
+[profile.dev]
+debug = "line-tables-only"
+opt-level = 1
+lto = "off"
+
+[profile.dev.package."*"]
+debug = false
+
+[profile.debugging]
+inherits = "dev"
+debug = "full"
