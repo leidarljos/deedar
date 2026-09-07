@@ -66,6 +66,22 @@ just deedar migrate
 just deedar delete deed-file-note
 ```
 
+`evidence` also takes several ids, or `-` to read them from standard
+input. That is the form a working set arrives in, and the check fails
+closed on the whole list: one deed that cannot be evidenced is enough to
+make the set untrustworthy, and the report says which one rather than
+stopping at it.
+
+```sh
+just deedar evidence deed-file-note deed-patch-note
+# deed-file-note ok
+# deed-patch-note ok
+# 2 of 2 verified
+
+# or from whatever holds the citations, one id per line
+printf '%s\n' deed-file-note deed-patch-note | deedar evidence -
+```
+
 `trail` walks `--input` from the patch to the quote. `current`
 follows a later take (`--supersedes`) to the tip; `get` still
 returns the named frozen deed. `get` also accepts a unique
@@ -89,6 +105,7 @@ deedar.create --> deed + evidence
         get / list ----+--> a viewer paints face
         next work -----+--> --input ids --> trail
         evidence ------+--> check the deed, its bytes, and sources
+                       |      (several ids, or - for a list on stdin)
         leave ---------+--> dest/{id} + hash sidecar
         timestamp -----+--> RFC 3161 TimeStampReq over evidence
         current -------+--> follow --supersedes to the tip

@@ -8,16 +8,91 @@ use deed::{Body, Deed, DeedId, FormField, Grant, Kind, MailMessageId, Measure, S
 use deedar::{Client, CreateRequest, StoreUrl};
 
 fn main() -> ExitCode {
-    match run(env::args().skip(1).collect()) {
-        Ok(out) => {
-            print!("{out}");
-            ExitCode::SUCCESS
+    match dispatch(env::args().skip(1).collect()) {
+        Ok(report) => {
+            print!("{}", report.text);
+            if report.ok {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::from(1)
+            }
         }
         Err(e) => {
             eprintln!("deedar: {e}");
             ExitCode::from(1)
         }
     }
+}
+
+/// What a verb produced: text to print, and whether the run succeeded.
+///
+/// Every other verb fails by returning `Err`, which prints one message and
+/// nothing else. Checking a list of ids cannot work that way: the point is to
+/// say which ones failed, so it has to print a report *and* exit non-zero.
+struct Report {
+    text: String,
+    ok: bool,
+}
+
+/// Route the verbs that report per-id, and hand the rest to [`run`].
+fn dispatch(args: Vec<String>) -> Result<Report, String> {
+    let (url, rest) = take_url(&args)?;
+    if rest.first().map(String::as_str) == Some("evidence") && is_many(&rest[1..]) {
+        return evidence_many(&url, &rest[1..]);
+    }
+    run(args).map(|text| Report { text, ok: true })
+}
+
+/// Whether an `evidence` call names more than one deed.
+///
+/// A single id keeps the single-deed report it always had. `-` reads the ids
+/// from standard input, one per line, which is the form a working set arrives
+/// in from whatever tool holds the citations. A bare `evidence` stays an error
+/// rather than blocking on a terminal nobody meant to type into.
+fn is_many(args: &[String]) -> bool {
+    args.len() > 1 || args.first().is_some_and(|a| a == "-")
+}
+
+/// Check every named deed, reporting one line each.
+///
+/// Fails closed on the whole list: one unverifiable deed in a working set is
+/// enough to make the set untrustworthy, and a caller that has to parse the
+/// text to find that out will not.
+fn evidence_many(url: &str, args: &[String]) -> Result<Report, String> {
+    let ids: Vec<String> = if args.first().is_some_and(|a| a == "-") {
+        let mut buf = String::new();
+        std::io::Read::read_to_string(&mut std::io::stdin(), &mut buf)
+            .map_err(|e| format!("read ids from stdin: {e}"))?;
+        buf.split_whitespace().map(str::to_string).collect()
+    } else {
+        args.to_vec()
+    };
+    if ids.is_empty() {
+        return Err("evidence - read no ids".into());
+    }
+    let mut client = Client::open(url).map_err(|e| e.to_string())?;
+    let mut text = String::new();
+    let mut verified = 0usize;
+    for raw in &ids {
+        match client
+            .resolve(raw)
+            .and_then(|id| client.evidence(&id).map(|ev| ev.deed_id))
+        {
+            Ok(id) => {
+                verified += 1;
+                text.push_str(&format!("{id} ok\n"));
+            }
+            // The id as the caller wrote it, not as the store would spell it:
+            // an id that does not resolve has no other spelling, and the
+            // caller has to find this one in whatever cited it.
+            Err(e) => text.push_str(&format!("{raw} FAILED: {e}\n")),
+        }
+    }
+    text.push_str(&format!("{verified} of {} verified\n", ids.len()));
+    Ok(Report {
+        ok: verified == ids.len(),
+        text,
+    })
 }
 
 fn run(args: Vec<String>) -> Result<String, String> {
@@ -95,7 +170,8 @@ fn run(args: Vec<String>) -> Result<String, String> {
         )),
         Some(other) => Err(format!("unknown command {other}")),
         None => Err(
-            "usage: deedar [--url FILE] create|get|list|trail|evidence|delete|leave|timestamp|current|migrate"
+            "usage: deedar [--url FILE] create|get|list|trail|evidence|delete|leave|timestamp|current|migrate\n\
+             evidence takes one id, several ids, or - to read them from stdin"
                 .into(),
         ),
     }
@@ -454,7 +530,7 @@ fn join_grants(grants: &[Grant]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::run;
+    use super::{dispatch, run};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn tmp_url() -> String {
@@ -516,6 +592,103 @@ mod tests {
         ])
         .expect("trail");
         assert!(trail.contains("deed-quote-rfc2094-nll"), "{trail}");
+    }
+
+    /// A working set arrives as several ids at once, and the answer a caller
+    /// needs is which of them failed rather than that one did.
+    #[test]
+    fn evidence_over_several_ids_reports_each_and_fails_on_any() {
+        let url = tmp_url();
+        for slug in ["deed-quote-first", "deed-quote-second"] {
+            run(vec![
+                "--url".into(),
+                url.clone(),
+                "create".into(),
+                "quote".into(),
+                "--id".into(),
+                slug.into(),
+                "--excerpt".into(),
+                "a range in a frozen edition".into(),
+                "--src-url".into(),
+                "https://example.invalid/edition".into(),
+                "--agent".into(),
+                "reader".into(),
+            ])
+            .expect("create quote");
+        }
+
+        let both = dispatch(vec![
+            "--url".into(),
+            url.clone(),
+            "evidence".into(),
+            "deed-quote-first".into(),
+            "deed-quote-second".into(),
+        ])
+        .expect("evidence over two ids");
+        assert!(both.ok, "{}", both.text);
+        assert!(both.text.contains("deed-quote-first ok"), "{}", both.text);
+        assert!(both.text.contains("2 of 2 verified"), "{}", both.text);
+
+        // One bad id in a set makes the set untrustworthy, and the report has
+        // to name which one rather than stopping at it.
+        let mixed = dispatch(vec![
+            "--url".into(),
+            url,
+            "evidence".into(),
+            "deed-quote-first".into(),
+            "deed-quote-absent".into(),
+            "deed-quote-second".into(),
+        ])
+        .expect("evidence over a set holding one bad id");
+        assert!(!mixed.ok, "{}", mixed.text);
+        assert!(
+            mixed.text.contains("deed-quote-absent FAILED"),
+            "{}",
+            mixed.text
+        );
+        assert!(
+            mixed.text.contains("deed-quote-second ok"),
+            "a bad id must not stop the rest of the set: {}",
+            mixed.text
+        );
+        assert!(mixed.text.contains("2 of 3 verified"), "{}", mixed.text);
+    }
+
+    /// One id is still the single-deed report it always was, so a caller that
+    /// parses that output keeps working.
+    #[test]
+    fn evidence_over_one_id_keeps_its_own_shape() {
+        let url = tmp_url();
+        run(vec![
+            "--url".into(),
+            url.clone(),
+            "create".into(),
+            "quote".into(),
+            "--id".into(),
+            "deed-quote-alone".into(),
+            "--excerpt".into(),
+            "a range in a frozen edition".into(),
+            "--src-url".into(),
+            "https://example.invalid/edition".into(),
+            "--agent".into(),
+            "reader".into(),
+        ])
+        .expect("create quote");
+
+        let one = dispatch(vec![
+            "--url".into(),
+            url,
+            "evidence".into(),
+            "deed-quote-alone".into(),
+        ])
+        .expect("evidence over one id");
+        assert!(one.ok);
+        assert!(one.text.contains("id=deed-quote-alone ok"), "{}", one.text);
+        assert!(
+            !one.text.contains("verified"),
+            "the single-deed report has no set summary: {}",
+            one.text
+        );
     }
 
     #[test]
