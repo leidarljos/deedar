@@ -82,6 +82,18 @@ just deedar evidence deed-file-note deed-patch-note
 vissue recall <id> --deeds-only | deedar evidence -
 ```
 
+`current` takes a set the same way, which is the other half of checking
+a citation: `evidence` says the bytes are intact, and `current` says
+whether the thing cited is still the tip. It exits non-zero when any of
+them moved, so a hook can gate on a stale citation.
+
+```sh
+vissue recall <id> --deeds-only | deedar current -
+# deed-file-note current
+# deed-patch-note SUPERSEDED by deed-patch-note-v2
+# 1 of 2 current
+```
+
 `trail` walks `--input` from the patch to the quote. `current`
 follows a later take (`--supersedes`) to the tip; `get` still
 returns the named frozen deed. `get` also accepts a unique
@@ -109,6 +121,7 @@ deedar.create --> deed + evidence
         leave ---------+--> dest/{id} + hash sidecar
         timestamp -----+--> RFC 3161 TimeStampReq over evidence
         current -------+--> follow --supersedes to the tip
+                       |      (several ids, or - for a list on stdin)
         migrate -------+--> write {store}/layout when missing
 ```
 

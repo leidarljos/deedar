@@ -40,6 +40,9 @@ fn dispatch(args: Vec<String>) -> Result<Report, String> {
     if rest.first().map(String::as_str) == Some("evidence") && is_many(&rest[1..]) {
         return evidence_many(&url, &rest[1..]);
     }
+    if rest.first().map(String::as_str) == Some("current") && is_many(&rest[1..]) {
+        return current_many(&url, &rest[1..]);
+    }
     run(args).map(|text| Report { text, ok: true })
 }
 
@@ -58,7 +61,8 @@ fn is_many(args: &[String]) -> bool {
 /// Fails closed on the whole list: one unverifiable deed in a working set is
 /// enough to make the set untrustworthy, and a caller that has to parse the
 /// text to find that out will not.
-fn evidence_many(url: &str, args: &[String]) -> Result<Report, String> {
+/// The ids a set-shaped call names, from the arguments or from stdin.
+fn ids_from(args: &[String], verb: &str) -> Result<Vec<String>, String> {
     let ids: Vec<String> = if args.first().is_some_and(|a| a == "-") {
         let mut buf = String::new();
         std::io::Read::read_to_string(&mut std::io::stdin(), &mut buf)
@@ -68,8 +72,54 @@ fn evidence_many(url: &str, args: &[String]) -> Result<Report, String> {
         args.to_vec()
     };
     if ids.is_empty() {
-        return Err("evidence - read no ids".into());
+        return Err(format!("{verb} - read no ids"));
     }
+    Ok(ids)
+}
+
+/// Follow every named deed to the tip of its supersede chain.
+///
+/// The set form of `current`, and the reason it exists: a citation is written
+/// once and the thing it names can be superseded afterwards. Whatever holds the
+/// citations, a tracker or a pack, has no way to notice that on its own, so it
+/// hands the list over and this says which of them have moved on.
+///
+/// Exits non-zero when any citation is stale, so a hook can gate on it. A
+/// missing deed is stale too: a citation that resolves to nothing is not a
+/// citation anybody should keep.
+fn current_many(url: &str, args: &[String]) -> Result<Report, String> {
+    let ids = ids_from(args, "current")?;
+    let mut client = Client::open(url).map_err(|e| e.to_string())?;
+    let mut text = String::new();
+    let mut stale = 0usize;
+    for raw in &ids {
+        match client
+            .resolve(raw)
+            .and_then(|id| client.current(&id).map(|d| (id, d)))
+        {
+            Ok((id, tip)) => {
+                if tip.id.to_string() == id.to_string() {
+                    text.push_str(&format!("{id} current\n"));
+                } else {
+                    stale += 1;
+                    text.push_str(&format!("{id} SUPERSEDED by {}\n", tip.id));
+                }
+            }
+            Err(e) => {
+                stale += 1;
+                text.push_str(&format!("{raw} FAILED: {e}\n"));
+            }
+        }
+    }
+    text.push_str(&format!("{} of {} current\n", ids.len() - stale, ids.len()));
+    Ok(Report {
+        ok: stale == 0,
+        text,
+    })
+}
+
+fn evidence_many(url: &str, args: &[String]) -> Result<Report, String> {
+    let ids = ids_from(args, "evidence")?;
     let mut client = Client::open(url).map_err(|e| e.to_string())?;
     let mut text = String::new();
     let mut verified = 0usize;
@@ -171,7 +221,7 @@ fn run(args: Vec<String>) -> Result<String, String> {
         Some(other) => Err(format!("unknown command {other}")),
         None => Err(
             "usage: deedar [--url FILE] create|get|list|trail|evidence|delete|leave|timestamp|current|migrate\n\
-             evidence takes one id, several ids, or - to read them from stdin"
+             evidence and current take one id, several ids, or - to read them from stdin"
                 .into(),
         ),
     }
@@ -652,6 +702,61 @@ mod tests {
             mixed.text
         );
         assert!(mixed.text.contains("2 of 3 verified"), "{}", mixed.text);
+    }
+
+    /// A citation is written once and the thing it names can be superseded
+    /// afterwards. Whatever holds the citations cannot notice that on its own,
+    /// so the set form is what tells it which have moved on.
+    #[test]
+    fn current_over_a_set_names_the_ones_that_moved() {
+        let url = tmp_url();
+        let quote = |slug: &str, extra: Vec<String>| {
+            let mut argv = vec![
+                "--url".into(),
+                url.clone(),
+                "create".into(),
+                "quote".into(),
+                "--id".into(),
+                slug.to_string(),
+                "--excerpt".into(),
+                "a range in a frozen edition".into(),
+                "--src-url".into(),
+                "https://example.invalid/edition".into(),
+                "--agent".into(),
+                "reader".into(),
+            ];
+            argv.extend(extra);
+            run(argv).expect("create quote");
+        };
+        quote("deed-quote-stable", vec![]);
+        quote("deed-quote-first", vec![]);
+        quote(
+            "deed-quote-second",
+            vec!["--supersedes".into(), "deed-quote-first".into()],
+        );
+
+        let report = dispatch(vec![
+            "--url".into(),
+            url,
+            "current".into(),
+            "deed-quote-stable".into(),
+            "deed-quote-first".into(),
+        ])
+        .expect("current over a set");
+        assert!(!report.ok, "one of them moved: {}", report.text);
+        assert!(
+            report.text.contains("deed-quote-stable current"),
+            "{}",
+            report.text
+        );
+        assert!(
+            report
+                .text
+                .contains("deed-quote-first SUPERSEDED by deed-quote-second"),
+            "the citation has to name what to cite instead: {}",
+            report.text
+        );
+        assert!(report.text.contains("1 of 2 current"), "{}", report.text);
     }
 
     /// One id is still the single-deed report it always was, so a caller that
