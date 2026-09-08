@@ -79,7 +79,7 @@ just deedar evidence deed-file-note deed-patch-note
 # 2 of 2 verified
 
 # or from whatever holds the citations, one id per line
-printf '%s\n' deed-file-note deed-patch-note | deedar evidence -
+vissue recall <id> --deeds-only | deedar evidence -
 ```
 
 `trail` walks `--input` from the patch to the quote. `current`

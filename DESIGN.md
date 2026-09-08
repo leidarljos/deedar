@@ -47,7 +47,13 @@ mailer, a CI job.
 - Hand a CI job a deed id for the artifact it must test or publish.
 
 claimdag, packset, or vissue can cite a deed id. Those products
-keep their own writers.
+keep their own writers. A citation is only worth what it resolves to, so
+the tool holding the citations hands them over as a list and this one
+checks them:
+
+```
+vissue recall <id> --deeds-only | deedar evidence -
+```
 
 ## Envelope
 
@@ -104,7 +110,9 @@ Each kind is a handler. The body is what the next unit needs.
   clock the create caller does not supply. `deedar evidence <id>`
   checks: not tombstoned, each `sha256:` path still hashes, keyed
   hash matches, and every deed `sources` names can itself be
-  evidenced. A configured host key requires a host sidecar and a
+  evidenced. Several ids, or `-` for a list on standard input, check a
+  whole working set at once: one line per id, and a non-zero exit if any
+  of them failed. A configured host key requires a host sidecar and a
   different keyed-hash construction than `writer.key`. Create fails
   if a body path is not a readable file.
 - `leave` copies write-once product bytes for `file`, `set`, and
