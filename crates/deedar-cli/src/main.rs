@@ -36,6 +36,16 @@ struct Report {
 
 /// Route the verbs that report per-id, and hand the rest to [`run`].
 fn dispatch(args: Vec<String>) -> Result<Report, String> {
+    // Before the store is resolved: asking which build this is must work on a
+    // machine that has no store yet, and it is how anything checking for drift
+    // finds out.
+    if args.iter().any(|a| a == "--version" || a == "-V") {
+        return Ok(Report {
+            text: format!("deedar {}
+", env!("CARGO_PKG_VERSION")),
+            ok: true,
+        });
+    }
     let (url, rest) = take_url(&args)?;
     if rest.first().map(String::as_str) == Some("evidence") && is_many(&rest[1..]) {
         return evidence_many(&url, &rest[1..]);
