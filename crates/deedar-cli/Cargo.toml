@@ -14,3 +14,6 @@ path = "src/main.rs"
 [dependencies]
 deed.workspace = true
 deedar.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

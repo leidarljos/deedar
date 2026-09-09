@@ -227,6 +227,24 @@ fn run(args: Vec<String>) -> Result<String, String> {
     }
 }
 
+/// Where a seat keeps its store when nobody says otherwise.
+///
+/// `$XDG_DATA_HOME/deedar/store`, or `~/.local/share/deedar/store`.
+fn default_store() -> Option<PathBuf> {
+    let base = env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/share")))?;
+    Some(base.join("deedar").join("store"))
+}
+
+/// The store to act on: `--url`, then `DEEDAR_URL`, then the seat's own.
+///
+/// The fallback is taken only when that store is already there. Creating one
+/// wherever a command happened to run is how a seat ends up with two, and a
+/// citation that resolves against one and not the other is worse than a
+/// command that refused. So an absent store still refuses, and names the path
+/// it would have used.
 fn take_url(args: &[String]) -> Result<(String, Vec<String>), String> {
     let mut url = env::var("DEEDAR_URL").unwrap_or_default();
     let mut rest = Vec::new();
@@ -241,7 +259,17 @@ fn take_url(args: &[String]) -> Result<(String, Vec<String>), String> {
         i += 1;
     }
     if url.is_empty() {
-        return Err("set DEEDAR_URL or pass --url".into());
+        let seat = default_store();
+        match seat {
+            Some(dir) if dir.is_dir() => url = format!("file://{}", dir.display()),
+            Some(dir) => {
+                return Err(format!(
+                    "set DEEDAR_URL or pass --url; no store at {}",
+                    dir.display()
+                ))
+            }
+            None => return Err("set DEEDAR_URL or pass --url".into()),
+        }
     }
     Ok((url, rest))
 }
@@ -576,6 +604,92 @@ fn join_grants(grants: &[Grant]) -> String {
         })
         .collect::<Vec<_>>()
         .join(",")
+}
+
+#[cfg(test)]
+mod url_tests {
+    use super::*;
+
+    /// Point HOME and XDG at a scratch directory for one closure.
+    fn with_home<T>(
+        dir: &std::path::Path,
+        xdg: Option<&std::path::Path>,
+        f: impl FnOnce() -> T,
+    ) -> T {
+        let old_home = env::var_os("HOME");
+        let old_xdg = env::var_os("XDG_DATA_HOME");
+        let old_url = env::var_os("DEEDAR_URL");
+        env::remove_var("DEEDAR_URL");
+        env::set_var("HOME", dir);
+        match xdg {
+            Some(path) => env::set_var("XDG_DATA_HOME", path),
+            None => env::remove_var("XDG_DATA_HOME"),
+        }
+        let out = f();
+        match old_home {
+            Some(v) => env::set_var("HOME", v),
+            None => env::remove_var("HOME"),
+        }
+        match old_xdg {
+            Some(v) => env::set_var("XDG_DATA_HOME", v),
+            None => env::remove_var("XDG_DATA_HOME"),
+        }
+        if let Some(v) = old_url {
+            env::set_var("DEEDAR_URL", v);
+        }
+        out
+    }
+
+    #[test]
+    fn an_explicit_url_wins_over_everything() {
+        let dir = tempfile::tempdir().unwrap();
+        with_home(dir.path(), None, || {
+            let args = vec![
+                "--url".to_string(),
+                "file:///somewhere".to_string(),
+                "list".into(),
+            ];
+            let (url, rest) = take_url(&args).unwrap();
+            assert_eq!(url, "file:///somewhere");
+            assert_eq!(rest, vec!["list".to_string()]);
+        });
+    }
+
+    #[test]
+    fn the_seat_store_is_used_when_it_is_there() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = dir.path().join(".local/share/deedar/store");
+        std::fs::create_dir_all(&store).unwrap();
+        with_home(dir.path(), None, || {
+            let (url, _) = take_url(&["list".to_string()]).unwrap();
+            assert_eq!(url, format!("file://{}", store.display()));
+        });
+    }
+
+    #[test]
+    fn xdg_moves_the_seat_store() {
+        let dir = tempfile::tempdir().unwrap();
+        let xdg = dir.path().join("data");
+        let store = xdg.join("deedar/store");
+        std::fs::create_dir_all(&store).unwrap();
+        with_home(dir.path(), Some(&xdg), || {
+            let (url, _) = take_url(&["list".to_string()]).unwrap();
+            assert_eq!(url, format!("file://{}", store.display()));
+        });
+    }
+
+    #[test]
+    fn no_store_refuses_and_names_the_path_it_wanted() {
+        // Creating one wherever a command happened to run is how a seat ends
+        // up with two stores, and a citation resolving against one and not the
+        // other is worse than a command that refused.
+        let dir = tempfile::tempdir().unwrap();
+        with_home(dir.path(), None, || {
+            let err = take_url(&["list".to_string()]).unwrap_err();
+            assert!(err.contains("no store at"), "{err}");
+            assert!(err.contains(".local/share/deedar/store"), "{err}");
+        });
+    }
 }
 
 #[cfg(test)]
