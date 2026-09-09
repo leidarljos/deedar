@@ -41,8 +41,11 @@ fn dispatch(args: Vec<String>) -> Result<Report, String> {
     // finds out.
     if args.iter().any(|a| a == "--version" || a == "-V") {
         return Ok(Report {
-            text: format!("deedar {}
-", env!("CARGO_PKG_VERSION")),
+            text: format!(
+                "deedar {}
+",
+                env!("CARGO_PKG_VERSION")
+            ),
             ok: true,
         });
     }
