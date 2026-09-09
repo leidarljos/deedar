@@ -1,4 +1,9 @@
 //! Host-issued evidence sidecar beside store HMAC.
+//!
+//! Two constructions with different claims. The keyed hash says the bytes are
+//! the bytes the host saw. The signature says who vouched for them, and is the
+//! only one a store can demand, because a keyed-hash verifier holds the key it
+//! checks with and can therefore mint what it checks.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -12,9 +17,10 @@ static ENV: Mutex<()> = Mutex::new(());
 
 fn isolate() -> (std::sync::MutexGuard<'static, ()>, String, PathBuf) {
     let guard = ENV.lock().unwrap_or_else(|e| e.into_inner());
-    // SAFETY: ENV is held for the whole sitting that reads DEEDAR_HOST_KEY.
+    // SAFETY: ENV is held for the whole sitting that reads either variable.
     unsafe {
         std::env::remove_var("DEEDAR_HOST_KEY");
+        std::env::remove_var("DEEDAR_HOST_SIGNING_KEY");
     }
     let n = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -229,4 +235,148 @@ fn store_signature_cannot_stand_in_for_host_when_keys_match() {
         .evidence(&id)
         .expect_err("store HMAC is not host evidence");
     assert!(matches!(err, Error::Evidence(_)), "{err}");
+}
+
+/// Write a layout naming what the store accepts.
+fn write_layout(url: &str, body: &str) {
+    let dir = deedar::store_dir(url).unwrap();
+    fs::write(dir.join("layout"), body).unwrap();
+}
+
+/// A signing key on disk, and the public half a layout would name.
+fn signing_key(path: &Path, fill: u8) -> String {
+    fs::write(path, [fill; 32]).unwrap();
+    let key = ed25519_dalek::SigningKey::from_bytes(&[fill; 32]);
+    key.verifying_key()
+        .to_bytes()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+#[test]
+fn a_signed_sidecar_verifies_against_an_accepted_signer() {
+    let (_guard, url, parent) = isolate();
+    let key = parent.join("host.signing");
+    let public = signing_key(&key, 21);
+    // SAFETY: ENV is held for the whole sitting.
+    unsafe {
+        std::env::set_var("DEEDAR_HOST_SIGNING_KEY", &key);
+    }
+    // The store has to exist before its layout can be written.
+    drop(open(&url));
+    write_layout(
+        &url,
+        &format!("1\nattestation = required\nsigner = ed25519:{public}\n"),
+    );
+
+    let mut client = open(&url);
+    let id = DeedId::parse("deed-quote-host").unwrap();
+    client
+        .create(quote(
+            "deed-quote-host",
+            "signed",
+            "https://example.com/host",
+        ))
+        .unwrap();
+    let written = fs::read(sidecar(&url, "deed-quote-host")).unwrap();
+    assert!(
+        String::from_utf8_lossy(&written).starts_with("ed25519:"),
+        "the sidecar says which construction wrote it"
+    );
+    let ev = client.evidence(&id).expect("an accepted signer");
+    assert_eq!(ev.deed_id, id);
+}
+
+#[test]
+fn a_signature_from_a_key_the_layout_does_not_accept_is_refused() {
+    let (_guard, url, parent) = isolate();
+    let key = parent.join("host.signing");
+    signing_key(&key, 22);
+    let stranger = signing_key(&parent.join("other.signing"), 23);
+    // SAFETY: ENV is held for the whole sitting.
+    unsafe {
+        std::env::set_var("DEEDAR_HOST_SIGNING_KEY", &key);
+    }
+    drop(open(&url));
+    write_layout(
+        &url,
+        &format!("1\nattestation = required\nsigner = ed25519:{stranger}\n"),
+    );
+
+    let mut client = open(&url);
+    let id = DeedId::parse("deed-quote-host").unwrap();
+    client
+        .create(quote(
+            "deed-quote-host",
+            "wrong signer",
+            "https://example.com/host",
+        ))
+        .unwrap();
+    let err = client.evidence(&id).expect_err("a signer nobody accepts");
+    assert!(matches!(err, Error::Evidence(_)), "{err}");
+}
+
+/// The reason the construction changed. A keyed hash cannot answer "who was
+/// entitled to make this", because whoever can check one can mint one.
+#[test]
+fn a_required_attestation_is_not_satisfied_by_a_keyed_hash() {
+    let (_guard, url, parent) = isolate();
+    let key = parent.join("lane.host");
+    write_key(&key, 31);
+    // SAFETY: ENV is held for the whole sitting.
+    unsafe {
+        std::env::set_var("DEEDAR_HOST_KEY", &key);
+    }
+    let mut client = open(&url);
+    let id = DeedId::parse("deed-quote-host").unwrap();
+    client
+        .create(quote(
+            "deed-quote-host",
+            "hash not signature",
+            "https://example.com/host",
+        ))
+        .unwrap();
+    // The hash verifies while the store asks for nothing more.
+    client.evidence(&id).expect("hash checks out on its own");
+    drop(client);
+
+    write_layout(&url, "1\nattestation = required\n");
+    let mut client = open(&url);
+    let err = client
+        .evidence(&id)
+        .expect_err("a hash is not an attestation");
+    assert!(matches!(err, Error::Evidence(_)), "{err}");
+    assert_eq!(client.get(&id).unwrap().id, id, "the deed still opens");
+}
+
+#[test]
+fn a_required_attestation_refuses_a_deed_with_no_sidecar_at_all() {
+    let (_guard, url, _parent) = isolate();
+    let mut client = open(&url);
+    let id = DeedId::parse("deed-quote-host").unwrap();
+    client
+        .create(quote(
+            "deed-quote-host",
+            "nothing vouched",
+            "https://example.com/host",
+        ))
+        .unwrap();
+    client.evidence(&id).expect("no demand, no sidecar, fine");
+    drop(client);
+
+    write_layout(&url, "1\nattestation = required\n");
+    let mut client = open(&url);
+    let err = client.evidence(&id).expect_err("nothing vouched for it");
+    assert!(matches!(err, Error::Evidence(_)), "{err}");
+}
+
+/// A layout demanding something nobody can read would open the store wide
+/// while claiming to be closed.
+#[test]
+fn a_layout_nobody_can_read_refuses_to_open_the_store() {
+    let (_guard, url, _parent) = isolate();
+    drop(open(&url));
+    write_layout(&url, "1\nattestation = sometimes\n");
+    assert!(Client::open(&url).is_err());
 }

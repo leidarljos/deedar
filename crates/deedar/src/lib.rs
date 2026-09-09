@@ -11,6 +11,7 @@
 
 use std::path::{Path, PathBuf};
 
+mod attest;
 mod current;
 mod digest;
 mod fs;
@@ -21,6 +22,7 @@ mod timestamp;
 mod url;
 mod wire;
 
+pub use attest::{Demand, Policy};
 pub use deed::{
     walk_trail, Body, Deed, DeedId, Draft, Error, Evidence, Face, FormField, Grant, Kind,
     MailMessageId, Measure, ProducedBy, Result, Source, Step,

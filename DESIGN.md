@@ -115,6 +115,20 @@ Each kind is a handler. The body is what the next unit needs.
   of them failed. A configured host key requires a host sidecar and a
   different keyed-hash construction than `writer.key`. Create fails
   if a body path is not a readable file.
+- **Host attestation** is a separate claim from integrity, and a separate
+  construction. The keyed hash says the bytes are the bytes the host saw. It
+  cannot say who was entitled to make them, because its verifier holds the key
+  it checks with and can therefore mint what it checks, and that key sits beside
+  the store where the agent being vouched for can read it. So an attestation is
+  an Ed25519 signature over the same canonical bytes, written by
+  `DEEDAR_HOST_SIGNING_KEY`, whose private half deliberately does not live
+  beside the store. `{store}/layout` names the public keys the store accepts and
+  whether an attestation is `required`, so a reader who did not set the store up
+  can see what it demands. A keyed hash never satisfies `required`. The claim is
+  worth exactly the separation between signer and signed: a policy library
+  inside the agent's own process cannot hold a key the agent cannot read, so
+  signing there attests that a code path ran, which is a real thing to attest
+  and is not authorisation.
 - `leave` copies write-once product bytes for `file`, `set`, and
   `clip` into `dest/{id}/` and writes `manifest.json`
   (`claim_generator=deedar`, deed id, kind, hash of the

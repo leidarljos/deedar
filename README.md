@@ -100,7 +100,18 @@ returns the named frozen deed. `get` also accepts a unique
 `sha256:` of the deed bytes or of one product path. `evidence`
 checks the deed, its write-once bytes, and every deed in
 `sources`. A `DEEDAR_HOST_KEY` (or `{store}/../host.key`) requires
-`{id}.host`. `leave` copies the file bytes to `dest/{id}/` with a
+`{id}.host`; `DEEDAR_HOST_SIGNING_KEY` writes that sidecar as an
+Ed25519 signature instead, which is the only form a store can demand.
+`{store}/layout` says which public keys it accepts and whether an
+attestation is `required`:
+
+```
+1
+attestation = required
+signer = ed25519:<64 hex>
+```
+
+`leave` copies the file bytes to `dest/{id}/` with a
 hash sidecar (`manifest.json`). `timestamp` writes an RFC 3161
 TimeStampReq over those evidence bytes (`.tsq` when `DEEDAR_TSA` is
 unset; `.tsr` when the authority replies). `migrate` ensures

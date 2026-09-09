@@ -16,7 +16,13 @@ type HmacSha256 = Hmac<Sha256>;
 pub struct FsStore {
     dir: PathBuf,
     key: [u8; 32],
+    /// The keyed-hash key, when the store has one beside it.
     host_key: Option<[u8; 32]>,
+    /// The Ed25519 key this host signs with, when one is configured. The
+    /// private half is deliberately not beside the store.
+    signing_key: Option<ed25519_dalek::SigningKey>,
+    /// What the layout says this store accepts.
+    policy: crate::attest::Policy,
 }
 
 impl FsStore {
@@ -43,6 +49,8 @@ impl FsStore {
             dir: dir.to_path_buf(),
             key,
             host_key: crate::host::load(dir)?,
+            signing_key: crate::host::load_signing_key()?,
+            policy: crate::attest::Policy::read(dir)?,
         })
     }
 
@@ -135,7 +143,14 @@ impl FsStore {
             evidence: evidence.clone(),
         })?;
         atomic_write(&self.evidence_path(&deed.id), &eframe)?;
-        if let Some(host_key) = &self.host_key {
+        // A signature when the host has a signing key, and the keyed hash
+        // otherwise, because a store that has always written one keeps working.
+        // Both cover the same canonical bytes.
+        if let Some(signing) = &self.signing_key {
+            let signed =
+                crate::host::sign_ed25519(signing, &wire::deed_bytes(&deed), evidence.unix_time);
+            atomic_write(&crate::host::sidecar(&self.dir, &deed.id), &signed)?;
+        } else if let Some(host_key) = &self.host_key {
             let mac = crate::host::sign(host_key, &wire::deed_bytes(&deed), evidence.unix_time)?;
             atomic_write(&crate::host::sidecar(&self.dir, &deed.id), &mac)?;
         }
@@ -282,16 +297,41 @@ impl FsStore {
             .map_err(|_| Error::Evidence("keyed hash".into()))
     }
 
+    /// Check whatever attestation the store demands, and whatever it has.
+    ///
+    /// A keyed hash never satisfies a demand for attestation. It says the bytes
+    /// are the bytes; the demand is about who was entitled to make them, and a
+    /// construction whose verifier can mint cannot answer that.
     fn check_host(&self, deed: &Deed, ev: &Evidence) -> Result<()> {
-        let Some(key) = &self.host_key else {
-            return Ok(());
-        };
         let path = crate::host::sidecar(&self.dir, &deed.id);
-        if !path.exists() {
-            return Err(Error::Evidence("host sidecar".into()));
+        let present = path.exists();
+        if !present {
+            return if self.policy.permits_unattested() && self.host_key.is_none() {
+                Ok(())
+            } else {
+                Err(Error::Evidence("host sidecar".into()))
+            };
         }
-        let signature = fs::read(&path).map_err(|e| Error::Io(e.to_string()))?;
-        crate::host::verify(key, &wire::deed_bytes(deed), ev.unix_time, &signature)
+        let bytes = fs::read(&path).map_err(|e| Error::Io(e.to_string()))?;
+        let deed_bytes = wire::deed_bytes(deed);
+        match crate::host::read_sidecar(&bytes) {
+            Some(crate::host::Sidecar::Signature(signature)) => crate::host::verify_ed25519(
+                &self.policy.signers,
+                &deed_bytes,
+                ev.unix_time,
+                &signature,
+            ),
+            Some(crate::host::Sidecar::KeyedHash(mac)) => {
+                if !self.policy.permits_unattested() {
+                    return Err(Error::Evidence("host attestation required".into()));
+                }
+                match &self.host_key {
+                    Some(key) => crate::host::verify(key, &deed_bytes, ev.unix_time, &mac),
+                    None => Ok(()),
+                }
+            }
+            None => Err(Error::Evidence("host sidecar unreadable".into())),
+        }
     }
 
     fn ingest_body(&self, body: &mut Body) -> Result<()> {
