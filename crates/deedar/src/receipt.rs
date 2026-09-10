@@ -513,7 +513,7 @@ pub fn check_handover(dir: &Path, accept: &BTreeSet<[u8; 32]>) -> Result<Handove
         let receipt = match Receipt::parse(&text) {
             Ok(receipt) => receipt,
             Err(e) => {
-                wrong.push(format!("{name}: {e}"));
+                wrong.push(format!("{name}: {}", said(&e)));
                 continue;
             }
         };
@@ -522,7 +522,7 @@ pub fn check_handover(dir: &Path, accept: &BTreeSet<[u8; 32]>) -> Result<Handove
             continue;
         };
         if let Err(e) = receipt.check(&bytes) {
-            wrong.push(e.to_string());
+            wrong.push(said(&e));
             continue;
         }
         match &head {
@@ -563,7 +563,7 @@ pub fn check_handover(dir: &Path, accept: &BTreeSet<[u8; 32]>) -> Result<Handove
                 head_signer = Some(signed.signer);
                 head_accepted = accepted;
             }
-            Err(e) => wrong.push(format!("head: {e}")),
+            Err(e) => wrong.push(said(&e)),
         }
     }
 
@@ -580,6 +580,19 @@ pub fn check_handover(dir: &Path, accept: &BTreeSet<[u8; 32]>) -> Result<Handove
             "this handover does not check out:\n{}",
             wrong.join("\n")
         )))
+    }
+}
+
+/// One complaint's text, without the prefix Display would add again.
+///
+/// Every entry in the wrong-list is joined under one "does not check out"
+/// heading that already says what kind of failure this is, so letting each
+/// inner error render its own `evidence:` produces `evidence: evidence:` and
+/// makes the line harder to read than the fault it is reporting.
+fn said(e: &Error) -> String {
+    match e {
+        Error::Evidence(text) | Error::Io(text) => text.clone(),
+        other => other.to_string(),
     }
 }
 
