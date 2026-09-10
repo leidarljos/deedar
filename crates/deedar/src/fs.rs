@@ -19,7 +19,6 @@ type HmacSha256 = Hmac<Sha256>;
 /// before the log existed has deeds and no entries, and should be told to
 /// backfill rather than accused; a store that logged a deed and no longer
 /// serves it, or serves one it never logged, is what the log exists to catch.
-#[derive(Debug, Clone, PartialEq, Eq)]
 /// One reading of the log, held for a handover of many deeds.
 ///
 /// See [`FsStore::exporter`]. Every receipt made through this is a lookup in a
@@ -93,6 +92,7 @@ impl Exporter<'_> {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Audit {
     /// Entries the log holds.
     pub logged: usize,
