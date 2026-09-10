@@ -108,29 +108,33 @@ pub fn node_hash(left: &[u8; 32], right: &[u8; 32]) -> [u8; 32] {
     hasher.finalize().into()
 }
 
-/// The Merkle root over `leaves`, or the hash of the empty string when there
-/// are none, which is what RFC 6962 defines an empty tree's root to be.
+/// The Merkle root over `leaves`, RFC 6962 section 2.1.
+///
+/// Empty is the hash of the empty string, one leaf is its leaf hash, and
+/// otherwise the tree splits at the largest power of two below the width. That
+/// split is not the same tree as pairing adjacent leaves and carrying the odd
+/// one up, and it matters: the proofs below are the RFC's, and they are only
+/// sound over the RFC's shape.
 #[must_use]
 pub fn root(leaves: &[[u8; 32]]) -> [u8; 32] {
-    if leaves.is_empty() {
-        return Sha256::digest([]).into();
-    }
-    let mut level: Vec<[u8; 32]> = leaves.to_vec();
-    while level.len() > 1 {
-        let mut next = Vec::with_capacity(level.len().div_ceil(2));
-        let mut pair = level.chunks_exact(2);
-        for two in &mut pair {
-            next.push(node_hash(&two[0], &two[1]));
+    match leaves {
+        [] => Sha256::digest([]).into(),
+        [one] => *one,
+        _ => {
+            let split = split_point(leaves.len());
+            node_hash(&root(&leaves[..split]), &root(&leaves[split..]))
         }
-        // An odd leaf at this level is carried up rather than paired with
-        // itself, which is what keeps a tree of n leaves distinct from one of
-        // n + 1 where the last is a duplicate.
-        if let [odd] = pair.remainder() {
-            next.push(*odd);
-        }
-        level = next;
     }
-    level[0]
+}
+
+/// The largest power of two strictly below `width`, which is where a tree of
+/// that width divides.
+fn split_point(width: usize) -> usize {
+    let mut split = 1usize;
+    while split * 2 < width {
+        split *= 2;
+    }
+    split
 }
 
 /// What a store publishes: how many entries it has, and the root over them.
@@ -159,41 +163,33 @@ impl Head {
     }
 }
 
-/// The audit path proving the leaf at `index` is in a tree of `size` leaves.
+/// The audit path proving the leaf at `index` is in a tree of these leaves.
 ///
-/// The path is the sibling at each level, bottom up. A verifier that has the
-/// leaf recomputes the root from it and compares against a head it already
-/// trusts, which is what makes the proof worth more than the store's word.
+/// RFC 6962 section 2.1.1: the sibling subtree root at each level, innermost
+/// first. A verifier that has the leaf recomputes the root from it and
+/// compares against a head it already trusts, which is what makes the proof
+/// worth more than the store's word.
 #[must_use]
 pub fn inclusion_proof(leaves: &[[u8; 32]], index: usize) -> Option<Vec<[u8; 32]>> {
     if index >= leaves.len() {
         return None;
     }
-    let mut path = Vec::new();
-    let mut level: Vec<[u8; 32]> = leaves.to_vec();
-    let mut at = index;
-    while level.len() > 1 {
-        let sibling = if at % 2 == 0 { at + 1 } else { at - 1 };
-        // The carried-up odd node has no sibling at this level and so
-        // contributes nothing to the path.
-        if sibling < level.len() {
-            path.push(level[sibling]);
-        }
-        let mut next = Vec::with_capacity(level.len().div_ceil(2));
-        let mut pair = level.chunks_exact(2);
-        for two in &mut pair {
-            next.push(node_hash(&two[0], &two[1]));
-        }
-        if let [odd] = pair.remainder() {
-            next.push(*odd);
-        }
-        level = next;
-        at /= 2;
+    if leaves.len() == 1 {
+        return Some(Vec::new());
     }
-    Some(path)
+    let split = split_point(leaves.len());
+    Some(if index < split {
+        let mut path = inclusion_proof(&leaves[..split], index)?;
+        path.push(root(&leaves[split..]));
+        path
+    } else {
+        let mut path = inclusion_proof(&leaves[split..], index - split)?;
+        path.push(root(&leaves[..split]));
+        path
+    })
 }
 
-/// Whether `leaf` sits at `index` of a tree of `size` leaves with root `root`.
+/// Whether `leaf` sits at `index` of a tree of `size` leaves with that root.
 #[must_use]
 pub fn verify_inclusion(
     leaf: &[u8; 32],
@@ -206,26 +202,149 @@ pub fn verify_inclusion(
         return false;
     }
     let mut hash = *leaf;
-    let mut at = index;
-    let mut width = size;
-    let mut step = 0usize;
-    while width > 1 {
-        let sibling = if at % 2 == 0 { at + 1 } else { at - 1 };
-        if sibling < width {
-            let Some(next) = path.get(step) else {
-                return false;
-            };
-            step += 1;
-            hash = if at % 2 == 0 {
-                node_hash(&hash, next)
-            } else {
-                node_hash(next, &hash)
-            };
+    let (mut at, mut last) = (index, size - 1);
+    let mut steps = path.iter();
+    while last > 0 {
+        let Some(step) = steps.next() else {
+            return false;
+        };
+        // A right-hand node, or the last node at this level, joins from the
+        // left; anything else joins from the right.
+        if at % 2 == 1 || at == last {
+            hash = node_hash(step, &hash);
+            while at != 0 && at % 2 == 0 {
+                at /= 2;
+                last /= 2;
+            }
+        } else {
+            hash = node_hash(&hash, step);
         }
         at /= 2;
-        width = width.div_ceil(2);
+        last /= 2;
     }
-    step == path.len() && hex(&hash) == root_hex
+    steps.next().is_none() && hex(&hash) == root_hex
+}
+
+/// The proof that a tree of `old` leaves is a prefix of these leaves.
+///
+/// An inclusion proof answers "is this deed in the tree you are publishing".
+/// It does not answer "is the tree you are publishing the one you published
+/// last time, with entries added". A store that rewrites its log wholesale and
+/// signs a fresh head passes every inclusion check against that head, because
+/// every entry in the new log is consistent with it.
+///
+/// This is what a reader who kept an old head uses. The nodes let them
+/// recompute both roots: the old one, to see that the head they hold is the
+/// one being extended, and the new one, to see what it was extended to. A log
+/// that dropped or reordered anything already published cannot produce a set
+/// of nodes that yields both.
+///
+/// RFC 6962 section 2.1.2. `None` when `old` is zero or wider than the tree,
+/// since neither names a prefix of it.
+#[must_use]
+pub fn consistency_proof(leaves: &[[u8; 32]], old: usize) -> Option<Vec<[u8; 32]>> {
+    if old == 0 || old > leaves.len() {
+        return None;
+    }
+    Some(subproof(leaves, old, true))
+}
+
+/// The RFC's SUBPROOF. `known` is whether the reader already holds the root of
+/// the subtree being described, which is true exactly when it is the old tree
+/// itself and so never needs sending.
+fn subproof(leaves: &[[u8; 32]], old: usize, known: bool) -> Vec<[u8; 32]> {
+    if old == leaves.len() {
+        return if known {
+            Vec::new()
+        } else {
+            vec![root(leaves)]
+        };
+    }
+    let split = split_point(leaves.len());
+    if old <= split {
+        let mut path = subproof(&leaves[..split], old, known);
+        path.push(root(&leaves[split..]));
+        path
+    } else {
+        let mut path = subproof(&leaves[split..], old - split, false);
+        path.push(root(&leaves[..split]));
+        path
+    }
+}
+
+/// Whether the tree of `old` leaves with `old_root` is a prefix of the tree of
+/// `new` leaves with `new_root`.
+///
+/// Both roots are recomputed from the same nodes, which is what makes this
+/// worth more than the store's word: a log that dropped an already published
+/// entry can produce one of the two and never both.
+#[must_use]
+pub fn verify_consistency(
+    old: usize,
+    old_root: &str,
+    new: usize,
+    new_root: &str,
+    path: &[[u8; 32]],
+) -> bool {
+    if old == 0 || old > new {
+        return false;
+    }
+    if old == new {
+        // Nothing was added, so there is nothing to send and the two heads
+        // have to be the same head.
+        return path.is_empty() && old_root == new_root;
+    }
+    // When the old tree is a whole subtree its root was never sent, because
+    // the reader is the one holding it.
+    let (seed, rest) = if old.is_power_of_two() {
+        let Some(seed) = from_hex_root(old_root) else {
+            return false;
+        };
+        (seed, path)
+    } else {
+        let Some((head, rest)) = path.split_first() else {
+            return false;
+        };
+        (*head, rest)
+    };
+
+    let (mut at, mut last) = (old - 1, new - 1);
+    while at % 2 == 1 {
+        at /= 2;
+        last /= 2;
+    }
+    let (mut from_old, mut from_new) = (seed, seed);
+    for step in rest {
+        if last == 0 {
+            return false;
+        }
+        if at % 2 == 1 || at == last {
+            from_old = node_hash(step, &from_old);
+            from_new = node_hash(step, &from_new);
+            while at != 0 && at % 2 == 0 {
+                at /= 2;
+                last /= 2;
+            }
+        } else {
+            from_new = node_hash(&from_new, step);
+        }
+        at /= 2;
+        last /= 2;
+    }
+    last == 0 && hex(&from_old) == old_root && hex(&from_new) == new_root
+}
+
+/// A hex root back to bytes, for the one case where the reader supplies it.
+fn from_hex_root(text: &str) -> Option<[u8; 32]> {
+    if text.len() != 64 {
+        return None;
+    }
+    let mut out = [0u8; 32];
+    for (slot, pair) in out.iter_mut().zip(text.as_bytes().chunks_exact(2)) {
+        let pair = std::str::from_utf8(pair).ok()?;
+        *slot = u8::from_str_radix(pair, 16).ok()?;
+    }
+    Some(out)
 }
 
 /// Hex, lower case, fixed width.
@@ -291,6 +410,122 @@ mod tests {
         assert!(!verify_inclusion(&set[3], 3, 8, &path, &"0".repeat(64)));
         // A truncated path leaves the hash short of the root.
         assert!(!verify_inclusion(&set[3], 3, 8, &path[..2], &head.root));
+    }
+
+    /// Every prefix of every tree proves it is a prefix, at every size.
+    ///
+    /// Exhaustive rather than a fixture, because the recursion has three
+    /// branches and the interesting one is the tree whose width is not a power
+    /// of two, where the old boundary lands inside the right subtree.
+    #[test]
+    fn every_prefix_proves_it_is_one() {
+        for new in 1..=33usize {
+            let all = leaves(new);
+            let later = Head::over(&all);
+            for old in 1..=new {
+                let earlier = Head::over(&all[..old]);
+                let path = consistency_proof(&all, old).expect("a proof");
+                assert!(
+                    verify_consistency(old, &earlier.root, new, &later.root, &path),
+                    "size {old} is not proving a prefix of {new}"
+                );
+            }
+        }
+    }
+
+    /// The attack the proof exists to stop: a log rewritten wholesale.
+    ///
+    /// Every entry in the new log is consistent with the new head, so every
+    /// inclusion proof against it checks out. Only a reader holding the old
+    /// head can tell, and only with this.
+    #[test]
+    fn a_rewritten_log_cannot_extend_the_head_it_replaced() {
+        let honest = leaves(8);
+        let published = Head::over(&honest);
+
+        // The store drops what it published at index 2 and appends two more,
+        // so the tree is the same width it would honestly have been.
+        let mut rewritten: Vec<[u8; 32]> = honest.clone();
+        rewritten.remove(2);
+        rewritten.push(leaf_hash(b"deed-8"));
+        rewritten.push(leaf_hash(b"deed-9"));
+        let now = Head::over(&rewritten);
+
+        // Inclusion against the new head is fine for everything in it, which
+        // is exactly why inclusion alone does not answer this.
+        let path = inclusion_proof(&rewritten, 0).expect("a path");
+        assert!(verify_inclusion(
+            &rewritten[0],
+            0,
+            now.size,
+            &path,
+            &now.root
+        ));
+
+        // Consistency is not: no proof the store can offer makes the head it
+        // published an ancestor of the one it publishes now.
+        let offered = consistency_proof(&rewritten, published.size).expect("a proof");
+        assert!(
+            !verify_consistency(
+                published.size,
+                &published.root,
+                now.size,
+                &now.root,
+                &offered
+            ),
+            "a rewritten log passed as an extension"
+        );
+    }
+
+    /// A proof for one pair of heads does not check another, and a shortened
+    /// or padded one does not check at all.
+    #[test]
+    fn a_consistency_proof_does_not_travel() {
+        let all = leaves(12);
+        let later = Head::over(&all);
+        let earlier = Head::over(&all[..5]);
+        let path = consistency_proof(&all, 5).expect("a proof");
+        assert!(verify_consistency(5, &earlier.root, 12, &later.root, &path));
+
+        // A different old size.
+        let other = Head::over(&all[..6]);
+        assert!(!verify_consistency(6, &other.root, 12, &later.root, &path));
+        // A root nobody published.
+        assert!(!verify_consistency(
+            5,
+            &"0".repeat(64),
+            12,
+            &later.root,
+            &path
+        ));
+        // Truncated, and padded.
+        assert!(!verify_consistency(
+            5,
+            &earlier.root,
+            12,
+            &later.root,
+            &path[..1]
+        ));
+        let mut padded = path.clone();
+        padded.push([0u8; 32]);
+        assert!(!verify_consistency(
+            5,
+            &earlier.root,
+            12,
+            &later.root,
+            &padded
+        ));
+        // Backwards is not a prefix.
+        assert!(!verify_consistency(
+            12,
+            &later.root,
+            5,
+            &earlier.root,
+            &path
+        ));
+        // And an empty tree has no prefix to speak of.
+        assert!(consistency_proof(&all, 0).is_none());
+        assert!(consistency_proof(&all, 13).is_none());
     }
 
     /// Dropping a deed changes the root, which is the whole point: a store
