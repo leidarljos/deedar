@@ -91,6 +91,20 @@ pub struct AuditRow {
     pub backfill_settles_it: bool,
 }
 
+/// What checking a handover established.
+#[derive(Debug, Clone, Serialize, schemars::JsonSchema)]
+pub struct HandoverRow {
+    /// The accessions whose bytes match their digest and whose path reaches
+    /// the head, both, since neither implies the other.
+    pub proven: Vec<String>,
+    /// The one head every deed in the bag was against. Record it: the next
+    /// handover from the same sender is checked against this.
+    pub head: Option<HeadRow>,
+    /// Whether a bridge was checked, so the head above is the head this reader
+    /// already held, grown rather than replaced.
+    pub bridged_from: Option<usize>,
+}
+
 fn row(deed: &deed::Deed) -> DeedRow {
     DeedRow {
         id: deed.id.to_string(),
@@ -297,6 +311,65 @@ impl DeedarServer {
         }
         // Asked for and not supplied is the caller's problem to know about.
         Err(McpError::internal_error(refused.join("\n"), None))
+    }
+
+    #[tool(
+        description = "Check deeds somebody else handed over: that each one's bytes match the digest its log entry recorded, and that its path reaches the head the bag names. Needs no store, because a receiver holds a bag and no log. Answers with the head to record for next time; pass that back as a bridge file in `since` to also check the sender's log only grew.",
+        annotations(
+            title = "Check a handover",
+            read_only_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn deedar_check(
+        &self,
+        Parameters(args): Parameters<CheckArgs>,
+    ) -> Result<Json<HandoverRow>, McpError> {
+        let mut bridged_from = None;
+        if let Some(path) = &args.since {
+            let text = std::fs::read_to_string(path).map_err(|_| {
+                McpError::invalid_params(format!("no bridge at {path}"), None)
+            })?;
+            let bridge = deedar::Bridge::parse(&text)
+                .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+            // A bag whose deeds check out against a head nobody has seen
+            // before is a bag from a log that may have been rewritten, so this
+            // failing is a refusal and not a note.
+            bridge
+                .check()
+                .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+            bridged_from = Some(bridge.from.size);
+        }
+        let done = deedar::check_handover(&PathBuf::from(&args.dir))
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        Ok(Json(HandoverRow {
+            proven: done.proven,
+            head: done.head.map(|head| HeadRow {
+                size: head.size,
+                root: head.root,
+            }),
+            bridged_from,
+        }))
+    }
+
+    #[tool(
+        description = "The record joining a head a reader already holds to this log's own, so they can tell a log that grew from one that was rewritten. Give it the size the reader recorded from an earlier handover.",
+        annotations(
+            title = "Bridge to an earlier head",
+            read_only_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn deedar_log_bridge(
+        &self,
+        Parameters(args): Parameters<BridgeArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let bridge = open(&self.url)?
+            .bridge(args.from)
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        Ok(CallToolResult::success(vec![ContentBlock::text(
+            bridge.render(),
+        )]))
     }
 }
 
