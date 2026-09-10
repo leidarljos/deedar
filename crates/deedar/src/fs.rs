@@ -231,7 +231,7 @@ impl FsStore {
         let index = entries
             .iter()
             .position(|e| e.id == wanted)
-            .ok_or_else(|| Error::NotFound(wanted))?;
+            .ok_or(Error::NotFound(wanted))?;
         let leaves: Vec<[u8; 32]> = entries
             .iter()
             .map(|e| crate::log::leaf_hash(&e.material()))
