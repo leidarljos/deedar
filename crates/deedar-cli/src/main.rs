@@ -284,18 +284,34 @@ fn cmd_log(client: &mut Client, args: &[String]) -> Result<String, String> {
             Ok(out)
         }
         Some("audit") => {
-            let missing = client.log_audit().map_err(|e| e.to_string())?;
-            if missing.is_empty() {
-                let head = client.log_head().map_err(|e| e.to_string())?;
-                return Ok(format!("ok {} logged, {} served\n", head.size, head.size));
+            let audit = client.log_audit().map_err(|e| e.to_string())?;
+            if audit.is_clean() {
+                return Ok(format!("ok {} logged and served\n", audit.logged));
             }
-            // A non-empty audit is a finding rather than an error: the reader
-            // asked what is missing and this is the answer.
             let mut out = String::new();
-            for row in &missing {
+            for row in &audit.missing {
                 out.push_str(&format!("missing {}\t{}\n", row.id, row.why));
             }
+            for id in &audit.unlogged {
+                out.push_str(&format!("unlogged {id}\n"));
+            }
+            // A store from before the log is not a store that lost something,
+            // and saying so is more use than a count of complaints.
+            if audit.predates_the_log() {
+                out.push_str(&format!(
+                    "{} deeds and an empty log: this store predates it. `deedar log backfill` \
+                     writes what is on the shelves, dated from the evidence where there is one.\n",
+                    audit.unlogged.len()
+                ));
+            }
             Err(out)
+        }
+        Some("backfill") => {
+            let added = client.log_backfill().map_err(|e| e.to_string())?;
+            Ok(format!(
+                "logged {} deeds already on the shelves\n",
+                added.len()
+            ))
         }
         Some(other) => Err(format!("unknown log command {other}")),
     }
@@ -381,7 +397,7 @@ fn run(args: Vec<String>) -> Result<String, String> {
         None => Err(
             "usage: deedar [--url FILE] create|get|list|trail|evidence|delete|leave|timestamp|current|log|export|vouch|migrate\n\
              evidence, current and export take one id, several ids, or - to read them from stdin\n\
-             log takes head, list, audit, or prove ID; vouch takes sign FILE or check FILE"
+             log takes head, list, audit, backfill, or prove ID; vouch takes sign FILE or check FILE"
                 .into(),
         ),
     }

@@ -30,8 +30,8 @@ pub use deed::{
     MailMessageId, Measure, ProducedBy, Result, Source, Step,
 };
 pub use digest::{deed_digest, resolve};
-pub use fs::Missing;
 pub use fs::{is_write_once_addr, FsStore};
+pub use fs::{Audit, Missing};
 pub use log::{Entry as LogEntry, Head as LogHead};
 pub use timestamp::{imprint_hash, timestamp_req};
 pub use url::{open, StoreUrl};
@@ -124,8 +124,17 @@ impl Client {
     /// # Errors
     ///
     /// Fails when the log cannot be read.
-    pub fn log_audit(&self) -> Result<Vec<Missing>> {
+    pub fn log_audit(&self) -> Result<Audit> {
         self.store.log_audit()
+    }
+
+    /// Log every deed the store serves that the log does not name.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the store or the log cannot be read or appended to.
+    pub fn log_backfill(&self) -> Result<Vec<String>> {
+        self.store.log_backfill()
     }
 
     pub fn get(&mut self, id: &DeedId) -> Result<Deed> {

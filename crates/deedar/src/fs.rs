@@ -13,6 +13,39 @@ use crate::CreateRequest;
 type HmacSha256 = Hmac<Sha256>;
 
 /// Directory of deeds, write-once bytes, and tombstones.
+/// What an audit found, in both directions.
+///
+/// The two are different states and only one is tampering. A store written
+/// before the log existed has deeds and no entries, and should be told to
+/// backfill rather than accused; a store that logged a deed and no longer
+/// serves it, or serves one it never logged, is what the log exists to catch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Audit {
+    /// Entries the log holds.
+    pub logged: usize,
+    /// Logged and not served as logged.
+    pub missing: Vec<Missing>,
+    /// Served and never logged.
+    pub unlogged: Vec<String>,
+}
+
+impl Audit {
+    /// Whether the store answers for everything, in both directions.
+    #[must_use]
+    pub fn is_clean(&self) -> bool {
+        self.missing.is_empty() && self.unlogged.is_empty()
+    }
+
+    /// Whether the only complaint is that nothing was ever logged.
+    ///
+    /// Worth its own question: a store from before the log is not a store that
+    /// lost something, and the two want different advice.
+    #[must_use]
+    pub fn predates_the_log(&self) -> bool {
+        self.logged == 0 && self.missing.is_empty() && !self.unlogged.is_empty()
+    }
+}
+
 /// A deed the log names that the store no longer serves as logged.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Missing {
@@ -191,6 +224,47 @@ impl FsStore {
         Ok(())
     }
 
+    /// Log every deed the store serves that the log does not name.
+    ///
+    /// A store written before the log existed is not a store that lost
+    /// anything, and telling it so forever is not an answer. This appends what
+    /// is already on the shelves, in accession order so two runs over the same
+    /// store agree.
+    ///
+    /// What this cannot do is date them. The entry takes the evidence's time
+    /// where there is one, and the moment of backfill where there is not, and
+    /// either way the log says these were logged now rather than when they
+    /// were made. A log that starts today is honest about starting today; one
+    /// that claimed to have watched a deed it never saw would not be.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the store or the log cannot be read, or the log cannot be
+    /// appended to.
+    pub fn log_backfill(&self) -> Result<Vec<String>> {
+        let audit = self.log_audit()?;
+        let mut added = Vec::new();
+        for id in audit.unlogged {
+            let Ok(parsed) = DeedId::parse(&id) else {
+                continue;
+            };
+            let deed = self.get(&parsed)?;
+            let when = self.evidence(&parsed).map(|e| e.unix_time).unwrap_or(0);
+            let stamped = if when == 0 { Self::now_unix() } else { when };
+            self.append_log(&deed, stamped)?;
+            added.push(id);
+        }
+        Ok(added)
+    }
+
+    /// Seconds since the epoch, for a deed whose evidence carries no time.
+    fn now_unix() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0)
+    }
+
     /// Every entry the log holds, in the order they were appended.
     ///
     /// # Errors
@@ -252,9 +326,26 @@ impl FsStore {
     /// # Errors
     ///
     /// Fails when the log cannot be read.
-    pub fn log_audit(&self) -> Result<Vec<Missing>> {
+    pub fn log_audit(&self) -> Result<Audit> {
+        let entries = self.log_entries()?;
         let mut out = Vec::new();
-        for entry in self.log_entries()? {
+        let mut logged: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        for entry in &entries {
+            logged.insert(entry.id.clone());
+        }
+        // The other direction, which is the one an empty log makes vacuous. A
+        // store written before the log existed has deeds and no entries, and
+        // walking only the log calls that clean because there was nothing to
+        // walk. The emptier the log the better the verdict, which is backwards.
+        let mut unlogged: Vec<String> = Vec::new();
+        for deed in self.list()? {
+            let id = deed.id.to_string();
+            if !logged.contains(&id) {
+                unlogged.push(id);
+            }
+        }
+        unlogged.sort();
+        for entry in entries {
             let Ok(id) = DeedId::parse(&entry.id) else {
                 out.push(Missing {
                     id: entry.id.clone(),
@@ -278,7 +369,11 @@ impl FsStore {
                 }
             }
         }
-        Ok(out)
+        Ok(Audit {
+            logged: logged.len(),
+            missing: out,
+            unlogged,
+        })
     }
 
     /// Write one deed into a satchel: its canonical bytes, its evidence, and
