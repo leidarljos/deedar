@@ -129,7 +129,10 @@ mod tests {
     #[tokio::test]
     async fn every_prompt_renders_from_what_it_declares() {
         let declared = DeedarServer::prompt_router().list_all();
-        let names: Vec<&str> = declared.iter().map(|p| p.name.as_str()).collect();
+        // As a set: the router lists by name, and what matters is which
+        // prompts are declared rather than the order a listing returns them.
+        let mut names: Vec<&str> = declared.iter().map(|p| p.name.as_str()).collect();
+        names.sort_unstable();
         assert_eq!(names, ["check_a_handover", "stand_behind_a_deed"]);
         for prompt in &declared {
             assert!(
