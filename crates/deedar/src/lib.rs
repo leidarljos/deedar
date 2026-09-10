@@ -76,6 +76,47 @@ impl Client {
         crate::digest::resolve(&self.store, raw)
     }
 
+    /// The head over everything the store has logged.
+    ///
+    /// Read straight off the store rather than through the wire, because the
+    /// log is about what this store holds and a reader asking a store to
+    /// summarise itself over a protocol has learned nothing it did not
+    /// already have to trust.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the log cannot be read.
+    pub fn log_head(&self) -> Result<log::Head> {
+        self.store.log_head()
+    }
+
+    /// Every entry in the log, oldest first.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the log cannot be read.
+    pub fn log_entries(&self) -> Result<Vec<log::Entry>> {
+        self.store.log_entries()
+    }
+
+    /// Where a deed sits in the log, and the audit path to the root.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the log cannot be read or holds no entry for `id`.
+    pub fn log_proof(&self, id: &DeedId) -> Result<(usize, Vec<[u8; 32]>)> {
+        self.store.log_proof(id)
+    }
+
+    /// What the log says the store holds, against what it will hand over.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the log cannot be read.
+    pub fn log_audit(&self) -> Result<Vec<Missing>> {
+        self.store.log_audit()
+    }
+
     pub fn get(&mut self, id: &DeedId) -> Result<Deed> {
         let bytes = wire::encode_request(&Request::Get(id.clone()))?;
         match wire::decode_response(&self.store.handle(&bytes)?)? {

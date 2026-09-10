@@ -158,6 +158,63 @@ fn evidence_many(url: &str, args: &[String]) -> Result<Report, String> {
     })
 }
 
+/// The append-only log: what the store has issued, and whether it still
+/// serves it.
+///
+/// `head` is what a reader keeps between visits. `prove` shows a deed is in
+/// the tree that head names. `audit` walks the log and asks the store for each
+/// deed, which is how a deletion becomes visible: every signature that is left
+/// is still good, and the log is what says one is missing.
+fn cmd_log(client: &mut Client, args: &[String]) -> Result<String, String> {
+    match args.first().map(String::as_str) {
+        Some("head") | None => {
+            let head = client.log_head().map_err(|e| e.to_string())?;
+            Ok(format!("size={} root={}\n", head.size, head.root))
+        }
+        Some("list") => {
+            let entries = client.log_entries().map_err(|e| e.to_string())?;
+            let mut out = String::new();
+            for (at, entry) in entries.iter().enumerate() {
+                out.push_str(&format!(
+                    "{at}\t{}\t{}\t{}\n",
+                    entry.id, entry.digest, entry.unix_time
+                ));
+            }
+            Ok(out)
+        }
+        Some("prove") => {
+            let id = client
+                .resolve(args.get(1).ok_or("log prove needs an id")?)
+                .map_err(|e| e.to_string())?;
+            let (index, path) = client.log_proof(&id).map_err(|e| e.to_string())?;
+            let head = client.log_head().map_err(|e| e.to_string())?;
+            let mut out = format!(
+                "id={id}\nindex={index}\nsize={}\nroot={}\n",
+                head.size, head.root
+            );
+            for step in &path {
+                out.push_str(&format!("path={}\n", deedar::log::hex(step)));
+            }
+            Ok(out)
+        }
+        Some("audit") => {
+            let missing = client.log_audit().map_err(|e| e.to_string())?;
+            if missing.is_empty() {
+                let head = client.log_head().map_err(|e| e.to_string())?;
+                return Ok(format!("ok {} logged, {} served\n", head.size, head.size));
+            }
+            // A non-empty audit is a finding rather than an error: the reader
+            // asked what is missing and this is the answer.
+            let mut out = String::new();
+            for row in &missing {
+                out.push_str(&format!("missing {}\t{}\n", row.id, row.why));
+            }
+            Err(out)
+        }
+        Some(other) => Err(format!("unknown log command {other}")),
+    }
+}
+
 fn run(args: Vec<String>) -> Result<String, String> {
     let (url, rest) = take_url(&args)?;
     let mut client = Client::open(&url).map_err(|e| e.to_string())?;
@@ -223,6 +280,7 @@ fn run(args: Vec<String>) -> Result<String, String> {
             let d = client.current(&id).map_err(|e| e.to_string())?;
             Ok(format_one(&d))
         }
+        Some("log") => cmd_log(&mut client, &rest[1..]),
         Some("migrate") => {
             client.migrate().map_err(|e| e.to_string())?;
             Ok("layout=1\n".into())
@@ -233,8 +291,9 @@ fn run(args: Vec<String>) -> Result<String, String> {
         )),
         Some(other) => Err(format!("unknown command {other}")),
         None => Err(
-            "usage: deedar [--url FILE] create|get|list|trail|evidence|delete|leave|timestamp|current|migrate\n\
-             evidence and current take one id, several ids, or - to read them from stdin"
+            "usage: deedar [--url FILE] create|get|list|trail|evidence|delete|leave|timestamp|current|log|migrate\n\
+             evidence and current take one id, several ids, or - to read them from stdin\n\
+             log takes head, list, audit, or prove ID"
                 .into(),
         ),
     }
