@@ -4,6 +4,7 @@
 //! Stdio, because a seat runs this beside the agent rather than as a service.
 
 mod args;
+mod prompts;
 mod server;
 
 use rmcp::{transport::stdio, ServiceExt};

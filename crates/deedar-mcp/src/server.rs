@@ -21,7 +21,7 @@ use std::path::PathBuf;
 
 use rmcp::{
     handler::server::wrapper::Json, handler::server::wrapper::Parameters,
-    handler::server::ServerHandler, model::*, tool, tool_handler, tool_router,
+    handler::server::ServerHandler, model::*, prompt_handler, tool, tool_handler, tool_router,
     ErrorData as McpError,
 };
 use serde::Serialize;
@@ -374,12 +374,14 @@ impl DeedarServer {
 }
 
 #[tool_handler]
+#[prompt_handler(router = Self::prompt_router())]
 impl ServerHandler for DeedarServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(
             ServerCapabilities::builder()
                 .enable_tools()
                 .enable_resources()
+                .enable_prompts()
                 .build(),
         )
         .with_server_info(Implementation::new("deedar", env!("CARGO_PKG_VERSION")))
