@@ -20,6 +20,79 @@ type HmacSha256 = Hmac<Sha256>;
 /// backfill rather than accused; a store that logged a deed and no longer
 /// serves it, or serves one it never logged, is what the log exists to catch.
 #[derive(Debug, Clone, PartialEq, Eq)]
+/// One reading of the log, held for a handover of many deeds.
+///
+/// See [`FsStore::exporter`]. Every receipt made through this is a lookup in a
+/// tree built once, and every deed in the bag is against the one head this
+/// holds, which is also what a receiver is told to record.
+pub struct Exporter<'a> {
+    store: &'a FsStore,
+    entries: Vec<crate::log::Entry>,
+    leaves: Vec<[u8; 32]>,
+    head: crate::log::Head,
+    signed: Option<crate::receipt::SignedHead>,
+    position: std::collections::HashMap<String, usize>,
+}
+
+impl Exporter<'_> {
+    /// The head every receipt from this exporter is against.
+    #[must_use]
+    pub fn head(&self) -> &crate::log::Head {
+        &self.head
+    }
+
+    /// The receipt for one deed, from the tree already built.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the log holds no entry for `id`.
+    pub fn receipt(&self, id: &DeedId) -> Result<crate::receipt::Receipt> {
+        let index = *self
+            .position
+            .get(id.as_str())
+            .ok_or_else(|| Error::NotFound(id.to_string()))?;
+        let path = crate::log::inclusion_proof(&self.leaves, index)
+            .ok_or_else(|| Error::Io("log: no path for an entry that is in it".into()))?;
+        let entry = &self.entries[index];
+        Ok(crate::receipt::Receipt {
+            id: entry.id.clone(),
+            digest: entry.digest.clone(),
+            unix_time: entry.unix_time,
+            index,
+            size: self.head.size,
+            root: self.head.root.clone(),
+            path,
+        })
+    }
+
+    /// Write one deed into a satchel: bytes, evidence, sidecar, receipt, and
+    /// the signed head when this store holds a key.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the deed is absent, the log has no entry for it, or `into`
+    /// cannot be written.
+    pub fn export(&self, id: &DeedId, into: &Path) -> Result<Vec<PathBuf>> {
+        let deed = self.store.get(id)?;
+        let (out, mut written) = self.store.export_files(id, into, &deed)?;
+
+        let receipt = self.receipt(id)?;
+        let path = out.join("proof.txt");
+        atomic_write(&path, receipt.render().as_bytes())?;
+        written.push(path);
+
+        // The head every receipt in this bag is against. Written beside the
+        // deeds so a receiver has one thing to record, and it is the same head
+        // for every deed of this export by construction.
+        if let Some(signed) = &self.signed {
+            let path = crate::receipt::head_beside(into);
+            atomic_write(&path, signed.render().as_bytes())?;
+            written.push(path);
+        }
+        Ok(written)
+    }
+}
+
 pub struct Audit {
     /// Entries the log holds.
     pub logged: usize,
@@ -475,12 +548,59 @@ impl FsStore {
     /// Fails when the deed is absent, the log has no entry for it, or `into`
     /// cannot be written.
     pub fn export_into(&self, id: &DeedId, into: &Path) -> Result<Vec<PathBuf>> {
-        let deed = self.get(id)?;
+        self.exporter()?.export(id, into)
+    }
+
+    /// The log read once, for a handover of many deeds.
+    ///
+    /// A receipt is a path through a tree whose every leaf is a hash over a log
+    /// entry, so making one means reading the whole log and hashing every
+    /// entry. Doing that inside each export made a handover of `m` deeds from
+    /// a log of `n` entries cost `m` reads and `m * n` hashes, which is the
+    /// shape that turns a hundred-deed satchel from instant into seconds.
+    /// The tree does not change between two deeds of one export, so it is
+    /// built once and every receipt is a lookup in it.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the log cannot be read.
+    pub fn exporter(&self) -> Result<Exporter<'_>> {
+        let entries = self.log_entries()?;
+        let leaves: Vec<[u8; 32]> = entries
+            .iter()
+            .map(|e| crate::log::leaf_hash(&e.material()))
+            .collect();
+        let head = crate::log::Head::over(&leaves);
+        let signed = match crate::host::load_signing_key()? {
+            Some(_) => Some(crate::receipt::sign_head(&head)?),
+            None => None,
+        };
+        let position: std::collections::HashMap<String, usize> = entries
+            .iter()
+            .enumerate()
+            .map(|(at, e)| (e.id.clone(), at))
+            .collect();
+        Ok(Exporter {
+            store: self,
+            entries,
+            leaves,
+            head,
+            signed,
+            position,
+        })
+    }
+
+    fn export_files(
+        &self,
+        id: &DeedId,
+        into: &Path,
+        deed: &Deed,
+    ) -> Result<(PathBuf, Vec<PathBuf>)> {
         let out = into.join(id.as_str());
         fs::create_dir_all(&out).map_err(|e| Error::Io(e.to_string()))?;
 
         let mut written = Vec::new();
-        let bytes = crate::wire::deed_bytes(&deed);
+        let bytes = crate::wire::deed_bytes(deed);
         let path = out.join("deed.bin");
         atomic_write(&path, &bytes)?;
         written.push(path);
@@ -497,22 +617,7 @@ impl FsStore {
             atomic_write(&path, &raw)?;
             written.push(path);
         }
-
-        let receipt = self.receipt(id)?;
-        let path = out.join("proof.txt");
-        atomic_write(&path, receipt.render().as_bytes())?;
-        written.push(path);
-
-        // The head every receipt in this bag is against, signed when this
-        // store holds a key. Rewritten on each export rather than written
-        // once, so a bag whose deeds were exported across a growing log ends
-        // up naming the head they actually share, or failing the check.
-        if let Some(signed) = self.signed_head()? {
-            let path = crate::receipt::head_beside(into);
-            atomic_write(&path, signed.render().as_bytes())?;
-            written.push(path);
-        }
-        Ok(written)
+        Ok((out, written))
     }
 
     fn log_leaves(&self) -> Result<Vec<[u8; 32]>> {

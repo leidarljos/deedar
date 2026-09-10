@@ -274,13 +274,21 @@ fn cmd_export(client: &mut Client, args: &[String]) -> Result<String, String> {
     }
     let into = into.ok_or("export needs --into DIR")?;
     let ids = ids_from(&rest, "export")?;
+    // The log is read and hashed once for the whole list. Per deed it was a
+    // full read and a full hashing each, which made a hundred-deed handover
+    // cost a hundred readings of a log that did not change between them.
+    // Names resolve first, against the store, and only then is the log read:
+    // resolving mutates the client's view of the store and the exporter
+    // borrows it for the whole handover.
+    let resolved: Vec<(String, deed::Result<DeedId>)> = ids
+        .iter()
+        .map(|raw| (raw.clone(), client.resolve(raw)))
+        .collect();
+    let exporter = client.exporter().map_err(|e| e.to_string())?;
     let mut wrote = 0usize;
     let mut refused = Vec::new();
-    for raw in &ids {
-        match client
-            .resolve(raw)
-            .and_then(|id| client.export_into(&id, &into))
-        {
+    for (raw, id) in resolved {
+        match id.and_then(|id| exporter.export(&id, &into)) {
             Ok(files) => wrote += files.len(),
             Err(e) => refused.push(format!("{raw}\t{e}")),
         }

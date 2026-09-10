@@ -299,13 +299,20 @@ impl DeedarServer {
     ) -> Result<CallToolResult, McpError> {
         let mut client = open(&self.url)?;
         let into = PathBuf::from(&args.into);
+        // Resolve first, then read the log once for the whole handover; see
+        // the command line's export for why the order is the order.
+        let resolved: Vec<(String, deed::Result<deed::DeedId>)> = args
+            .accessions
+            .iter()
+            .map(|raw| (raw.clone(), client.resolve(raw)))
+            .collect();
+        let exporter = client
+            .exporter()
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
         let mut wrote = 0usize;
         let mut refused = Vec::new();
-        for raw in &args.accessions {
-            match client
-                .resolve(raw)
-                .and_then(|id| client.export_into(&id, &into))
-            {
+        for (raw, id) in resolved {
+            match id.and_then(|id| exporter.export(&id, &into)) {
                 Ok(files) => wrote += files.len(),
                 Err(e) => refused.push(format!("{raw}: {e}")),
             }
