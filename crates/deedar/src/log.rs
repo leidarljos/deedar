@@ -297,7 +297,7 @@ pub fn verify_consistency(
     // When the old tree is a whole subtree its root was never sent, because
     // the reader is the one holding it.
     let (seed, rest) = if old.is_power_of_two() {
-        let Some(seed) = from_hex_root(old_root) else {
+        let Some(seed) = from_hex(old_root) else {
             return false;
         };
         (seed, path)
@@ -335,7 +335,13 @@ pub fn verify_consistency(
 }
 
 /// A hex root back to bytes, for the one case where the reader supplies it.
-fn from_hex_root(text: &str) -> Option<[u8; 32]> {
+/// A 32 byte hash from its hex, or nothing when the text is not one.
+///
+/// Anything that reads a proof off a wire or a file needs this, because every
+/// hash in a proof arrives as hex and a proof half read is worse than one that
+/// was refused.
+#[must_use]
+pub fn from_hex(text: &str) -> Option<[u8; 32]> {
     if text.len() != 64 {
         return None;
     }

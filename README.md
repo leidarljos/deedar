@@ -118,6 +118,57 @@ unset; `.tsr` when the authority replies). `migrate` ensures
 `{store}/layout`. `delete` writes a tombstone; `evidence` on that id
 then fails.
 
+## Handing work over
+
+`export` writes deeds into a directory somebody else will open: the
+canonical bytes, the evidence, the host signature when there is one,
+and a `proof.txt`.
+
+```sh
+just deedar export --into /tmp/bag/data/deeds deed-patch-note
+# or the list a tracker names
+vissue recall <id> --deeds-only | deedar export --into /tmp/bag/data/deeds -
+```
+
+The proof is the part that is not a copy. Bytes and a signature travel
+fine on their own and say a writer vouched for them; they do not say the
+deed existed before somebody asked for it. `proof.txt` carries the
+deed's place in this store's append-only log, the path from its leaf to
+the log head, and the rest of what that leaf hashes over. A receiver
+holding nothing but the bag can rebuild the leaf and walk it.
+
+`check` is the other end, and it is the one verb that needs no store:
+
+```sh
+just deedar check /tmp/bag
+# 3 deeds proven against a log of 41 entries, root 9f2c...
+```
+
+Write that head down. Every deed in a bag has to be against one head, so
+there is one thing to keep, and the next bag from the same sender is
+checked against it:
+
+```sh
+# the sender, told which head the receiver holds
+just deedar log bridge 41 > /tmp/bag2/bridge.txt
+# the receiver
+just deedar check /tmp/bag2 --since /tmp/bag2/bridge.txt
+# the log grew from 41 entries to 58 without dropping or rewriting one
+# 2 deeds proven against a log of 58 entries, root 4a71...
+```
+
+Without the bridge a clean answer means every deed is in the tree the
+sender is showing. With it, that tree is also the one the receiver
+already saw, grown rather than replaced. Both proof kinds are RFC 6962's
+(`log prove`, `log bridge`); `log head` is what a reader keeps between
+visits and `log audit` walks the log against the shelves, which is how a
+deletion becomes visible when every signature that is left is still
+good.
+
+`vouch sign` and `vouch check` cover the manifest of a bag rather than
+the deeds inside it. They answer who packed it; the proofs answer
+whether what is in it predates the packing. A receiver wants both.
+
 Other kinds and store law: [DESIGN.md](DESIGN.md).
 
 ```
@@ -134,6 +185,9 @@ deedar.create --> deed + evidence
         current -------+--> follow --supersedes to the tip
                        |      (several ids, or - for a list on stdin)
         migrate -------+--> write {store}/layout when missing
+        export --------+--> dest/{id} + proof.txt against the log head
+        check ---------+--> the receiving end: bytes, leaf, path, head
+                       |      (--since a bridge, for a head kept earlier)
 ```
 
 ## Build

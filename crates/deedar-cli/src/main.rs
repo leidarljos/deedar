@@ -191,6 +191,51 @@ fn cmd_vouch(url: &str, args: &[String]) -> Result<String, String> {
     }
 }
 
+/// Check deeds somebody else handed over.
+///
+/// This is the other end of `export`, and the only verb here that needs no
+/// store: a receiver holds a bag and no log, which is the whole situation the
+/// proofs exist for. It answers with the head every deed in the bag was
+/// against, because that head is what the receiver writes down and hands to
+/// `--since` the next time the same sender gives them something.
+///
+/// A bridge file, when given, is checked before anything else. Without one a
+/// clean answer means every deed is in the tree the sender is showing; with
+/// one it also means that tree is the one the receiver already saw, grown
+/// rather than replaced.
+fn cmd_check(args: &[String]) -> Result<String, String> {
+    let mut dir: Option<PathBuf> = None;
+    let mut bridge: Option<PathBuf> = None;
+    let mut at = 0;
+    while at < args.len() {
+        match args[at].as_str() {
+            "--since" => {
+                at += 1;
+                bridge = Some(PathBuf::from(args.get(at).ok_or("--since needs a file")?));
+            }
+            other if dir.is_none() => dir = Some(PathBuf::from(other)),
+            other => return Err(format!("check takes one directory, and also got {other:?}")),
+        }
+        at += 1;
+    }
+    let dir = dir.ok_or("check needs a satchel directory")?;
+
+    let mut out = String::new();
+    if let Some(path) = bridge {
+        let text = std::fs::read_to_string(&path)
+            .map_err(|_| format!("no bridge at {}", path.display()))?;
+        let bridge = deedar::Bridge::parse(&text).map_err(|e| e.to_string())?;
+        bridge.check().map_err(|e| e.to_string())?;
+        out.push_str(&format!(
+            "the log grew from {} entries to {} without dropping or rewriting one\n",
+            bridge.from.size, bridge.to.size
+        ));
+    }
+    let done = deedar::check_handover(&dir).map_err(|e| e.to_string())?;
+    out.push_str(&done.render());
+    Ok(out)
+}
+
 /// Write deeds somewhere else, with the proof they were logged here first.
 ///
 /// Takes one accession, several, or `-` to read them from stdin, which is how
@@ -248,9 +293,12 @@ fn cmd_export(client: &mut Client, args: &[String]) -> Result<String, String> {
 /// serves it.
 ///
 /// `head` is what a reader keeps between visits. `prove` shows a deed is in
-/// the tree that head names. `audit` walks the log and asks the store for each
-/// deed, which is how a deletion becomes visible: every signature that is left
-/// is still good, and the log is what says one is missing.
+/// the tree that head names, in the form a reader can check with nothing but
+/// the deed bytes. `bridge` joins a head a reader kept to this one, which is
+/// the only thing that catches a log rewritten between two visits. `audit`
+/// walks the log and asks the store for each deed, which is how a deletion
+/// becomes visible: every signature that is left is still good, and the log is
+/// what says one is missing.
 fn cmd_log(client: &mut Client, args: &[String]) -> Result<String, String> {
     match args.first().map(String::as_str) {
         Some("head") | None => {
@@ -272,16 +320,17 @@ fn cmd_log(client: &mut Client, args: &[String]) -> Result<String, String> {
             let id = client
                 .resolve(args.get(1).ok_or("log prove needs an id")?)
                 .map_err(|e| e.to_string())?;
-            let (index, path) = client.log_proof(&id).map_err(|e| e.to_string())?;
-            let head = client.log_head().map_err(|e| e.to_string())?;
-            let mut out = format!(
-                "id={id}\nindex={index}\nsize={}\nroot={}\n",
-                head.size, head.root
-            );
-            for step in &path {
-                out.push_str(&format!("path={}\n", deedar::log::hex(step)));
-            }
-            Ok(out)
+            // The same record an export writes beside a deed, so what is shown
+            // here and what travels are one format and one checker.
+            Ok(client.receipt(&id).map_err(|e| e.to_string())?.render())
+        }
+        Some("bridge") => {
+            let from: usize = args
+                .get(1)
+                .ok_or("log bridge needs the size of the head the reader already holds")?
+                .parse()
+                .map_err(|_| "log bridge takes a size".to_string())?;
+            Ok(client.bridge(from).map_err(|e| e.to_string())?.render())
         }
         Some("audit") => {
             let audit = client.log_audit().map_err(|e| e.to_string())?;
@@ -392,6 +441,7 @@ fn run(args: Vec<String>) -> Result<String, String> {
         }
         Some("log") => cmd_log(&mut client, &rest[1..]),
         Some("export") => cmd_export(&mut client, &rest[1..]),
+        Some("check") => cmd_check(&rest[1..]),
         Some("vouch") => cmd_vouch(&url, &rest[1..]),
         Some("migrate") => {
             client.migrate().map_err(|e| e.to_string())?;
@@ -403,9 +453,10 @@ fn run(args: Vec<String>) -> Result<String, String> {
         )),
         Some(other) => Err(format!("unknown command {other}")),
         None => Err(
-            "usage: deedar [--url FILE] create|get|list|trail|evidence|delete|leave|timestamp|current|log|export|vouch|migrate\n\
+            "usage: deedar [--url FILE] create|get|list|trail|evidence|delete|leave|timestamp|current|log|export|check|vouch|migrate\n\
              evidence, current and export take one id, several ids, or - to read them from stdin\n\
-             log takes head, list, audit, backfill, or prove ID; vouch takes sign FILE or check FILE"
+             log takes head, list, audit, backfill, prove ID, or bridge SIZE\n\
+             check takes a satchel directory and optionally --since BRIDGE; vouch takes sign FILE or check FILE"
                 .into(),
         ),
     }

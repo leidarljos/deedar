@@ -19,6 +19,7 @@ mod host;
 mod leave;
 pub mod log;
 mod migrate;
+pub mod receipt;
 mod timestamp;
 mod url;
 pub mod vouch;
@@ -33,6 +34,7 @@ pub use digest::{deed_digest, resolve};
 pub use fs::{is_write_once_addr, FsStore};
 pub use fs::{Audit, Missing};
 pub use log::{Entry as LogEntry, Head as LogHead};
+pub use receipt::{check_handover, Bridge, Handover, Receipt};
 pub use timestamp::{imprint_hash, timestamp_req};
 pub use url::{open, StoreUrl};
 pub use vouch::{Checked, Vouch};
@@ -108,6 +110,25 @@ impl Client {
     /// Fails when the log cannot be read or holds no entry for `id`.
     pub fn log_proof(&self, id: &DeedId) -> Result<(usize, Vec<[u8; 32]>)> {
         self.store.log_proof(id)
+    }
+
+    /// The checkable record for one deed: its place in the log, the path to
+    /// the head, and the rest of what the leaf hashes over.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the deed is absent or the log holds no entry for it.
+    pub fn receipt(&self, id: &DeedId) -> Result<Receipt> {
+        self.store.receipt(id)
+    }
+
+    /// The record joining a head somebody already holds to this log's own.
+    ///
+    /// # Errors
+    ///
+    /// Fails when `from` is zero or larger than this log.
+    pub fn bridge(&self, from: usize) -> Result<Bridge> {
+        self.store.bridge(from)
     }
 
     /// Write one deed into a satchel with the proof it was already logged.

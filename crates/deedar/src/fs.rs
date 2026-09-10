@@ -306,12 +306,33 @@ impl FsStore {
 
     /// The proof that `id` is in the tree the current head names, and where.
     ///
+    /// The path on its own is for a reader who already holds the log and can
+    /// rebuild the leaf themselves. Anything that travels wants [`receipt`],
+    /// which carries the rest of what the leaf hashes over.
+    ///
+    /// [`receipt`]: Self::receipt
+    ///
     /// # Errors
     ///
     /// Fails when the log cannot be read or holds no entry for `id`.
     pub fn log_proof(&self, id: &DeedId) -> Result<(usize, Vec<[u8; 32]>)> {
-        let entries = self.log_entries()?;
+        let receipt = self.receipt(id)?;
+        Ok((receipt.index, receipt.path))
+    }
+
+    /// The record a receiver checks a handed-over deed against.
+    ///
+    /// This is the proof plus the rest of what the leaf hashes over. The path
+    /// alone is not enough for anybody who does not already hold the log:
+    /// they have to rebuild the leaf first, and the leaf covers the entry's
+    /// time as well as its accession and digest.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the deed is absent or the log holds no entry for it.
+    pub fn receipt(&self, id: &DeedId) -> Result<crate::receipt::Receipt> {
         let wanted = id.to_string();
+        let entries = self.log_entries()?;
         let index = entries
             .iter()
             .position(|e| e.id == wanted)
@@ -322,7 +343,43 @@ impl FsStore {
             .collect();
         let path = crate::log::inclusion_proof(&leaves, index)
             .ok_or_else(|| Error::Io("log: no path for an entry that is in it".into()))?;
-        Ok((index, path))
+        let head = crate::log::Head::over(&leaves);
+        let entry = &entries[index];
+        Ok(crate::receipt::Receipt {
+            id: entry.id.clone(),
+            digest: entry.digest.clone(),
+            unix_time: entry.unix_time,
+            index,
+            size: head.size,
+            root: head.root,
+            path,
+        })
+    }
+
+    /// The record joining a head somebody already holds to this log's own.
+    ///
+    /// A receiver who took a satchel last month wrote down a head. Handing
+    /// them a second satchel proves each new deed against a new head and says
+    /// nothing about whether that head is the old one grown. This is what says
+    /// it, and it is the only thing that catches a log rewritten in between.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the earlier size is zero, or larger than this log, or names
+    /// a root this log never had at that size.
+    pub fn bridge(&self, from: usize) -> Result<crate::receipt::Bridge> {
+        let leaves = self.log_leaves()?;
+        let path = crate::log::consistency_proof(&leaves, from).ok_or_else(|| {
+            Error::Evidence(format!(
+                "a log of {} entries cannot bridge from {from}",
+                leaves.len()
+            ))
+        })?;
+        Ok(crate::receipt::Bridge {
+            from: crate::log::Head::over(&leaves[..from]),
+            to: crate::log::Head::over(&leaves),
+            path,
+        })
     }
 
     /// What the log says the store holds, against what it will hand over.
@@ -423,19 +480,9 @@ impl FsStore {
             written.push(path);
         }
 
-        let (index, audit) = self.log_proof(id)?;
-        let head = self.log_head()?;
-        let mut proof = format!(
-            "id={id}\ndigest={}\nindex={index}\nsize={}\nroot={}\n",
-            crate::digest::deed_digest(&deed),
-            head.size,
-            head.root
-        );
-        for step in &audit {
-            proof.push_str(&format!("path={}\n", crate::log::hex(step)));
-        }
+        let receipt = self.receipt(id)?;
         let path = out.join("proof.txt");
-        atomic_write(&path, proof.as_bytes())?;
+        atomic_write(&path, receipt.render().as_bytes())?;
         written.push(path);
         Ok(written)
     }
