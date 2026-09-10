@@ -165,6 +165,12 @@ visits and `log audit` walks the log against the shelves, which is how a
 deletion becomes visible when every signature that is left is still
 good.
 
+The head itself is signed when the store holds a signing key, and the bag
+carries it. `check` says who signed it, and whether that key is one this
+reader accepts, because a head nobody vouched for makes a bag internally
+consistent and unattributed: every proof in it is against a head the bag
+asserted about itself.
+
 `vouch sign` and `vouch check` cover the manifest of a bag rather than
 the deeds inside it. They answer who packed it; the proofs answer
 whether what is in it predates the packing. A receiver wants both.
