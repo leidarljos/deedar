@@ -179,6 +179,13 @@ pub fn verify_ed25519(
 }
 
 /// The bytes both constructions cover, so the canonical form is one thing.
+/// The attested message, for a test that checks two domains stay apart.
+#[cfg(test)]
+#[must_use]
+pub fn attested_for_test(deed_bytes: &[u8], unix_time: u64) -> Vec<u8> {
+    attested(deed_bytes, unix_time)
+}
+
 fn attested(deed_bytes: &[u8], unix_time: u64) -> Vec<u8> {
     let mut message = Vec::with_capacity(HOST_DOMAIN.len() + 1 + deed_bytes.len() + 8);
     message.extend_from_slice(HOST_DOMAIN);

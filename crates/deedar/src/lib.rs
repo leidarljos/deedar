@@ -21,6 +21,7 @@ pub mod log;
 mod migrate;
 mod timestamp;
 mod url;
+pub mod vouch;
 mod wire;
 
 pub use attest::{Demand, Policy};
@@ -34,6 +35,7 @@ pub use fs::{is_write_once_addr, FsStore};
 pub use log::{Entry as LogEntry, Head as LogHead};
 pub use timestamp::{imprint_hash, timestamp_req};
 pub use url::{open, StoreUrl};
+pub use vouch::{Checked, Vouch};
 pub use wire::{
     decode_request, decode_response, encode_request, encode_response, Request, Response,
 };

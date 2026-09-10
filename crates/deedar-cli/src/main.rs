@@ -158,6 +158,39 @@ fn evidence_many(url: &str, args: &[String]) -> Result<Report, String> {
     })
 }
 
+/// Sign a file somebody else will open, or check the signature on one.
+///
+/// A satchel arrives with a manifest, and checking the payload against that
+/// manifest catches what was corrupted or dropped on the way. It does not
+/// catch a manifest that was rewritten, because a receiver recomputing digests
+/// from the bag they were handed is checking the bag against itself. The
+/// manifest is the right thing to sign: it covers the whole payload already,
+/// so signing it signs everything, and the checker that objects to an unlisted
+/// file is what stops that being a loophole.
+///
+/// The signer list comes from the store's own layout, which is where a reader
+/// says which keys they accept. Without one this reports that the bytes and
+/// the signature go together and says so, rather than calling that a check.
+fn cmd_vouch(url: &str, args: &[String]) -> Result<String, String> {
+    let dir = deedar::store_dir(url).map_err(|e| e.to_string())?;
+    match args.first().map(String::as_str) {
+        Some("sign") => {
+            let path = PathBuf::from(args.get(1).ok_or("vouch sign needs a file")?);
+            let out = deedar::vouch::sign(&path).map_err(|e| e.to_string())?;
+            Ok(format!("{}\n", out.display()))
+        }
+        Some("check") => {
+            let path = PathBuf::from(args.get(1).ok_or("vouch check needs a file")?);
+            let policy = deedar::Policy::read(&dir).map_err(|e| e.to_string())?;
+            let checked =
+                deedar::vouch::check(&path, &policy.signers).map_err(|e| e.to_string())?;
+            Ok(checked.render())
+        }
+        Some(other) => Err(format!("unknown vouch command {other}")),
+        None => Err("vouch takes sign FILE or check FILE".into()),
+    }
+}
+
 /// Write deeds somewhere else, with the proof they were logged here first.
 ///
 /// Takes one accession, several, or `-` to read them from stdin, which is how
@@ -335,6 +368,7 @@ fn run(args: Vec<String>) -> Result<String, String> {
         }
         Some("log") => cmd_log(&mut client, &rest[1..]),
         Some("export") => cmd_export(&mut client, &rest[1..]),
+        Some("vouch") => cmd_vouch(&url, &rest[1..]),
         Some("migrate") => {
             client.migrate().map_err(|e| e.to_string())?;
             Ok("layout=1\n".into())
@@ -345,9 +379,9 @@ fn run(args: Vec<String>) -> Result<String, String> {
         )),
         Some(other) => Err(format!("unknown command {other}")),
         None => Err(
-            "usage: deedar [--url FILE] create|get|list|trail|evidence|delete|leave|timestamp|current|log|export|migrate\n\
+            "usage: deedar [--url FILE] create|get|list|trail|evidence|delete|leave|timestamp|current|log|export|vouch|migrate\n\
              evidence, current and export take one id, several ids, or - to read them from stdin\n\
-             log takes head, list, audit, or prove ID"
+             log takes head, list, audit, or prove ID; vouch takes sign FILE or check FILE"
                 .into(),
         ),
     }
