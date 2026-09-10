@@ -13,6 +13,15 @@ use crate::CreateRequest;
 type HmacSha256 = Hmac<Sha256>;
 
 /// Directory of deeds, write-once bytes, and tombstones.
+/// A deed the log names that the store no longer serves as logged.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Missing {
+    /// The accession the log recorded.
+    pub id: String,
+    /// What the store said when asked for it, or how it differs.
+    pub why: String,
+}
+
 pub struct FsStore {
     dir: PathBuf,
     key: [u8; 32],
@@ -157,7 +166,131 @@ impl FsStore {
         if let Some(prior) = req.supersedes {
             self.record_supersedes(&deed.id, &prior)?;
         }
+        // The log goes last, so an entry never names a deed the store failed
+        // to write. The other order would let a crash leave a head covering
+        // something no reader can fetch.
+        self.append_log(&deed, evidence.unix_time)?;
         Ok((deed, evidence))
+    }
+
+    /// Add one deed to the append-only log.
+    fn append_log(&self, deed: &Deed, unix_time: u64) -> Result<()> {
+        let entry = crate::log::Entry {
+            id: deed.id.to_string(),
+            digest: crate::digest::deed_digest(deed),
+            unix_time,
+        };
+        let path = self.log_path();
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .map_err(|e| Error::Io(e.to_string()))?;
+        std::io::Write::write_all(&mut file, entry.line().as_bytes())
+            .map_err(|e| Error::Io(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Every entry the log holds, in the order they were appended.
+    ///
+    /// # Errors
+    ///
+    /// Fails when a line is not an entry, rather than skipping it: a log that
+    /// dropped what it could not read would report a tree the store never
+    /// signed, which is the failure the log exists to make visible.
+    pub fn log_entries(&self) -> Result<Vec<crate::log::Entry>> {
+        let path = self.log_path();
+        if !path.exists() {
+            return Ok(Vec::new());
+        }
+        let text = fs::read_to_string(&path).map_err(|e| Error::Io(e.to_string()))?;
+        text.lines()
+            .filter(|line| !line.trim().is_empty())
+            .map(crate::log::Entry::parse)
+            .collect()
+    }
+
+    /// The head over everything logged so far.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the log cannot be read.
+    pub fn log_head(&self) -> Result<crate::log::Head> {
+        let leaves = self.log_leaves()?;
+        Ok(crate::log::Head::over(&leaves))
+    }
+
+    /// The proof that `id` is in the tree the current head names, and where.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the log cannot be read or holds no entry for `id`.
+    pub fn log_proof(&self, id: &DeedId) -> Result<(usize, Vec<[u8; 32]>)> {
+        let entries = self.log_entries()?;
+        let wanted = id.to_string();
+        let index = entries
+            .iter()
+            .position(|e| e.id == wanted)
+            .ok_or_else(|| Error::NotFound(wanted))?;
+        let leaves: Vec<[u8; 32]> = entries
+            .iter()
+            .map(|e| crate::log::leaf_hash(&e.material()))
+            .collect();
+        let path = crate::log::inclusion_proof(&leaves, index)
+            .ok_or_else(|| Error::Io("log: no path for an entry that is in it".into()))?;
+        Ok((index, path))
+    }
+
+    /// What the log says the store holds, against what it will hand over.
+    ///
+    /// The log is append-only and the store is not: `delete` tombstones a deed
+    /// and the leaf stays. That gap is the detection. A reader walks the log,
+    /// asks for each deed, and gets back the ones that have gone missing or
+    /// changed under their accession, which is a question no pile of
+    /// signatures answers because each signature is still perfectly good.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the log cannot be read.
+    pub fn log_audit(&self) -> Result<Vec<Missing>> {
+        let mut out = Vec::new();
+        for entry in self.log_entries()? {
+            let Ok(id) = DeedId::parse(&entry.id) else {
+                out.push(Missing {
+                    id: entry.id.clone(),
+                    why: "the log holds an accession the store cannot parse".into(),
+                });
+                continue;
+            };
+            match self.get(&id) {
+                Err(e) => out.push(Missing {
+                    id: entry.id.clone(),
+                    why: e.to_string(),
+                }),
+                Ok(deed) => {
+                    let now = crate::digest::deed_digest(&deed);
+                    if now != entry.digest {
+                        out.push(Missing {
+                            id: entry.id.clone(),
+                            why: format!("logged as {}, serves as {now}", entry.digest),
+                        });
+                    }
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    fn log_leaves(&self) -> Result<Vec<[u8; 32]>> {
+        Ok(self
+            .log_entries()?
+            .iter()
+            .map(|e| crate::log::leaf_hash(&e.material()))
+            .collect())
+    }
+
+    fn log_path(&self) -> PathBuf {
+        self.dir.join("log")
     }
 
     pub fn get(&self, id: &DeedId) -> Result<Deed> {

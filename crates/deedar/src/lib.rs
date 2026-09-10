@@ -17,6 +17,7 @@ mod digest;
 mod fs;
 mod host;
 mod leave;
+pub mod log;
 mod migrate;
 mod timestamp;
 mod url;
@@ -28,7 +29,9 @@ pub use deed::{
     MailMessageId, Measure, ProducedBy, Result, Source, Step,
 };
 pub use digest::{deed_digest, resolve};
+pub use fs::Missing;
 pub use fs::{is_write_once_addr, FsStore};
+pub use log::{Entry as LogEntry, Head as LogHead};
 pub use timestamp::{imprint_hash, timestamp_req};
 pub use url::{open, StoreUrl};
 pub use wire::{
