@@ -4,6 +4,7 @@ members = [
     "crates/deed",
     "crates/deedar",
     "crates/deedar-cli",
+    "crates/deedar-mcp",
 ]
 
 [workspace.package]
@@ -17,6 +18,7 @@ rust-version = "1.85"
 deed = { path = "crates/deed" }
 deedar = { path = "crates/deedar" }
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 sha2 = "0.10"
 hmac = "0.12"
 ureq = "2.12"
