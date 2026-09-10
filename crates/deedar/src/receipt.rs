@@ -26,6 +26,7 @@
 //! bridge to the head the receiver kept from the first says whether that head
 //! is the same log grown or a different log entirely.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
