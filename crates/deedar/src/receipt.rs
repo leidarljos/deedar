@@ -560,6 +560,9 @@ mod tests {
         )
         .expect("receipt");
         let err = check_handover(dir.path()).expect_err("two heads passed");
-        assert!(format!("{err}").contains("where the rest of this satchel"), "{err}");
+        assert!(
+            format!("{err}").contains("where the rest of this satchel"),
+            "{err}"
+        );
     }
 }

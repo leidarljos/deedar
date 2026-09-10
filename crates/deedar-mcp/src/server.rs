@@ -327,9 +327,8 @@ impl DeedarServer {
     ) -> Result<Json<HandoverRow>, McpError> {
         let mut bridged_from = None;
         if let Some(path) = &args.since {
-            let text = std::fs::read_to_string(path).map_err(|_| {
-                McpError::invalid_params(format!("no bridge at {path}"), None)
-            })?;
+            let text = std::fs::read_to_string(path)
+                .map_err(|_| McpError::invalid_params(format!("no bridge at {path}"), None))?;
             let bridge = deedar::Bridge::parse(&text)
                 .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
             // A bag whose deeds check out against a head nobody has seen

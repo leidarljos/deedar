@@ -39,7 +39,7 @@ fn asked(text: String) -> Vec<PromptMessage> {
     vec![PromptMessage::new_text(Role::User, text)]
 }
 
-#[prompt_router(vis = pub(crate))]
+#[prompt_router(vis = "pub(crate)")]
 impl DeedarServer {
     /// Check a handover somebody sent: the payload, who packed it, and whether
     /// the deeds inside predate the asking.

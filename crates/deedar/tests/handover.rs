@@ -143,7 +143,10 @@ fn one_bag_is_one_head() {
     store.export_into(&later, &deeds).unwrap();
 
     let err = check_handover(bag.path()).expect_err("two heads in one bag passed");
-    assert!(format!("{err}").contains("where the rest of this satchel"), "{err}");
+    assert!(
+        format!("{err}").contains("where the rest of this satchel"),
+        "{err}"
+    );
 
     // Re-exported against the head the rest of the bag is against, it checks.
     store.export_into(&ids[0], &deeds).unwrap();
