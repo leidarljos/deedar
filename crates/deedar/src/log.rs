@@ -16,7 +16,14 @@
 //!   rather than replacing it, so a store cannot rewrite what it already
 //!   published without every reader who kept a head noticing.
 //!
-//! The hashing is the one in RFC 6962: a leaf is `SHA-256(0x00 || entry)` and
+//! The hashing is Certificate Transparency's, specified in RFC 9162
+//! (doi:10.17487/RFC9162), which obsoletes RFC 6962. The tree construction is
+//! unchanged between the two versions and the section numbers cited below are
+//! the ones that carried over; what 2.0 settles, and what this store takes
+//! from it, is that the head a reader keeps is a signed object rather than two
+//! numbers they are told to write down.
+//!
+//! A leaf is `SHA-256(0x00 || entry)` and
 //! a node is `SHA-256(0x01 || left || right)`, with the odd node at each level
 //! carried up. The prefixes are what stop a leaf being passed off as a node.
 //! Certificate Transparency uses this shape for the same reason a provenance
@@ -108,7 +115,7 @@ pub fn node_hash(left: &[u8; 32], right: &[u8; 32]) -> [u8; 32] {
     hasher.finalize().into()
 }
 
-/// The Merkle root over `leaves`, RFC 6962 section 2.1.
+/// The Merkle root over `leaves`, RFC 9162 section 2.1.
 ///
 /// Empty is the hash of the empty string, one leaf is its leaf hash, and
 /// otherwise the tree splits at the largest power of two below the width. That
@@ -165,7 +172,7 @@ impl Head {
 
 /// The audit path proving the leaf at `index` is in a tree of these leaves.
 ///
-/// RFC 6962 section 2.1.1: the sibling subtree root at each level, innermost
+/// RFC 9162 section 2.1.3: the sibling subtree root at each level, innermost
 /// first. A verifier that has the leaf recomputes the root from it and
 /// compares against a head it already trusts, which is what makes the proof
 /// worth more than the store's word.
@@ -239,7 +246,7 @@ pub fn verify_inclusion(
 /// that dropped or reordered anything already published cannot produce a set
 /// of nodes that yields both.
 ///
-/// RFC 6962 section 2.1.2. `None` when `old` is zero or wider than the tree,
+/// RFC 9162 section 2.1.4. `None` when `old` is zero or wider than the tree,
 /// since neither names a prefix of it.
 #[must_use]
 pub fn consistency_proof(leaves: &[[u8; 32]], old: usize) -> Option<Vec<[u8; 32]>> {

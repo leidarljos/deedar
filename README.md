@@ -159,7 +159,7 @@ just deedar check /tmp/bag2 --since /tmp/bag2/bridge.txt
 
 Without the bridge a clean answer means every deed is in the tree the
 sender is showing. With it, that tree is also the one the receiver
-already saw, grown rather than replaced. Both proof kinds are RFC 6962's
+already saw, grown rather than replaced. Both proof kinds are RFC 9162's
 (`log prove`, `log bridge`); `log head` is what a reader keeps between
 visits and `log audit` walks the log against the shelves, which is how a
 deletion becomes visible when every signature that is left is still

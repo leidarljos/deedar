@@ -100,6 +100,13 @@ pub struct HandoverRow {
     /// The one head every deed in the bag was against. Record it: the next
     /// handover from the same sender is checked against this.
     pub head: Option<HeadRow>,
+    /// Who signed that head, when the bag carried a signature over it. An
+    /// unsigned head means every proof above is against a head the bag
+    /// asserted about itself.
+    pub head_signer: Option<String>,
+    /// Whether that signer was on this reader's list, as opposed to merely
+    /// being the one the file named.
+    pub head_accepted: bool,
     /// Whether a bridge was checked, so the head above is the head this reader
     /// already held, grown rather than replaced.
     pub bridged_from: Option<usize>,
@@ -339,7 +346,15 @@ impl DeedarServer {
                 .map_err(|e| McpError::internal_error(e.to_string(), None))?;
             bridged_from = Some(bridge.from.size);
         }
-        let done = deedar::check_handover(&PathBuf::from(&args.dir))
+        // The reader's signer list, from their own store's layout. A surface
+        // that checked against no list would report the weaker of the two
+        // answers as though it were the stronger.
+        let accept = deedar::store_dir(&self.url)
+            .ok()
+            .and_then(|dir| deedar::Policy::read(&dir).ok())
+            .map(|policy| policy.signers)
+            .unwrap_or_default();
+        let done = deedar::check_handover(&PathBuf::from(&args.dir), &accept)
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
         Ok(Json(HandoverRow {
             proven: done.proven,
@@ -347,6 +362,8 @@ impl DeedarServer {
                 size: head.size,
                 root: head.root,
             }),
+            head_signer: done.head_signer.map(|signer| deedar::log::hex(&signer)),
+            head_accepted: done.head_accepted,
             bridged_from,
         }))
     }

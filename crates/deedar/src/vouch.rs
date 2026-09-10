@@ -110,6 +110,14 @@ pub fn beside(path: &Path) -> PathBuf {
 }
 
 /// The bytes a signature actually covers.
+/// The covered bytes, for a test in another module asserting that two
+/// signatures over the same content are not interchangeable.
+#[cfg(test)]
+#[must_use]
+pub fn covered_for_test(bytes: &[u8]) -> Vec<u8> {
+    covered(bytes)
+}
+
 fn covered(bytes: &[u8]) -> Vec<u8> {
     let mut message = Vec::with_capacity(DOMAIN.len() + 1 + bytes.len());
     message.extend_from_slice(DOMAIN);

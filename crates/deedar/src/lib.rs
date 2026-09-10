@@ -34,7 +34,7 @@ pub use digest::{deed_digest, resolve};
 pub use fs::{is_write_once_addr, FsStore};
 pub use fs::{Audit, Missing};
 pub use log::{Entry as LogEntry, Head as LogHead};
-pub use receipt::{check_handover, Bridge, Handover, Receipt};
+pub use receipt::{check_handover, sign_head, Bridge, Handover, Receipt, SignedHead};
 pub use timestamp::{imprint_hash, timestamp_req};
 pub use url::{open, StoreUrl};
 pub use vouch::{Checked, Vouch};
@@ -129,6 +129,15 @@ impl Client {
     /// Fails when `from` is zero or larger than this log.
     pub fn bridge(&self, from: usize) -> Result<Bridge> {
         self.store.bridge(from)
+    }
+
+    /// This log's head, signed when the store holds a key.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the log cannot be read or a configured key cannot be used.
+    pub fn signed_head(&self) -> Result<Option<SignedHead>> {
+        self.store.signed_head()
     }
 
     /// Write one deed into a satchel with the proof it was already logged.

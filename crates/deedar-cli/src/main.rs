@@ -203,7 +203,7 @@ fn cmd_vouch(url: &str, args: &[String]) -> Result<String, String> {
 /// clean answer means every deed is in the tree the sender is showing; with
 /// one it also means that tree is the one the receiver already saw, grown
 /// rather than replaced.
-fn cmd_check(args: &[String]) -> Result<String, String> {
+fn cmd_check(url: &str, args: &[String]) -> Result<String, String> {
     let mut dir: Option<PathBuf> = None;
     let mut bridge: Option<PathBuf> = None;
     let mut at = 0;
@@ -231,7 +231,16 @@ fn cmd_check(args: &[String]) -> Result<String, String> {
             bridge.from.size, bridge.to.size
         ));
     }
-    let done = deedar::check_handover(&dir).map_err(|e| e.to_string())?;
+    // The signer list is the reader's, and it lives in their own store's
+    // layout, the same place `vouch check` reads it from. A reader with no
+    // store gets the weaker answer and is told so rather than being given the
+    // stronger one for free.
+    let accept = deedar::store_dir(url)
+        .ok()
+        .and_then(|dir| deedar::Policy::read(&dir).ok())
+        .map(|policy| policy.signers)
+        .unwrap_or_default();
+    let done = deedar::check_handover(&dir, &accept).map_err(|e| e.to_string())?;
     out.push_str(&done.render());
     Ok(out)
 }
@@ -302,6 +311,12 @@ fn cmd_export(client: &mut Client, args: &[String]) -> Result<String, String> {
 fn cmd_log(client: &mut Client, args: &[String]) -> Result<String, String> {
     match args.first().map(String::as_str) {
         Some("head") | None => {
+            // Signed when this store holds a key, because the head is the one
+            // thing a reader keeps between visits and an unsigned one is two
+            // numbers they were handed.
+            if let Some(signed) = client.signed_head().map_err(|e| e.to_string())? {
+                return Ok(signed.render());
+            }
             let head = client.log_head().map_err(|e| e.to_string())?;
             Ok(format!("size={} root={}\n", head.size, head.root))
         }
@@ -441,7 +456,7 @@ fn run(args: Vec<String>) -> Result<String, String> {
         }
         Some("log") => cmd_log(&mut client, &rest[1..]),
         Some("export") => cmd_export(&mut client, &rest[1..]),
-        Some("check") => cmd_check(&rest[1..]),
+        Some("check") => cmd_check(&url, &rest[1..]),
         Some("vouch") => cmd_vouch(&url, &rest[1..]),
         Some("migrate") => {
             client.migrate().map_err(|e| e.to_string())?;

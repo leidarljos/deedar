@@ -48,14 +48,14 @@ fn an_exported_bag_checks_out_with_no_store() {
         store.export_into(id, &deeds).unwrap();
     }
 
-    let done = check_handover(bag.path()).unwrap();
+    let done = check_handover(bag.path(), &BTreeSet::new()).unwrap();
     assert_eq!(done.proven.len(), 3);
     let head = done.head.clone().expect("a head to record");
     assert_eq!(head, store.log_head().unwrap());
     // Handed the bag or the directory inside it, the same answer, because a
     // receiver is given a bag and should not have to learn the layout to
     // check it.
-    assert_eq!(check_handover(&deeds).unwrap(), done);
+    assert_eq!(check_handover(&deeds, &BTreeSet::new()).unwrap(), done);
 }
 
 /// Bytes swapped after the export are caught, which is the property the
@@ -72,14 +72,14 @@ fn bytes_that_moved_after_the_export_are_caught() {
     for id in &ids {
         store.export_into(id, &deeds).unwrap();
     }
-    check_handover(bag.path()).unwrap();
+    check_handover(bag.path(), &BTreeSet::new()).unwrap();
 
     let swapped = deeds.join(ids[1].as_str()).join("deed.bin");
     let mut bytes = std::fs::read(&swapped).unwrap();
     bytes.extend_from_slice(b"and one more thing");
     std::fs::write(&swapped, &bytes).unwrap();
 
-    let err = check_handover(bag.path()).expect_err("edited bytes passed");
+    let err = check_handover(bag.path(), &BTreeSet::new()).expect_err("edited bytes passed");
     assert!(format!("{err}").contains("hash to"), "{err}");
 }
 
@@ -97,7 +97,7 @@ fn a_later_deed_is_not_under_an_earlier_head() {
     let deeds = bag.path().join("data").join("deeds");
     store.export_into(&later, &deeds).unwrap();
 
-    let done = check_handover(bag.path()).unwrap();
+    let done = check_handover(bag.path(), &BTreeSet::new()).unwrap();
     let now = done.head.expect("a head");
     assert_ne!(now, kept, "a new deed left the head where it was");
 
@@ -142,7 +142,8 @@ fn one_bag_is_one_head() {
     let later = mint_more(&url, "deed-quote-secondwave");
     store.export_into(&later, &deeds).unwrap();
 
-    let err = check_handover(bag.path()).expect_err("two heads in one bag passed");
+    let err =
+        check_handover(bag.path(), &BTreeSet::new()).expect_err("two heads in one bag passed");
     assert!(
         format!("{err}").contains("where the rest of this satchel"),
         "{err}"
@@ -150,7 +151,7 @@ fn one_bag_is_one_head() {
 
     // Re-exported against the head the rest of the bag is against, it checks.
     store.export_into(&ids[0], &deeds).unwrap();
-    let done = check_handover(bag.path()).unwrap();
+    let done = check_handover(bag.path(), &BTreeSet::new()).unwrap();
     assert_eq!(done.proven.len(), 2);
     assert_ne!(
         early,
@@ -191,7 +192,7 @@ fn a_receipt_is_the_entry_the_log_holds() {
     for id in &ids {
         store.export_into(id, &deeds).unwrap();
     }
-    let done = check_handover(bag.path()).unwrap();
+    let done = check_handover(bag.path(), &BTreeSet::new()).unwrap();
     assert_eq!(done.proven.into_iter().collect::<BTreeSet<_>>(), asked);
 }
 

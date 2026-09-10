@@ -6,8 +6,9 @@
 //! sender who mints a deed the morning they are asked for it produces bytes
 //! that are just as intact and a signature that is just as good.
 //!
-//! The answer the transparency logs settled on (RFC 6962,
-//! doi:10.17487/RFC6962) is that a deed travels with the path from its leaf to
+//! The answer the transparency logs settled on (RFC 9162,
+//! doi:10.17487/RFC9162, which obsoletes RFC 6962) is that a deed travels with
+//! the path from its leaf to
 //! a tree head, and the head is a short thing a receiver can write down. A
 //! sender who wants to slip in a deed after the fact has to produce a head
 //! that covers it, and that head will not be the one the receiver already
@@ -31,6 +32,7 @@ use sha2::{Digest, Sha256};
 
 use deed::{Error, Result};
 
+use crate::attest::ED25519;
 use crate::log::{self, Head};
 
 /// One deed's place in a log, as an export writes it beside the bytes.
@@ -169,6 +171,155 @@ impl Receipt {
     }
 }
 
+/// A head with a signature over it.
+///
+/// The head is the one thing a receiver keeps between handovers, and until it
+/// is signed it is two numbers that arrived in the same bag as the deeds they
+/// are supposed to vouch for. A sender who wants to show two readers different
+/// histories has nothing to forge: they write the size and root they like.
+///
+/// RFC 9162 makes the signed tree head the object rather than the pair, and
+/// this is that: the same size and root, over a domain-separated message, by a
+/// key a reader either accepts or does not.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SignedHead {
+    /// What is being vouched for.
+    pub head: Head,
+    /// The verifying key, as 32 bytes.
+    pub signer: [u8; 32],
+    /// The signature over the covered bytes.
+    pub signature: [u8; 64],
+}
+
+/// Domain separation, so a signature over a head cannot be replayed as a
+/// signature over a manifest or a deed.
+const HEAD_DOMAIN: &[u8] = b"deedar-head-v1";
+
+/// The bytes a head signature actually covers.
+fn head_message(head: &Head) -> Vec<u8> {
+    let mut message = Vec::from(HEAD_DOMAIN);
+    message.push(0);
+    message.extend_from_slice(format!("{} {}", head.size, head.root).as_bytes());
+    message
+}
+
+impl SignedHead {
+    /// The file a handover carries.
+    #[must_use]
+    pub fn render(&self) -> String {
+        format!(
+            "size={} root={} {ED25519} {} {}
+",
+            self.head.size,
+            self.head.root,
+            log::hex(&self.signer),
+            log::hex(&self.signature)
+        )
+    }
+
+    /// Read one back.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the line is not a size, a root, this scheme, a 32 byte key
+    /// and a 64 byte signature.
+    pub fn parse(text: &str) -> Result<Self> {
+        let mut fields = text.split_whitespace();
+        let (Some(size), Some(root), Some(scheme), Some(key), Some(sig), None) = (
+            fields.next(),
+            fields.next(),
+            fields.next(),
+            fields.next(),
+            fields.next(),
+            fields.next(),
+        ) else {
+            return Err(Error::Evidence("head: not a signed head line".into()));
+        };
+        if scheme != ED25519 {
+            return Err(Error::Evidence(format!("head: scheme {scheme:?}")));
+        }
+        let size = size
+            .strip_prefix("size=")
+            .ok_or_else(|| Error::Evidence("head: no size".into()))?;
+        let root = root
+            .strip_prefix("root=")
+            .ok_or_else(|| Error::Evidence("head: no root".into()))?;
+        let signer =
+            crate::attest::from_hex(key).ok_or_else(|| Error::Evidence("head: key".into()))?;
+        let mut signature = [0u8; 64];
+        if sig.len() != 128 {
+            return Err(Error::Evidence("head: signature length".into()));
+        }
+        for (slot, pair) in signature.iter_mut().zip(sig.as_bytes().chunks_exact(2)) {
+            let pair =
+                std::str::from_utf8(pair).map_err(|_| Error::Evidence("head: hex".into()))?;
+            *slot =
+                u8::from_str_radix(pair, 16).map_err(|_| Error::Evidence("head: hex".into()))?;
+        }
+        Ok(Self {
+            head: Head {
+                size: number(size, "size")? as usize,
+                root: root.to_string(),
+            },
+            signer,
+            signature,
+        })
+    }
+
+    /// Whether the signature covers this head, and whether the key is one the
+    /// reader accepts.
+    ///
+    /// The two are reported apart, the same way a manifest signature is. A
+    /// signature that verifies against the key it names says the head and the
+    /// signature go together and nothing about who made them, and a reader who
+    /// gave no signer list has to be told that is what they got.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the signature does not cover the head, or names a key the
+    /// reader does not accept.
+    pub fn check(&self, accept: &BTreeSet<[u8; 32]>) -> Result<bool> {
+        let key = ed25519_dalek::VerifyingKey::from_bytes(&self.signer)
+            .map_err(|_| Error::Evidence("head: not a verifying key".into()))?;
+        ed25519_dalek::Verifier::verify(
+            &key,
+            &head_message(&self.head),
+            &ed25519_dalek::Signature::from_bytes(&self.signature),
+        )
+        .map_err(|_| Error::Evidence("head: the signature does not cover this head".into()))?;
+        if accept.is_empty() {
+            return Ok(false);
+        }
+        if !accept.contains(&self.signer) {
+            return Err(Error::Evidence(format!(
+                "head: signed by {}, which is not a key this reader accepts",
+                log::hex(&self.signer)
+            )));
+        }
+        Ok(true)
+    }
+}
+
+/// Sign a head with this host's key.
+///
+/// # Errors
+///
+/// Fails when no signing key is configured.
+pub fn sign_head(head: &Head) -> Result<SignedHead> {
+    let key: ed25519_dalek::SigningKey = crate::host::load_signing_key()?.ok_or_else(|| {
+        Error::Evidence(
+            "no signing key: set DEEDAR_HOST_SIGNING_KEY to a 32 byte seed outside the store"
+                .into(),
+        )
+    })?;
+    let signature = ed25519_dalek::Signer::sign(&key, &head_message(head));
+    Ok(SignedHead {
+        head: head.clone(),
+        signer: key.verifying_key().to_bytes(),
+        signature: signature.to_bytes(),
+    })
+}
+
 /// One head against an earlier one from the same log.
 ///
 /// The receipt says a deed is in the tree the sender is showing. It says
@@ -259,22 +410,54 @@ pub struct Handover {
     /// The head every one of them was against, which is what to record for
     /// next time. Absent only when the handover carried no deeds.
     pub head: Option<Head>,
+    /// Who signed that head, when the bag carried a signature over it.
+    pub head_signer: Option<[u8; 32]>,
+    /// Whether that signer was on the reader's list, as opposed to merely
+    /// being the one the file named.
+    pub head_accepted: bool,
 }
 
 impl Handover {
-    /// One line a person reads.
+    /// One line a person reads, then what it does not say.
     #[must_use]
     pub fn render(&self) -> String {
-        match &self.head {
-            Some(head) => format!(
-                "{} deeds proven against a log of {} entries, root {}\n",
-                self.proven.len(),
-                head.size,
-                head.root
+        let Some(head) = &self.head else {
+            return "no deeds travelled with this satchel\n".to_string();
+        };
+        let mut out = format!(
+            "{} deeds proven against a log of {} entries, root {}\n",
+            self.proven.len(),
+            head.size,
+            head.root
+        );
+        match self.head_signer {
+            Some(signer) if self.head_accepted => {
+                out.push_str(&format!(
+                    "head signed by {} (accepted)\n",
+                    log::hex(&signer)
+                ));
+            }
+            Some(signer) => out.push_str(&format!(
+                "head signed by {}, and no signer list was given, so this says the head and the \
+                 signature go together and nothing about who made them\n",
+                log::hex(&signer)
+            )),
+            // Worth saying rather than leaving as an absence. Every proof here
+            // is against this head, so a head nobody vouched for is a bag that
+            // is internally consistent and unattributed.
+            None => out.push_str(
+                "the head is unsigned, so every proof above is against a head this bag asserted \
+                 about itself\n",
             ),
-            None => "no deeds travelled with this satchel\n".to_string(),
         }
+        out
     }
+}
+
+/// The file a handover carries its signed head in.
+#[must_use]
+pub fn head_beside(deeds: &Path) -> PathBuf {
+    deeds.join("head")
 }
 
 /// Check every deed a handover carried.
@@ -293,7 +476,7 @@ impl Handover {
 /// Fails when a deed carries no receipt, when bytes and digest disagree, when
 /// a path does not reach the head, or when the receipts disagree about which
 /// head they are against.
-pub fn check_handover(dir: &Path) -> Result<Handover> {
+pub fn check_handover(dir: &Path, accept: &BTreeSet<[u8; 32]>) -> Result<Handover> {
     let root = deeds_in(dir).ok_or_else(|| {
         Error::Evidence(format!(
             "{}: no deeds here and none under data/deeds",
@@ -356,9 +539,41 @@ pub fn check_handover(dir: &Path) -> Result<Handover> {
         proven.push(receipt.id);
     }
 
+    // The signed head, when one travelled. It has to be the head the receipts
+    // are against: a bag whose deeds prove membership in one tree and whose
+    // signature covers another is a bag where the signature vouches for
+    // nothing that arrived.
+    let mut head_signer = None;
+    let mut head_accepted = false;
+    if let Ok(text) = std::fs::read_to_string(head_beside(&root)) {
+        match SignedHead::parse(&text).and_then(|signed| {
+            let accepted = signed.check(accept)?;
+            Ok((signed, accepted))
+        }) {
+            Ok((signed, accepted)) => {
+                if head.as_ref().is_some_and(|held| *held != signed.head) {
+                    wrong.push(format!(
+                        "the signed head covers a log of {} entries and the deeds prove membership \
+                         in one of {}",
+                        signed.head.size,
+                        head.as_ref().map_or(0, |held| held.size)
+                    ));
+                }
+                head_signer = Some(signed.signer);
+                head_accepted = accepted;
+            }
+            Err(e) => wrong.push(format!("head: {e}")),
+        }
+    }
+
     if wrong.is_empty() {
         proven.sort();
-        Ok(Handover { proven, head })
+        Ok(Handover {
+            proven,
+            head,
+            head_signer,
+            head_accepted,
+        })
     } else {
         Err(Error::Evidence(format!(
             "this handover does not check out:\n{}",
@@ -508,6 +723,93 @@ mod tests {
         assert!(format!("{err}").contains("dropped or rewritten"), "{err}");
     }
 
+    /// A head that nobody signed is reported as one nobody signed.
+    ///
+    /// Every proof in a bag is against its head, so an unsigned head makes the
+    /// whole bag internally consistent and unattributed: a sender showing two
+    /// readers different histories has nothing to forge. That is worth a line
+    /// rather than an absence.
+    #[test]
+    fn an_unsigned_head_says_so() {
+        let done = Handover {
+            proven: vec!["deed-file-one".into()],
+            head: Some(Head {
+                size: 4,
+                root: "ab".repeat(32),
+            }),
+            head_signer: None,
+            head_accepted: false,
+        };
+        let said = done.render();
+        assert!(said.contains("the head is unsigned"), "{said}");
+        assert!(said.contains("asserted about itself"), "{said}");
+
+        let named = Handover {
+            head_signer: Some([7u8; 32]),
+            ..done.clone()
+        };
+        let said = named.render();
+        assert!(said.contains("nothing about who made them"), "{said}");
+
+        let accepted = Handover {
+            head_accepted: true,
+            ..named
+        };
+        assert!(accepted.render().contains("(accepted)"));
+    }
+
+    /// A head signature covers the head and stops covering a different one,
+    /// and it is not replayable as a signature over anything else.
+    #[test]
+    fn a_head_signature_covers_that_head_only() {
+        let key = ed25519_dalek::SigningKey::from_bytes(&[5u8; 32]);
+        let head = Head {
+            size: 9,
+            root: "3c".repeat(32),
+        };
+        let signed = SignedHead {
+            head: head.clone(),
+            signer: key.verifying_key().to_bytes(),
+            signature: ed25519_dalek::Signer::sign(&key, &head_message(&head)).to_bytes(),
+        };
+        // Through the file, since the file is what travels.
+        let read = SignedHead::parse(&signed.render()).expect("round trips");
+        assert_eq!(read, signed);
+        assert!(!read.check(&BTreeSet::new()).expect("verifies"));
+        assert!(read
+            .check(&BTreeSet::from([signed.signer]))
+            .expect("verifies"));
+
+        // A stranger's list refuses it rather than reporting it.
+        let stranger = ed25519_dalek::SigningKey::from_bytes(&[6u8; 32])
+            .verifying_key()
+            .to_bytes();
+        let err = read
+            .check(&BTreeSet::from([stranger]))
+            .expect_err("a key nobody accepts passed");
+        assert!(
+            format!("{err}").contains("not a key this reader accepts"),
+            "{err}"
+        );
+
+        // The same signature over a head one entry longer does not verify.
+        let moved = SignedHead {
+            head: Head {
+                size: 10,
+                ..signed.head.clone()
+            },
+            ..signed.clone()
+        };
+        let err = moved
+            .check(&BTreeSet::new())
+            .expect_err("a moved head passed");
+        assert!(format!("{err}").contains("does not cover"), "{err}");
+
+        // And it is domain separated from the manifest signature, so one
+        // cannot be presented as the other.
+        assert_ne!(head_message(&head), crate::vouch::covered_for_test(b"x"));
+    }
+
     /// A handover is checked whole: a deed with no receipt fails it, and so
     /// does one against a head the rest of the bag does not share.
     #[test]
@@ -521,17 +823,20 @@ mod tests {
             std::fs::write(out.join("deed.bin"), body(at)).expect("bytes");
             std::fs::write(out.join("proof.txt"), receipt_for(&all, at).render()).expect("receipt");
         }
-        let done = check_handover(dir.path()).expect("checks out");
+        let done = check_handover(dir.path(), &BTreeSet::new()).expect("checks out");
         assert_eq!(done.proven.len(), 3);
         assert_eq!(done.head.as_ref().expect("a head").size, 6);
         // Handed the bag or handed the deeds, the same answer.
-        assert_eq!(check_handover(&deeds).expect("checks out"), done);
+        assert_eq!(
+            check_handover(&deeds, &BTreeSet::new()).expect("checks out"),
+            done
+        );
 
         // A deed that arrived with nothing saying it predates the asking.
         let bare = deeds.join("deed-thing-late");
         std::fs::create_dir_all(&bare).expect("dirs");
         std::fs::write(bare.join("deed.bin"), b"minted this morning").expect("bytes");
-        let err = check_handover(dir.path()).expect_err("a bare deed passed");
+        let err = check_handover(dir.path(), &BTreeSet::new()).expect_err("a bare deed passed");
         assert!(format!("{err}").contains("no proof.txt"), "{err}");
         std::fs::remove_dir_all(&bare).expect("clean up");
 
@@ -559,7 +864,7 @@ mod tests {
             .render(),
         )
         .expect("receipt");
-        let err = check_handover(dir.path()).expect_err("two heads passed");
+        let err = check_handover(dir.path(), &BTreeSet::new()).expect_err("two heads passed");
         assert!(
             format!("{err}").contains("where the rest of this satchel"),
             "{err}"

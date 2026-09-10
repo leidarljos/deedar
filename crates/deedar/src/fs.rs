@@ -356,6 +356,24 @@ impl FsStore {
         })
     }
 
+    /// This log's head, with a signature over it when a key is configured.
+    ///
+    /// A head is the one thing a reader keeps between handovers, so an
+    /// unsigned one is two numbers that arrived in the same bag as the deeds
+    /// they vouch for. Nothing here can force a store to hold a key, so an
+    /// absent key is reported as absent rather than made up: `Ok(None)`.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the log cannot be read, or a configured key cannot be used.
+    pub fn signed_head(&self) -> Result<Option<crate::receipt::SignedHead>> {
+        let head = self.log_head()?;
+        match crate::host::load_signing_key()? {
+            Some(_) => crate::receipt::sign_head(&head).map(Some),
+            None => Ok(None),
+        }
+    }
+
     /// The record joining a head somebody already holds to this log's own.
     ///
     /// A receiver who took a satchel last month wrote down a head. Handing
@@ -484,6 +502,16 @@ impl FsStore {
         let path = out.join("proof.txt");
         atomic_write(&path, receipt.render().as_bytes())?;
         written.push(path);
+
+        // The head every receipt in this bag is against, signed when this
+        // store holds a key. Rewritten on each export rather than written
+        // once, so a bag whose deeds were exported across a growing log ends
+        // up naming the head they actually share, or failing the check.
+        if let Some(signed) = self.signed_head()? {
+            let path = crate::receipt::head_beside(into);
+            atomic_write(&path, signed.render().as_bytes())?;
+            written.push(path);
+        }
         Ok(written)
     }
 
