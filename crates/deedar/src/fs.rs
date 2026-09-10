@@ -281,6 +281,60 @@ impl FsStore {
         Ok(out)
     }
 
+    /// Write one deed into a satchel: its canonical bytes, its evidence, and
+    /// the proof it was in this store's log before the satchel was packed.
+    ///
+    /// The proof is the part that is not a copy. Bytes and a signature travel
+    /// fine on their own and say a writer vouched for them; they do not say
+    /// the deed existed before somebody wanted to hand it over. An inclusion
+    /// path against a head the receiver can record is what separates a deed
+    /// from a deed minted for the occasion.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the deed is absent, the log has no entry for it, or `into`
+    /// cannot be written.
+    pub fn export_into(&self, id: &DeedId, into: &Path) -> Result<Vec<PathBuf>> {
+        let deed = self.get(id)?;
+        let out = into.join(id.as_str());
+        fs::create_dir_all(&out).map_err(|e| Error::Io(e.to_string()))?;
+
+        let mut written = Vec::new();
+        let bytes = crate::wire::deed_bytes(&deed);
+        let path = out.join("deed.bin");
+        atomic_write(&path, &bytes)?;
+        written.push(path);
+
+        if let Ok(raw) = fs::read(self.evidence_path(id)) {
+            let path = out.join("evidence.bin");
+            atomic_write(&path, &raw)?;
+            written.push(path);
+        }
+        // The host sidecar travels when there is one: it is the signature a
+        // receiver checks the bytes against.
+        if let Ok(raw) = fs::read(crate::host::sidecar(&self.dir, id)) {
+            let path = out.join("host");
+            atomic_write(&path, &raw)?;
+            written.push(path);
+        }
+
+        let (index, audit) = self.log_proof(id)?;
+        let head = self.log_head()?;
+        let mut proof = format!(
+            "id={id}\ndigest={}\nindex={index}\nsize={}\nroot={}\n",
+            crate::digest::deed_digest(&deed),
+            head.size,
+            head.root
+        );
+        for step in &audit {
+            proof.push_str(&format!("path={}\n", crate::log::hex(step)));
+        }
+        let path = out.join("proof.txt");
+        atomic_write(&path, proof.as_bytes())?;
+        written.push(path);
+        Ok(written)
+    }
+
     fn log_leaves(&self) -> Result<Vec<[u8; 32]>> {
         Ok(self
             .log_entries()?

@@ -158,6 +158,59 @@ fn evidence_many(url: &str, args: &[String]) -> Result<Report, String> {
     })
 }
 
+/// Write deeds somewhere else, with the proof they were logged here first.
+///
+/// Takes one accession, several, or `-` to read them from stdin, which is how
+/// `evidence` and `current` already take a list. That is what lets a tracker
+/// name what a handover needs without this store having to read the tracker's
+/// format: the list crosses on a pipe, the way the accession crosses
+/// everywhere else in this stack.
+///
+/// Bytes and a signature travel fine on their own and say a writer vouched for
+/// them. They do not say the deed existed before somebody wanted to hand it
+/// over. The inclusion proof beside them does.
+fn cmd_export(client: &mut Client, args: &[String]) -> Result<String, String> {
+    let mut into: Option<PathBuf> = None;
+    let mut rest: Vec<String> = Vec::new();
+    let mut at = 0;
+    while at < args.len() {
+        match args[at].as_str() {
+            "--into" => {
+                at += 1;
+                into = Some(PathBuf::from(
+                    args.get(at).ok_or("--into needs a directory")?,
+                ));
+            }
+            other => rest.push(other.to_string()),
+        }
+        at += 1;
+    }
+    let into = into.ok_or("export needs --into DIR")?;
+    let ids = ids_from(&rest, "export")?;
+    let mut wrote = 0usize;
+    let mut refused = Vec::new();
+    for raw in &ids {
+        match client
+            .resolve(raw)
+            .and_then(|id| client.export_into(&id, &into))
+        {
+            Ok(files) => wrote += files.len(),
+            Err(e) => refused.push(format!("{raw}\t{e}")),
+        }
+    }
+    if refused.is_empty() {
+        return Ok(format!("exported {} deeds, {wrote} files\n", ids.len()));
+    }
+    // Asked for and not supplied is the receiver's problem to know about, so
+    // it leaves on the error channel rather than in a line they have to spot.
+    Err(format!(
+        "{} of {} could not be exported:\n{}\n",
+        refused.len(),
+        ids.len(),
+        refused.join("\n")
+    ))
+}
+
 /// The append-only log: what the store has issued, and whether it still
 /// serves it.
 ///
@@ -281,6 +334,7 @@ fn run(args: Vec<String>) -> Result<String, String> {
             Ok(format_one(&d))
         }
         Some("log") => cmd_log(&mut client, &rest[1..]),
+        Some("export") => cmd_export(&mut client, &rest[1..]),
         Some("migrate") => {
             client.migrate().map_err(|e| e.to_string())?;
             Ok("layout=1\n".into())
@@ -291,8 +345,8 @@ fn run(args: Vec<String>) -> Result<String, String> {
         )),
         Some(other) => Err(format!("unknown command {other}")),
         None => Err(
-            "usage: deedar [--url FILE] create|get|list|trail|evidence|delete|leave|timestamp|current|log|migrate\n\
-             evidence and current take one id, several ids, or - to read them from stdin\n\
+            "usage: deedar [--url FILE] create|get|list|trail|evidence|delete|leave|timestamp|current|log|export|migrate\n\
+             evidence, current and export take one id, several ids, or - to read them from stdin\n\
              log takes head, list, audit, or prove ID"
                 .into(),
         ),

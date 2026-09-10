@@ -108,6 +108,15 @@ impl Client {
         self.store.log_proof(id)
     }
 
+    /// Write one deed into a satchel with the proof it was already logged.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the deed is absent, unlogged, or `into` cannot be written.
+    pub fn export_into(&self, id: &DeedId, into: &Path) -> Result<Vec<PathBuf>> {
+        self.store.export_into(id, into)
+    }
+
     /// What the log says the store holds, against what it will hand over.
     ///
     /// # Errors
