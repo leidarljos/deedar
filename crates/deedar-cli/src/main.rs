@@ -860,12 +860,25 @@ fn join_grants(grants: &[Grant]) -> String {
 mod url_tests {
     use super::*;
 
+    /// One sitting at a time over the process globals these tests read.
+    ///
+    /// HOME, XDG_DATA_HOME and DEEDAR_URL belong to the process, not to a
+    /// test, and cargo runs these in parallel. Without the lock one test sets
+    /// HOME while another is between its own set and its read, and the second
+    /// resolves a store under the first's temporary directory. The failure is
+    /// a wrong path in an assertion that looks like it is about path
+    /// resolution, so it reads as a bug in the code under test.
+    static ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     /// Point HOME and XDG at a scratch directory for one closure.
     fn with_home<T>(
         dir: &std::path::Path,
         xdg: Option<&std::path::Path>,
         f: impl FnOnce() -> T,
     ) -> T {
+        // Held across the set, the read and the restore. A lock taken only
+        // around the set is a lock that guards nothing.
+        let guard = ENV.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let old_home = env::var_os("HOME");
         let old_xdg = env::var_os("XDG_DATA_HOME");
         let old_url = env::var_os("DEEDAR_URL");
@@ -887,6 +900,7 @@ mod url_tests {
         if let Some(v) = old_url {
             env::set_var("DEEDAR_URL", v);
         }
+        drop(guard);
         out
     }
 
