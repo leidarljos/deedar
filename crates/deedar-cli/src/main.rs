@@ -295,12 +295,20 @@ fn cmd_log(client: &mut Client, args: &[String]) -> Result<String, String> {
             for id in &audit.unlogged {
                 out.push_str(&format!("unlogged {id}\n"));
             }
-            // A store from before the log is not a store that lost something,
-            // and saying so is more use than a count of complaints.
-            if audit.predates_the_log() {
+            // A store that fell behind the log is not one that lost something,
+            // and saying so is more use than a count of complaints. The test
+            // is that nothing is missing, not that the log is empty: a store
+            // holding deeds from both sides of the log still wants this.
+            if audit.backfill_settles_it() {
+                let older = if audit.predates_the_log() {
+                    "this store predates the log"
+                } else {
+                    "this store fell behind the log"
+                };
                 out.push_str(&format!(
-                    "{} deeds and an empty log: this store predates it. `deedar log backfill` \
-                     writes what is on the shelves, dated from the evidence where there is one.\n",
+                    "nothing is missing and {} deeds are unlogged: {older}. \
+                     `deedar log backfill` writes what is on the shelves, dated from the \
+                     evidence where there is one.\n",
                     audit.unlogged.len()
                 ));
             }

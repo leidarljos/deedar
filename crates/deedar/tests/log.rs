@@ -171,6 +171,7 @@ fn a_store_that_predates_the_log_is_not_clean_and_not_tampered() {
     assert!(audit.missing.is_empty(), "nothing was lost, only unlogged");
     // The state has its own name, because the advice differs.
     assert!(audit.predates_the_log(), "{audit:?}");
+    assert!(audit.backfill_settles_it(), "{audit:?}");
 
     // Backfilling is the way forward, and afterwards the store answers for
     // itself in both directions.
@@ -195,4 +196,43 @@ fn a_store_that_predates_the_log_is_not_clean_and_not_tampered() {
 
     // Backfilling twice adds nothing: the second run has nothing unlogged.
     assert!(store.log_backfill().unwrap().is_empty());
+}
+
+/// A store holding deeds from both sides of the log is behind, not tampered
+/// with, and wants the same advice as one that predates it.
+///
+/// The first version of the check asked whether the log was empty, so a store
+/// with nine deeds from before it and one from after got no advice at all: not
+/// clean, not tampered, and told nothing. The question is whether anything was
+/// lost, not how much has been logged so far.
+#[test]
+fn a_store_that_fell_behind_still_gets_told_to_backfill() {
+    let url = tmp_url();
+    three(&url);
+
+    // Drop the log, then log one more deed the way a rebuilt binary would.
+    let dir = deedar::store_dir(&url).unwrap();
+    std::fs::remove_file(dir.join("log")).expect("remove the log");
+    let mut client = Client::open(&url).unwrap();
+    client
+        .create(quote(
+            "deed-quote-after",
+            "written once the log existed",
+            "https://example.invalid/a",
+        ))
+        .unwrap();
+
+    let store = store(&url);
+    let audit = store.log_audit().unwrap();
+    assert_eq!(audit.logged, 1, "{audit:?}");
+    assert_eq!(audit.unlogged.len(), 3, "{audit:?}");
+    assert!(audit.missing.is_empty(), "nothing was lost");
+    // Not a store older than the log, because the log holds something.
+    assert!(!audit.predates_the_log(), "{audit:?}");
+    // But backfilling is still the whole answer, which is what the operator
+    // needs to be told.
+    assert!(audit.backfill_settles_it(), "{audit:?}");
+
+    store.log_backfill().unwrap();
+    assert!(store.log_audit().unwrap().is_clean());
 }

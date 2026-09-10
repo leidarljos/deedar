@@ -36,13 +36,23 @@ impl Audit {
         self.missing.is_empty() && self.unlogged.is_empty()
     }
 
-    /// Whether the only complaint is that nothing was ever logged.
+    /// Whether backfilling is the whole answer.
     ///
-    /// Worth its own question: a store from before the log is not a store that
-    /// lost something, and the two want different advice.
+    /// True when nothing was lost and something was never logged, which is a
+    /// store that is behind rather than one that has been tampered with. The
+    /// condition is not that the log is empty: a store with nine deeds from
+    /// before the log and one from after has a log, is missing nothing, and
+    /// still wants exactly this advice.
+    #[must_use]
+    pub fn backfill_settles_it(&self) -> bool {
+        self.missing.is_empty() && !self.unlogged.is_empty()
+    }
+
+    /// Whether nothing here was ever logged, which is a store older than the
+    /// log rather than one that fell behind it.
     #[must_use]
     pub fn predates_the_log(&self) -> bool {
-        self.logged == 0 && self.missing.is_empty() && !self.unlogged.is_empty()
+        self.logged == 0 && self.backfill_settles_it()
     }
 }
 
