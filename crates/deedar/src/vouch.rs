@@ -91,6 +91,16 @@ impl Vouch {
     }
 }
 
+/// The manifest inside a satchel, which is the file worth signing.
+///
+/// A receiver is handed a directory, not a filename. Making them know which
+/// file carries the digests before they can check who signed them is making
+/// them learn the format in order to verify it.
+#[must_use]
+pub fn manifest_in(dir: &Path) -> PathBuf {
+    dir.join("manifest-sha256.txt")
+}
+
 /// Where the signature for `path` lives.
 #[must_use]
 pub fn beside(path: &Path) -> PathBuf {
