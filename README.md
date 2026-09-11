@@ -1,5 +1,9 @@
 # deedar
 
+<p align="center">
+  <img src="docs/logo/icon.svg" width="120" height="120" alt="deedar: a receipt pinned through a gold seal">
+</p>
+
 A unit of work produces something. deedar records it as a **deed**:
 here is the work, this is its identity, take it. The next unit
 opens that deed by `id`.

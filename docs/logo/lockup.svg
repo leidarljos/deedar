@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 220" role="img" aria-label="deedar">
+  <rect width="720" height="220" fill="#0B0B0A"/>
+  <g transform="translate(18 10) scale(1)">
+    <svg x="0" y="0" width="200" height="200" viewBox="0 0 200 200">
+      <rect width="200" height="200" rx="36" fill="#0B0B0A" stroke="#F4F0E6" stroke-width="4"/>
+      <g transform="rotate(-7 100 100)">
+        <rect x="52" y="38" width="96" height="124" rx="6" fill="#F4F0E6"/>
+        <line x1="68" y1="68" x2="132" y2="68" stroke="#0B0B0A" stroke-width="4" stroke-linecap="round" opacity="0.28"/>
+        <line x1="68" y1="88" x2="124" y2="88" stroke="#0B0B0A" stroke-width="4" stroke-linecap="round" opacity="0.28"/>
+        <line x1="68" y1="108" x2="116" y2="108" stroke="#0B0B0A" stroke-width="4" stroke-linecap="round" opacity="0.28"/>
+      </g>
+      <circle cx="128" cy="138" r="26" fill="#E6A23C"/>
+      <circle cx="128" cy="138" r="16" fill="none" stroke="#0B0B0A" stroke-width="3" opacity="0.35"/>
+      <circle cx="128" cy="122" r="8" fill="#E6A23C" stroke="#0B0B0A" stroke-width="2"/>
+      <rect x="125.2" y="122" width="5.6" height="22" rx="2.8" fill="#E6A23C" stroke="#0B0B0A" stroke-width="1.5"/>
+    </svg>
+  </g>
+  <text x="250" y="138" font-family="Iowan Old Style, Palatino Linotype, Palatino, Charter, serif" font-size="86" font-weight="600" fill="#F4F0E6" letter-spacing="-1.2">deedar</text>
+</svg>
