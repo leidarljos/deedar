@@ -124,34 +124,25 @@ then fails.
 
 ## Handing work over
 
-`export` writes deeds into a directory somebody else will open: the
-canonical bytes, the evidence, the host signature when there is one,
-and a `proof.txt`.
+`export` writes deeds, evidence, the host signature, and a `proof.txt`: the
+deed's place in this store's log, the path to the log head, and what the leaf
+hashes over, so a receiver with nothing but the bag can rebuild the leaf.
+`check` is the other end and needs no store; it answers with the head to
+record. `log bridge SIZE` proves the log grew from a recorded head without a
+rewrite, and `check --since` verifies it. The head is signed when the store
+holds a key; `check` says who signed it and whether that key is accepted.
+`vouch sign`/`vouch check` cover the manifest, not the deeds; a receiver wants
+both.
 
 ```sh
 just deedar export --into /tmp/bag/data/deeds deed-patch-note
 # or the list a tracker names
 vissue recall <id> --deeds-only | deedar export --into /tmp/bag/data/deeds -
 ```
-
-The proof is the part that is not a copy. Bytes and a signature travel
-fine on their own and say a writer vouched for them; they do not say the
-deed existed before somebody asked for it. `proof.txt` carries the
-deed's place in this store's append-only log, the path from its leaf to
-the log head, and the rest of what that leaf hashes over. A receiver
-holding nothing but the bag can rebuild the leaf and walk it.
-
-`check` is the other end, and it is the one verb that needs no store:
-
 ```sh
 just deedar check /tmp/bag
 # 3 deeds proven against a log of 41 entries, root 9f2c...
 ```
-
-Write that head down. Every deed in a bag has to be against one head, so
-there is one thing to keep, and the next bag from the same sender is
-checked against it:
-
 ```sh
 # the sender, told which head the receiver holds
 just deedar log bridge 41 > /tmp/bag2/bridge.txt
@@ -160,24 +151,6 @@ just deedar check /tmp/bag2 --since /tmp/bag2/bridge.txt
 # the log grew from 41 entries to 58 without dropping or rewriting one
 # 2 deeds proven against a log of 58 entries, root 4a71...
 ```
-
-Without the bridge a clean answer means every deed is in the tree the
-sender is showing. With it, that tree is also the one the receiver
-already saw, grown rather than replaced. Both proof kinds are RFC 9162's
-(`log prove`, `log bridge`); `log head` is what a reader keeps between
-visits and `log audit` walks the log against the shelves, which is how a
-deletion becomes visible when every signature that is left is still
-good.
-
-The head itself is signed when the store holds a signing key, and the bag
-carries it. `check` says who signed it, and whether that key is one this
-reader accepts, because a head nobody vouched for makes a bag internally
-consistent and unattributed: every proof in it is against a head the bag
-asserted about itself.
-
-`vouch sign` and `vouch check` cover the manifest of a bag rather than
-the deeds inside it. They answer who packed it; the proofs answer
-whether what is in it predates the packing. A receiver wants both.
 
 Other kinds and store law: [DESIGN.md](DESIGN.md).
 
