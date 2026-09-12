@@ -63,8 +63,9 @@ fn export_many(c: &mut Criterion) {
     for (n, m) in [(1_000usize, 10usize), (1_000, 100), (5_000, 100)] {
         let (_dir, store, ids) = store_with(n);
         group.throughput(Throughput::Elements(m as u64));
+        // Through the store one deed at a time, which is the library's loop.
         group.bench_with_input(
-            BenchmarkId::new(format!("n={n}"), m),
+            BenchmarkId::new(format!("export_into each, n={n}"), m),
             &m,
             |b, _| {
                 b.iter_batched(
@@ -72,6 +73,23 @@ fn export_many(c: &mut Criterion) {
                     |bag| {
                         for id in &ids[..m] {
                             store.export_into(id, bag.path()).expect("export");
+                        }
+                    },
+                    criterion::BatchSize::PerIteration,
+                )
+            },
+        );
+        // Through one exporter, which is the command line's loop.
+        group.bench_with_input(
+            BenchmarkId::new(format!("one exporter, n={n}"), m),
+            &m,
+            |b, _| {
+                b.iter_batched(
+                    || tempfile::tempdir().expect("bag"),
+                    |bag| {
+                        let exporter = store.exporter().expect("exporter");
+                        for id in &ids[..m] {
+                            exporter.export(id, bag.path()).expect("export");
                         }
                     },
                     criterion::BatchSize::PerIteration,

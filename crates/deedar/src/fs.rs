@@ -26,6 +26,16 @@ type HmacSha256 = Hmac<Sha256>;
 /// holds, which is also what a receiver is told to record.
 pub struct Exporter<'a> {
     store: &'a FsStore,
+    tree: std::sync::Arc<LogTree>,
+}
+
+/// The log as a tree: every entry, every leaf hash, the head over them, the
+/// signature when there is one, and where each accession sits.
+///
+/// Built once per reading of the log and shared between the exporter that
+/// built it and the store's own cache of it, so a caller who exports through
+/// the store one deed at a time still pays for one reading.
+pub struct LogTree {
     entries: Vec<crate::log::Entry>,
     leaves: Vec<[u8; 32]>,
     head: crate::log::Head,
@@ -37,7 +47,7 @@ impl Exporter<'_> {
     /// The head every receipt from this exporter is against.
     #[must_use]
     pub fn head(&self) -> &crate::log::Head {
-        &self.head
+        &self.tree.head
     }
 
     /// The receipt for one deed, from the tree already built.
@@ -46,20 +56,21 @@ impl Exporter<'_> {
     ///
     /// Fails when the log holds no entry for `id`.
     pub fn receipt(&self, id: &DeedId) -> Result<crate::receipt::Receipt> {
-        let index = *self
+        let tree = &self.tree;
+        let index = *tree
             .position
             .get(id.as_str())
             .ok_or_else(|| Error::NotFound(id.to_string()))?;
-        let path = crate::log::inclusion_proof(&self.leaves, index)
+        let path = crate::log::inclusion_proof(&tree.leaves, index)
             .ok_or_else(|| Error::Io("log: no path for an entry that is in it".into()))?;
-        let entry = &self.entries[index];
+        let entry = &tree.entries[index];
         Ok(crate::receipt::Receipt {
             id: entry.id.clone(),
             digest: entry.digest.clone(),
             unix_time: entry.unix_time,
             index,
-            size: self.head.size,
-            root: self.head.root.clone(),
+            size: tree.head.size,
+            root: tree.head.root.clone(),
             path,
         })
     }
@@ -83,7 +94,7 @@ impl Exporter<'_> {
         // The head every receipt in this bag is against. Written beside the
         // deeds so a receiver has one thing to record, and it is the same head
         // for every deed of this export by construction.
-        if let Some(signed) = &self.signed {
+        if let Some(signed) = &self.tree.signed {
             let path = crate::receipt::head_beside(into);
             atomic_write(&path, signed.render().as_bytes())?;
             written.push(path);
@@ -148,6 +159,14 @@ pub struct FsStore {
     signing_key: Option<ed25519_dalek::SigningKey>,
     /// What the layout says this store accepts.
     policy: crate::attest::Policy,
+    /// The log as a tree, kept between exports while the log file stands
+    /// still. See [`FsStore::export_into`].
+    tree: std::sync::Mutex<
+        Option<(
+            (u64, Option<std::time::SystemTime>),
+            std::sync::Arc<LogTree>,
+        )>,
+    >,
 }
 
 impl FsStore {
@@ -176,6 +195,7 @@ impl FsStore {
             host_key: crate::host::load(dir)?,
             signing_key: crate::host::load_signing_key()?,
             policy: crate::attest::Policy::read(dir)?,
+            tree: std::sync::Mutex::new(None),
         })
     }
 
@@ -548,7 +568,36 @@ impl FsStore {
     /// Fails when the deed is absent, the log has no entry for it, or `into`
     /// cannot be written.
     pub fn export_into(&self, id: &DeedId, into: &Path) -> Result<Vec<PathBuf>> {
-        self.exporter()?.export(id, into)
+        // A caller looping over deeds through this, rather than through one
+        // exporter, would rebuild the tree per deed. The tree is keyed on the
+        // log file's size and modification time and kept until either moves,
+        // so that loop costs one reading of the log too. The check is a stat.
+        let stamp = self.log_stamp();
+        {
+            let held = self.tree.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some((seen, tree)) = held.as_ref() {
+                if *seen == stamp {
+                    return Exporter {
+                        store: self,
+                        tree: std::sync::Arc::clone(tree),
+                    }
+                    .export(id, into);
+                }
+            }
+        }
+        let exporter = self.exporter()?;
+        let mut held = self.tree.lock().unwrap_or_else(|e| e.into_inner());
+        *held = Some((stamp, std::sync::Arc::clone(&exporter.tree)));
+        drop(held);
+        exporter.export(id, into)
+    }
+
+    /// The log file's size and modification time, which is what says whether a
+    /// tree built over it is still the tree.
+    fn log_stamp(&self) -> (u64, Option<std::time::SystemTime>) {
+        fs::metadata(self.log_path())
+            .map(|m| (m.len(), m.modified().ok()))
+            .unwrap_or((0, None))
     }
 
     /// The log read once, for a handover of many deeds.
@@ -582,11 +631,13 @@ impl FsStore {
             .collect();
         Ok(Exporter {
             store: self,
-            entries,
-            leaves,
-            head,
-            signed,
-            position,
+            tree: std::sync::Arc::new(LogTree {
+                entries,
+                leaves,
+                head,
+                signed,
+                position,
+            }),
         })
     }
 
