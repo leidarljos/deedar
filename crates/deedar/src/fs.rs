@@ -304,6 +304,9 @@ impl FsStore {
             .append(true)
             .open(&path)
             .map_err(|e| Error::Io(e.to_string()))?;
+        // Two processes minting at once append whole lines, not interleaved
+        // bytes: the log is held for the one write.
+        lock_exclusive(&file)?;
         std::io::Write::write_all(&mut file, entry.line().as_bytes())
             .map_err(|e| Error::Io(e.to_string()))?;
         Ok(())
@@ -885,4 +888,15 @@ pub fn is_write_once_addr(path: impl AsRef<Path>) -> bool {
     path.as_ref()
         .to_str()
         .is_some_and(|s| s.starts_with("sha256:"))
+}
+
+/// An advisory exclusive lock on `file`, released when the handle closes.
+fn lock_exclusive(file: &fs::File) -> Result<()> {
+    use std::os::unix::io::AsRawFd;
+    // SAFETY: flock on a descriptor the caller owns for the write that follows.
+    let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) };
+    if rc != 0 {
+        return Err(Error::Io(std::io::Error::last_os_error().to_string()));
+    }
+    Ok(())
 }

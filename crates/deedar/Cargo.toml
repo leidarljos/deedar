@@ -8,6 +8,7 @@ rust-version.workspace = true
 description = "One-writer deed store and Cap'n client"
 
 [dependencies]
+libc = "0.2"
 deed.workspace = true
 ed25519-dalek = "2"
 sha2.workspace = true
