@@ -1,0 +1,84 @@
+#+title: Reference
+#+options: toc:nil num:nil
+
+* Command line
+
+=deedar [--url FILE] VERB ...=. The store is =--url=, else =DEEDAR_URL=,
+else the seat's own store under the user's data directory
+(=$XDG_DATA_HOME/deedar/store=) when it already exists.
+
+| Verb | Does |
+|---+---|
+| =create KIND --name N --agent A [--path P] [--input DEED]... [--supersedes DEED]= | mint one deed; kind-specific flags below |
+| =get ID= | one deed, flattened |
+| =list= | every deed, newest first |
+| =trail ID= | the deed and every input it was made from |
+| =evidence ID... \vert -= | the bytes are intact; one line each; non-zero on any failure |
+| =current ID... \vert -= | the tip of each supersede chain; non-zero when any citation is stale or missing |
+| =delete ID= | tombstone |
+| =leave ID= | a left-behind marker for a deed that moved store |
+| =timestamp ID= | a timestamp token over the deed |
+| =export --into DIR ID... \vert -= | deed, bytes, evidence, receipt (and signed head) into a satchel |
+| =check DIR [--since BRIDGE]= | every receipt against the head in the bag; with a bridge, that the log grew from a kept head |
+| =log head \vert list \vert audit \vert backfill \vert prove ID \vert bridge SIZE= | the append-only log |
+| =vouch sign FILE \vert check FILE= | a detached Ed25519 signature beside a file |
+| =migrate= | move a store to the current layout |
+
+* Kinds
+
+=file=, =set=, =quote=, =patch=, =mailDraft=, =clip=, =page=, =form=,
+=table=, =procedure=, =event=. The flags a kind reads:
+
+| Kind | Flags |
+|---+---|
+| =file= | =--path= |
+| =set= | =--member PATH=, repeatable |
+| =quote= | =--excerpt=, =--edition=, =--start=, =--end=, =--src-url= |
+| =patch= | =--tree=, =--diff PATH= repeatable, =--functionary= repeatable |
+| =mailDraft= | =--message-id=, =--in-reply-to=, =--subject= |
+| =clip= | =--media=, =--clip-src= repeatable, =--in=, =--out=, =--duration= |
+| =page= | =--page-url=, =--snapshot= |
+| =form= | =--blank=, =--field name=value= repeatable |
+| =table= | =--measure name=value= repeatable |
+| =procedure= | =--step TEXT= repeatable |
+| =event= | =--title=, =--when=, =--where=, =--who= |
+
+Every kind takes =--name=, =--agent=, =--activity=, =--input DEED=
+(repeatable), =--grant-host=, =--grant-path=, =--supersedes DEED=, and
+=--id= to keep an accession instead of minting one.
+
+* Accessions
+
+=deed-<kind>-<slug>= names a deed. =sha256:<hex>= names the canonical deed
+or one of its product paths. Both resolve with =get=. A tracker or a pack
+cites either and nothing else.
+
+* The store
+
+A directory with =bytes/= (content-addressed), =deeds/= (canonical
+records), =log= (one entry a line: content address, time), =layout=
+(version, attestation policy, accepted signers), and =writer.key=.
+
+* The log
+
+Certificate Transparency hashing, RFC 9162 (doi:10.17487/RFC9162): a leaf is =SHA-256(0x00 || entry)=,
+a node =SHA-256(0x01 || left || right)=, the tree splits at the largest power
+of two below the width. =head= is =size= and =root=, signed when a key is
+set. =prove ID= is the inclusion path; =bridge SIZE= the consistency path
+from an earlier head; =audit= the log against the shelves.
+
+* Environment
+
+| Variable | Meaning |
+|---+---|
+| =DEEDAR_URL= | the store, as =file://PATH= |
+| =DEEDAR_HOST_SIGNING_KEY= | a 32-byte Ed25519 seed; signs heads, sidecars and manifests |
+
+* Crates
+
+| Crate | Carries |
+|---+---|
+| =deed= | the deed types and canonical encoding |
+| =deedar= | store, log, receipts, signatures, attestation |
+| =deedar-cli= | =deedar= |
+| =deedar-mcp= | the read-only Model Context Protocol (MCP) surface |
