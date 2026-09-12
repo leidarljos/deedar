@@ -20,12 +20,16 @@ Both exit non-zero when any accession fails, so a shell hook can stop on them.
 * Sign what you hand over
 
 #+begin_src console
+$ mkdir -p ~/.config/deedar
 $ head -c 32 /dev/urandom > ~/.config/deedar/host.key && chmod 600 ~/.config/deedar/host.key
-$ export DEEDAR_HOST_SIGNING_KEY=~/.config/deedar/host.key
 $ deedar log head
 size=34 root=... ed25519 b2942e7e... <signature>
 $ deedar vouch sign bag/manifest-sha256.txt
 #+end_src
+
+That path is the default: with =DEEDAR_HOST_SIGNING_KEY= unset the key at
+=~/.config/deedar/host.key= signs when it exists. Set the variable to sign
+with a key kept elsewhere, or to =off= to sign nothing.
 
 The key lives outside the store. A receiver lists the keys they accept in
 their own store's =layout= file, one =signer = ed25519:<hex>= line each,

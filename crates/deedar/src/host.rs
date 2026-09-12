@@ -70,13 +70,32 @@ pub fn verify(key: &[u8; 32], deed_bytes: &[u8], unix_time: u64, signature: &[u8
 
 /// Where a host signing key lives, when one is configured.
 ///
+/// `DEEDAR_HOST_SIGNING_KEY` names it. Unset, the key at
+/// `$XDG_CONFIG_HOME/deedar/host.key` (`~/.config/deedar/host.key`) is used
+/// when that file exists, so a seat that made one once signs from then on
+/// with nothing set. `DEEDAR_HOST_SIGNING_KEY=off` signs nothing.
+///
 /// The private half never belongs beside the store: the point of the signature
 /// is that whoever reads the store cannot produce one.
 #[must_use]
 pub fn signing_key_path() -> Option<PathBuf> {
-    env::var_os("DEEDAR_HOST_SIGNING_KEY")
+    if let Some(raw) = env::var_os("DEEDAR_HOST_SIGNING_KEY").filter(|raw| !raw.is_empty()) {
+        if raw == "off" {
+            return None;
+        }
+        return Some(PathBuf::from(raw));
+    }
+    default_signing_key_path().filter(|p| p.is_file())
+}
+
+/// The path the seat's host key is looked for at when nothing names one.
+#[must_use]
+pub fn default_signing_key_path() -> Option<PathBuf> {
+    let config = env::var_os("XDG_CONFIG_HOME")
         .filter(|raw| !raw.is_empty())
         .map(PathBuf::from)
+        .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))?;
+    Some(config.join("deedar").join("host.key"))
 }
 
 /// Load the 32-byte Ed25519 seed the host signs with, if it is configured.

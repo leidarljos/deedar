@@ -2,6 +2,12 @@
 
 Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
 
+## Unreleased
+
+- The host key is found at `~/.config/deedar/host.key` when
+  `DEEDAR_HOST_SIGNING_KEY` is unset, so a seat signs with nothing set once
+  it has a key. `DEEDAR_HOST_SIGNING_KEY=off` signs nothing.
+
 ## 0.2.0 (2026-09-12)
 
 What a user gets:

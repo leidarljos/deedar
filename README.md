@@ -45,7 +45,7 @@ $ deedar check bag
 - The log is RFC 9162 hashing (doi:10.17487/RFC9162): inclusion receipts
   travel with an export, `log bridge` proves a log grew from a head you
   kept, `log audit` finds a deed that was logged and is gone.
-- `DEEDAR_HOST_SIGNING_KEY` signs heads, sidecars and satchel manifests
+- `DEEDAR_HOST_SIGNING_KEY` signs heads, sidecars and satchel manifests; unset, `~/.config/deedar/host.key` is used when it exists, and `off` signs nothing
   with Ed25519; a receiver lists accepted keys in its store's `layout`.
 - Bytes and deeds are content addressed; log appends take a file lock, so
   two processes minting at once write whole lines.

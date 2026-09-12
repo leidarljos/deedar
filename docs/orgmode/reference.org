@@ -72,7 +72,7 @@ from an earlier head; =audit= the log against the shelves.
 | Variable | Meaning |
 |---+---|
 | =DEEDAR_URL= | the store, as =file://PATH= |
-| =DEEDAR_HOST_SIGNING_KEY= | a 32-byte Ed25519 seed; signs heads, sidecars and manifests |
+| =DEEDAR_HOST_SIGNING_KEY= | a 32-byte Ed25519 seed; signs heads, sidecars and manifests. Unset, =~/.config/deedar/host.key= is used when it exists; =off= signs nothing |
 
 * Crates
 
