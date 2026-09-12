@@ -1,14 +1,4 @@
-//! The sequences this store is the authority for.
-//!
-//! A prompt is the primitive a person picks, and what it carries that a tool
-//! description cannot is an order and the reason for it. Both sequences here
-//! are orders that matter: each step answers a question the step before it
-//! does not, and stopping early means believing an answer to a question nobody
-//! asked.
-//!
-//! What belongs here is what this store can answer. Packing a slice is the
-//! tracker's sequence and lives there; checking one that arrived is this
-//! store's, because the proofs are its format.
+//! Prompts: check a handover that arrived; stand behind one deed.
 
 use rmcp::{
     handler::server::wrapper::Parameters, model::*, prompt, prompt_router, ErrorData as McpError,
@@ -125,12 +115,28 @@ impl DeedarServer {
 mod tests {
     use super::*;
 
+    fn text(message: &PromptMessage) -> &str {
+        &message.content.as_text().expect("a text prompt").text
+    }
+
+    fn ordered(said: &str, verbs: &[&str]) {
+        let at: Vec<usize> = verbs
+            .iter()
+            .map(|v| {
+                said.find(v)
+                    .unwrap_or_else(|| panic!("{v} missing: {said}"))
+            })
+            .collect();
+        assert!(
+            at.windows(2).all(|w| w[0] < w[1]),
+            "{verbs:?} out of order: {said}"
+        );
+    }
+
     /// Every declared prompt renders, from the arguments it says it takes.
     #[tokio::test]
     async fn every_prompt_renders_from_what_it_declares() {
         let declared = DeedarServer::prompt_router().list_all();
-        // As a set: the router lists by name, and what matters is which
-        // prompts are declared rather than the order a listing returns them.
         let mut names: Vec<&str> = declared.iter().map(|p| p.name.as_str()).collect();
         names.sort_unstable();
         assert_eq!(names, ["check_a_handover", "stand_behind_a_deed"]);
@@ -155,13 +161,11 @@ mod tests {
             }))
             .await
             .expect("renders");
-        let said = format!("{:?}", checked[0].content);
+        let said = text(&checked[0]);
         assert!(said.contains("/tmp/bag"), "{said}");
         assert!(said.contains("bridge.txt"), "{said}");
-        assert!(said.contains("may have been rewritten"), "{said}");
+        ordered(said, &["`deedar_check`"]);
 
-        // With no earlier head, the text says what to do with the one this
-        // check reports rather than leaving the reader with an unused answer.
         let first = server
             .check_a_handover_prompt(Parameters(ArrivalArgs {
                 dir: "/tmp/bag".into(),
@@ -169,7 +173,12 @@ mod tests {
             }))
             .await
             .expect("renders");
-        assert!(format!("{:?}", first[0].content).contains("Record the head"));
+        let first = text(&first[0]);
+        assert_ne!(first, said);
+        assert!(
+            !first.contains("Some(") && !first.contains("None"),
+            "{first}"
+        );
 
         let standing = server
             .stand_behind_a_deed_prompt(Parameters(StandingArgs {
@@ -177,6 +186,16 @@ mod tests {
             }))
             .await
             .expect("renders");
-        assert!(format!("{:?}", standing[0].content).contains("deed-file-note"));
+        let said = text(&standing[0]);
+        assert!(said.contains("deed-file-note"), "{said}");
+        ordered(
+            &said,
+            &[
+                "`deedar_get`",
+                "`deedar_evidence`",
+                "`deedar_current`",
+                "`deedar_log_audit`",
+            ],
+        );
     }
 }
