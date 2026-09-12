@@ -471,12 +471,21 @@ mod tests {
     use deedar::CreateRequest;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    /// A store of this test's own.
+    ///
+    /// Named by the clock alone, two tests starting in the same nanosecond
+    /// shared one store, and the second saw the first one's deed in its log.
+    /// It passed alone and failed in the suite, which is what a shared
+    /// directory looks like from a summary line. A counter beside the clock
+    /// makes the name this process's and this call's.
     fn store() -> String {
+        static NTH: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let n = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("time")
             .as_nanos();
-        let dir = std::env::temp_dir().join(format!("deedar-mcp-{n}"));
+        let nth = NTH.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("deedar-mcp-{}-{n}-{nth}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("mkdir");
         format!("file://{}", dir.display())
     }
