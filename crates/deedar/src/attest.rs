@@ -50,9 +50,8 @@ pub struct Policy {
 impl Policy {
     /// Read the policy out of a store's layout file.
     ///
-    /// A layout that says nothing about attestation is the old layout, and it
-    /// means optional with no accepted signers, which is what every store
-    /// written before this did.
+    /// A layout that says nothing about attestation means optional with no
+    /// accepted signers.
     ///
     /// # Errors
     ///

@@ -123,8 +123,7 @@ pub enum Sidecar {
 
 /// Read a sidecar and say which construction wrote it.
 ///
-/// The signature form is text and self-describing; anything else is the older
-/// raw hash, which is how a store written before this keeps opening.
+/// The signature form is text and self-describing; anything else is a raw hash.
 #[must_use]
 pub fn read_sidecar(bytes: &[u8]) -> Option<Sidecar> {
     if let Ok(text) = std::str::from_utf8(bytes) {

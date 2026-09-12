@@ -199,12 +199,8 @@ fn a_store_that_predates_the_log_is_not_clean_and_not_tampered() {
 }
 
 /// A store holding deeds from both sides of the log is behind, not tampered
-/// with, and wants the same advice as one that predates it.
-///
-/// The first version of the check asked whether the log was empty, so a store
-/// with nine deeds from before it and one from after got no advice at all: not
-/// clean, not tampered, and told nothing. The question is whether anything was
-/// lost, not how much has been logged so far.
+/// with: the question is whether anything was lost, not whether the log is
+/// empty.
 #[test]
 fn a_store_that_fell_behind_still_gets_told_to_backfill() {
     let url = tmp_url();
