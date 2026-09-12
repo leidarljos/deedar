@@ -25,11 +25,7 @@ pub struct DeedarServer {
     url: String,
 }
 
-/// One deed, flattened to what a caller reads rather than to the wire shape.
-///
-/// The store's own type is a Cap'n union over eleven bodies, which is right for
-/// a format and wrong for an answer: a caller asking what a deed produced wants
-/// the fields every deed has, and the body rendered rather than matched on.
+/// One deed, flattened: the fields every deed has, and the body rendered.
 #[derive(Debug, Clone, Serialize, schemars::JsonSchema)]
 pub struct DeedRow {
     /// The accession, which is what crosses the three stores.
@@ -455,13 +451,8 @@ mod tests {
     use deedar::CreateRequest;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    /// A store of this test's own.
-    ///
-    /// Named by the clock alone, two tests starting in the same nanosecond
-    /// shared one store, and the second saw the first one's deed in its log.
-    /// It passed alone and failed in the suite, which is what a shared
-    /// directory looks like from a summary line. A counter beside the clock
-    /// makes the name this process's and this call's.
+    /// A store of this test's own, named by pid and a counter: the clock alone
+    /// collides across tests in one process.
     fn store() -> String {
         static NTH: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let n = SystemTime::now()
