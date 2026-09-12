@@ -2,3 +2,5 @@
 **/*.rs.bk
 .deedar/
 .deeder/
+.venv-docs/
+docs/build/
