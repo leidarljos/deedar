@@ -1,21 +1,5 @@
-//! The deed store as an agent surface.
-//!
-//! An agent that wants to know what a unit of work produced had to shell out.
-//! The accession is the one identifier crossing the tracker, the pack and this
-//! store, so of the tools without a surface this is the one reached for most:
-//! it is how provenance gets followed at all.
-//!
-//! Almost everything here reads. That is worth saying in the hints rather than
-//! leaving a client to infer it, because a deed is frozen and the one verb
-//! that is not a read is `delete`, which is not offered. A client that cannot
-//! tell a read from a write on a record that is supposed to be immutable has
-//! no way to be careful with one.
-//!
-//! Two kinds of question live here and they are not the same. What does this
-//! deed say, which the store answers about itself; and is the store still
-//! answering for what it published, which only the log can answer. The second
-//! is the one an auditor asks, and it is why `log` verbs are here beside the
-//! reads rather than folded into them.
+//! The deed store over MCP. Every tool reads; `delete` is not offered.
+//! The `log` verbs answer whether the store still answers for what it published.
 
 use std::path::PathBuf;
 
