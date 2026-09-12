@@ -29,12 +29,8 @@ pub struct Exporter<'a> {
     tree: std::sync::Arc<LogTree>,
 }
 
-/// The log as a tree: every entry, every leaf hash, the head over them, the
-/// signature when there is one, and where each accession sits.
-///
-/// Built once per reading of the log and shared between the exporter that
-/// built it and the store's own cache of it, so a caller who exports through
-/// the store one deed at a time still pays for one reading.
+/// The log as a tree: entries, leaf hashes, the head, its signature when there
+/// is one, and each accession's index.
 pub struct LogTree {
     entries: Vec<crate::log::Entry>,
     leaves: Vec<[u8; 32]>,
@@ -76,7 +72,7 @@ impl Exporter<'_> {
     }
 
     /// Write one deed into a satchel: bytes, evidence, sidecar, receipt, and
-    /// the signed head when this store holds a key.
+    /// the signed head when there is one.
     ///
     /// # Errors
     ///
@@ -91,9 +87,6 @@ impl Exporter<'_> {
         atomic_write(&path, receipt.render().as_bytes())?;
         written.push(path);
 
-        // The head every receipt in this bag is against. Written beside the
-        // deeds so a receiver has one thing to record, and it is the same head
-        // for every deed of this export by construction.
         if let Some(signed) = &self.tree.signed {
             let path = crate::receipt::head_beside(into);
             atomic_write(&path, signed.render().as_bytes())?;
@@ -401,11 +394,7 @@ impl FsStore {
 
     /// The proof that `id` is in the tree the current head names, and where.
     ///
-    /// The path on its own is for a reader who already holds the log and can
-    /// rebuild the leaf themselves. Anything that travels wants [`receipt`],
-    /// which carries the rest of what the leaf hashes over.
-    ///
-    /// [`receipt`]: Self::receipt
+    /// For a reader who holds the log; what travels is [`Self::receipt`].
     ///
     /// # Errors
     ///
@@ -415,12 +404,8 @@ impl FsStore {
         Ok((receipt.index, receipt.path))
     }
 
-    /// The record a receiver checks a handed-over deed against.
-    ///
-    /// This is the proof plus the rest of what the leaf hashes over. The path
-    /// alone is not enough for anybody who does not already hold the log:
-    /// they have to rebuild the leaf first, and the leaf covers the entry's
-    /// time as well as its accession and digest.
+    /// The record a receiver checks a handed-over deed against: the path plus
+    /// everything the leaf hashes over.
     ///
     /// # Errors
     ///
@@ -451,12 +436,7 @@ impl FsStore {
         })
     }
 
-    /// This log's head, with a signature over it when a key is configured.
-    ///
-    /// A head is the one thing a reader keeps between handovers, so an
-    /// unsigned one is two numbers that arrived in the same bag as the deeds
-    /// they vouch for. Nothing here can force a store to hold a key, so an
-    /// absent key is reported as absent rather than made up: `Ok(None)`.
+    /// This log's head, signed when a key is configured; `Ok(None)` when not.
     ///
     /// # Errors
     ///
@@ -469,12 +449,7 @@ impl FsStore {
         }
     }
 
-    /// The record joining a head somebody already holds to this log's own.
-    ///
-    /// A receiver who took a satchel last month wrote down a head. Handing
-    /// them a second satchel proves each new deed against a new head and says
-    /// nothing about whether that head is the old one grown. This is what says
-    /// it, and it is the only thing that catches a log rewritten in between.
+    /// The consistency proof from a head somebody holds to this log's own.
     ///
     /// # Errors
     ///
@@ -570,10 +545,8 @@ impl FsStore {
     /// Fails when the deed is absent, the log has no entry for it, or `into`
     /// cannot be written.
     pub fn export_into(&self, id: &DeedId, into: &Path) -> Result<Vec<PathBuf>> {
-        // A caller looping over deeds through this, rather than through one
-        // exporter, would rebuild the tree per deed. The tree is keyed on the
-        // log file's size and modification time and kept until either moves,
-        // so that loop costs one reading of the log too. The check is a stat.
+        // The tree is kept while the log file's size and mtime stand still, so
+        // a loop through this costs one reading too.
         let stamp = self.log_stamp();
         {
             let held = self.tree.lock().unwrap_or_else(|e| e.into_inner());
@@ -602,15 +575,8 @@ impl FsStore {
             .unwrap_or((0, None))
     }
 
-    /// The log read once, for a handover of many deeds.
-    ///
-    /// A receipt is a path through a tree whose every leaf is a hash over a log
-    /// entry, so making one means reading the whole log and hashing every
-    /// entry. Doing that inside each export made a handover of `m` deeds from
-    /// a log of `n` entries cost `m` reads and `m * n` hashes, which is the
-    /// shape that turns a hundred-deed satchel from instant into seconds.
-    /// The tree does not change between two deeds of one export, so it is
-    /// built once and every receipt is a lookup in it.
+    /// The log read and hashed once, for a handover of many deeds; every
+    /// receipt is then a lookup.
     ///
     /// # Errors
     ///

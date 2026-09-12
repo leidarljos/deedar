@@ -1,30 +1,14 @@
 //! Checking a deed somebody else handed over.
 //!
-//! A satchel arrives with deed bytes, a manifest and a signature. Between
-//! them those say the payload is intact and that a key the receiver accepts
-//! stood behind the manifest. Neither says when the deed came into being. A
-//! sender who mints a deed the morning they are asked for it produces bytes
-//! that are just as intact and a signature that is just as good.
+//! Intact bytes and a good signature say nothing about when a deed came into
+//! being. A deed travels with the path from its leaf to a log head (RFC 9162,
+//! doi:10.17487/RFC9162), and the head is what a receiver writes down; a deed
+//! minted after the fact needs a head the receiver does not hold.
 //!
-//! The answer the transparency logs settled on (RFC 9162,
-//! doi:10.17487/RFC9162, which obsoletes RFC 6962) is that a deed travels with
-//! the path from its leaf to
-//! a tree head, and the head is a short thing a receiver can write down. A
-//! sender who wants to slip in a deed after the fact has to produce a head
-//! that covers it, and that head will not be the one the receiver already
-//! holds.
-//!
-//! So this module is the receiving half: it reads what an export wrote, and
-//! it either checks out or it fails. There is no middle report, because a
-//! provenance claim that is reported as a note is one nobody acts on.
-//!
-//! Two records travel. A [`Receipt`] is one deed against one head, which is
-//! the RFC's audit path. A [`Bridge`] is one head against an earlier one from
-//! the same log, which is the RFC's consistency proof and the only thing that
-//! catches a sender who rewrote history between two handovers: the receipt of
-//! the second satchel is perfectly good against its own head, and only the
-//! bridge to the head the receiver kept from the first says whether that head
-//! is the same log grown or a different log entirely.
+//! A [`Receipt`] is one deed against one head. A [`Bridge`] is one head
+//! against an earlier one from the same log, and is the only thing that
+//! catches a log rewritten between two handovers. A check passes or fails;
+//! there is no note.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -38,10 +22,8 @@ use crate::log::{self, Head};
 
 /// One deed's place in a log, as an export writes it beside the bytes.
 ///
-/// The digest and the time are here because the leaf hashes over the whole
-/// log entry, and a receiver holding only the deed cannot rebuild a leaf from
-/// a field the record left out. A path that cannot be walked back to a leaf is
-/// not a weaker proof, it is not a proof.
+/// Carries everything the leaf hashes over, so a receiver holding only the
+/// deed can rebuild the leaf.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Receipt {
     /// The deed's accession.
@@ -78,10 +60,7 @@ impl Receipt {
     ///
     /// # Errors
     ///
-    /// Fails when a field is absent or is not what it has to be. A receipt
-    /// missing a field is refused rather than checked against a default,
-    /// because every default here is a value that makes some other proof
-    /// verify.
+    /// Fails when a field is absent or malformed; no field has a default.
     pub fn parse(text: &str) -> Result<Self> {
         let mut id = None;
         let mut digest = None;
@@ -136,13 +115,9 @@ impl Receipt {
         }
     }
 
-    /// Whether these bytes are the deed this receipt is about, and whether the
-    /// log this receipt names holds it.
-    ///
-    /// Both halves are needed and neither implies the other. The digest ties
-    /// the bytes to the entry; the path ties the entry to the head. Checking
-    /// only the first accepts a deed the log never held, and checking only the
-    /// second accepts any bytes at all under a logged accession.
+    /// Whether these bytes are the deed, and whether the named log holds it.
+    /// The digest ties bytes to entry, the path ties entry to head; neither
+    /// implies the other.
     ///
     /// # Errors
     ///
@@ -172,16 +147,9 @@ impl Receipt {
     }
 }
 
-/// A head with a signature over it.
-///
-/// The head is the one thing a receiver keeps between handovers, and until it
-/// is signed it is two numbers that arrived in the same bag as the deeds they
-/// are supposed to vouch for. A sender who wants to show two readers different
-/// histories has nothing to forge: they write the size and root they like.
-///
-/// RFC 9162 makes the signed tree head the object rather than the pair, and
-/// this is that: the same size and root, over a domain-separated message, by a
-/// key a reader either accepts or does not.
+/// A head with a signature over it: RFC 9162's signed tree head. Unsigned, a
+/// head is two numbers that arrived in the same bag as the deeds they vouch
+/// for.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SignedHead {
     /// What is being vouched for.
@@ -268,12 +236,8 @@ impl SignedHead {
     }
 
     /// Whether the signature covers this head, and whether the key is one the
-    /// reader accepts.
-    ///
-    /// The two are reported apart, the same way a manifest signature is. A
-    /// signature that verifies against the key it names says the head and the
-    /// signature go together and nothing about who made them, and a reader who
-    /// gave no signer list has to be told that is what they got.
+    /// reader accepts. Returns `false` when no signer list was given: the head
+    /// and signature go together, and that is all it says.
     ///
     /// # Errors
     ///
@@ -321,11 +285,8 @@ pub fn sign_head(head: &Head) -> Result<SignedHead> {
     })
 }
 
-/// One head against an earlier one from the same log.
-///
-/// The receipt says a deed is in the tree the sender is showing. It says
-/// nothing about whether that tree is the one the sender showed last time,
-/// which is the question that catches a log rewritten between handovers.
+/// One head against an earlier one from the same log: the consistency proof
+/// that catches a log rewritten between handovers.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Bridge {
     /// The head the receiver already holds.
@@ -443,9 +404,6 @@ impl Handover {
                  signature go together and nothing about who made them\n",
                 log::hex(&signer)
             )),
-            // Worth saying rather than leaving as an absence. Every proof here
-            // is against this head, so a head nobody vouched for is a bag that
-            // is internally consistent and unattributed.
             None => out.push_str(
                 "the head is unsigned, so every proof above is against a head this bag asserted \
                  about itself\n",
@@ -461,16 +419,10 @@ pub fn head_beside(deeds: &Path) -> PathBuf {
     deeds.join("head")
 }
 
-/// Check every deed a handover carried.
+/// Check every deed a handover carried, given the bag or the deeds directory.
 ///
-/// Takes either the directory the deeds were exported into or the satchel
-/// around it, because a receiver is handed a bag and should not have to know
-/// which directory inside it holds the proofs before they can check them.
-///
-/// Every receipt has to name the same head. One export walks one log, so two
-/// heads in one bag means the deeds came from two moments and the receiver has
-/// no single thing to write down; taking the largest would let a sender
-/// smuggle a deed under a head nobody recorded.
+/// Every receipt has to name the same head, so the receiver has one thing to
+/// record and nothing rides in under a head nobody kept.
 ///
 /// # Errors
 ///
@@ -502,8 +454,6 @@ pub fn check_handover(dir: &Path, accept: &BTreeSet<[u8; 32]>) -> Result<Handove
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
         let Ok(text) = std::fs::read_to_string(folder.join("proof.txt")) else {
-            // A deed with no receipt is the case this whole module exists for:
-            // bytes that arrived with nothing saying they predate the asking.
             wrong.push(format!(
                 "{name}: no proof.txt, so nothing says this deed was logged before it was handed \
                  over"
@@ -540,10 +490,8 @@ pub fn check_handover(dir: &Path, accept: &BTreeSet<[u8; 32]>) -> Result<Handove
         proven.push(receipt.id);
     }
 
-    // The signed head, when one travelled. It has to be the head the receipts
-    // are against: a bag whose deeds prove membership in one tree and whose
-    // signature covers another is a bag where the signature vouches for
-    // nothing that arrived.
+    // The signed head, when one travelled, has to be the head the receipts are
+    // against.
     let mut head_signer = None;
     let mut head_accepted = false;
     if let Ok(text) = std::fs::read_to_string(head_beside(&root)) {
@@ -583,12 +531,8 @@ pub fn check_handover(dir: &Path, accept: &BTreeSet<[u8; 32]>) -> Result<Handove
     }
 }
 
-/// One complaint's text, without the prefix Display would add again.
-///
-/// Every entry in the wrong-list is joined under one "does not check out"
-/// heading that already says what kind of failure this is, so letting each
-/// inner error render its own `evidence:` produces `evidence: evidence:` and
-/// makes the line harder to read than the fault it is reporting.
+/// One complaint's text, without the `evidence:` prefix the heading already
+/// supplies.
 fn said(e: &Error) -> String {
     match e {
         Error::Evidence(text) | Error::Io(text) => text.clone(),
@@ -653,24 +597,19 @@ mod tests {
         }
     }
 
-    /// The point of the record: a receiver holding the bytes and the receipt
-    /// can rebuild the leaf and walk it to the head, with nothing else.
+    /// Bytes plus receipt rebuild the leaf and walk it to the head.
     #[test]
     fn a_receipt_carries_everything_the_leaf_needs() {
         let all = entries(9);
         for at in 0..all.len() {
             let receipt = receipt_for(&all, at);
-            // Through the file, because the file is the only thing that
-            // travels and a field that renders but does not parse is a field
-            // the receiver does not have.
             let read = Receipt::parse(&receipt.render()).expect("round trips");
             assert_eq!(read, receipt);
             read.check(&body(at)).expect("checks out");
         }
     }
 
-    /// Bytes swapped under a logged accession are caught by the digest, and a
-    /// path taken from a different entry is caught by the tree.
+    /// The digest catches swapped bytes; the tree catches a borrowed path.
     #[test]
     fn neither_half_of_the_check_is_redundant() {
         let all = entries(7);
@@ -689,8 +628,7 @@ mod tests {
         assert!(format!("{err}").contains("does not carry"), "{err}");
     }
 
-    /// A time nobody recorded is a leaf nobody can rebuild, which is why the
-    /// record refuses rather than filling one in.
+    /// A receipt missing a field is refused, not defaulted.
     #[test]
     fn a_receipt_missing_a_field_is_refused() {
         let all = entries(4);
@@ -706,8 +644,7 @@ mod tests {
         assert!(Receipt::parse("colour=blue\n").is_err());
     }
 
-    /// A grown log bridges to the head a receiver kept; a rewritten one does
-    /// not, and that is the only thing that catches it.
+    /// A grown log bridges to the kept head; a rewritten one does not.
     #[test]
     fn a_rewritten_log_does_not_bridge() {
         let all = entries(9);
@@ -724,8 +661,6 @@ mod tests {
             .check()
             .expect("a grown log bridges");
 
-        // The same sender, having quietly replaced an entry the receiver
-        // already saw. Every receipt against the new head is perfectly good.
         let mut rewritten = leaves.clone();
         rewritten[2] = log::leaf_hash(b"a deed nobody was shown");
         let swapped = Bridge {
@@ -737,12 +672,8 @@ mod tests {
         assert!(format!("{err}").contains("dropped or rewritten"), "{err}");
     }
 
-    /// A head that nobody signed is reported as one nobody signed.
-    ///
-    /// Every proof in a bag is against its head, so an unsigned head makes the
-    /// whole bag internally consistent and unattributed: a sender showing two
-    /// readers different histories has nothing to forge. That is worth a line
-    /// rather than an absence.
+    /// The report distinguishes an unsigned head, a named signer, and an
+    /// accepted one.
     #[test]
     fn an_unsigned_head_says_so() {
         let done = Handover {
@@ -772,8 +703,8 @@ mod tests {
         assert!(accepted.render().contains("(accepted)"));
     }
 
-    /// A head signature covers the head and stops covering a different one,
-    /// and it is not replayable as a signature over anything else.
+    /// A head signature covers that head, no other, and is not a manifest
+    /// signature.
     #[test]
     fn a_head_signature_covers_that_head_only() {
         let key = ed25519_dalek::SigningKey::from_bytes(&[5u8; 32]);
@@ -824,8 +755,8 @@ mod tests {
         assert_ne!(head_message(&head), crate::vouch::covered_for_test(b"x"));
     }
 
-    /// A handover is checked whole: a deed with no receipt fails it, and so
-    /// does one against a head the rest of the bag does not share.
+    /// A handover fails whole: on a deed with no receipt, and on a receipt
+    /// against a head the rest of the bag does not share.
     #[test]
     fn a_handover_is_checked_whole() {
         let all = entries(6);
@@ -846,7 +777,6 @@ mod tests {
             done
         );
 
-        // A deed that arrived with nothing saying it predates the asking.
         let bare = deeds.join("deed-thing-late");
         std::fs::create_dir_all(&bare).expect("dirs");
         std::fs::write(bare.join("deed.bin"), b"minted this morning").expect("bytes");
@@ -854,7 +784,6 @@ mod tests {
         assert!(format!("{err}").contains("no proof.txt"), "{err}");
         std::fs::remove_dir_all(&bare).expect("clean up");
 
-        // And one whose receipt is against a different moment of the log.
         let odd = &all[4];
         let out = deeds.join(&odd.id);
         std::fs::create_dir_all(&out).expect("dirs");
