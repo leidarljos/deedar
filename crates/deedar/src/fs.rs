@@ -149,6 +149,13 @@ pub struct Missing {
     pub why: String,
 }
 
+/// The log file's size and modification time: what says whether a tree built
+/// over it is still the tree.
+type LogStamp = (u64, Option<std::time::SystemTime>);
+
+/// One reading of the log, and the stamp of the file it was read from.
+type TreeCache = std::sync::Mutex<Option<(LogStamp, std::sync::Arc<LogTree>)>>;
+
 pub struct FsStore {
     dir: PathBuf,
     key: [u8; 32],
@@ -161,12 +168,7 @@ pub struct FsStore {
     policy: crate::attest::Policy,
     /// The log as a tree, kept between exports while the log file stands
     /// still. See [`FsStore::export_into`].
-    tree: std::sync::Mutex<
-        Option<(
-            (u64, Option<std::time::SystemTime>),
-            std::sync::Arc<LogTree>,
-        )>,
-    >,
+    tree: TreeCache,
 }
 
 impl FsStore {
@@ -594,7 +596,7 @@ impl FsStore {
 
     /// The log file's size and modification time, which is what says whether a
     /// tree built over it is still the tree.
-    fn log_stamp(&self) -> (u64, Option<std::time::SystemTime>) {
+    fn log_stamp(&self) -> LogStamp {
         fs::metadata(self.log_path())
             .map(|m| (m.len(), m.modified().ok()))
             .unwrap_or((0, None))
