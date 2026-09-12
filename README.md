@@ -4,181 +4,57 @@
   <img src="docs/logo/icon.svg" width="120" height="120" alt="deedar: a receipt pinned through a gold seal">
 </p>
 
-A unit of work produces something. deedar records it as a **deed**:
-here is the work, this is its identity, take it. The next unit
-opens that deed by `id`.
+What did this unit of work produce? A deed is the frozen record of one
+product: the bytes by hash, who made them, what they were made from. Every
+deed goes into an append-only Merkle log, so a store can show a deed was
+there before anyone asked and cannot drop one unnoticed. A tracker or a pack
+cites a deed by its accession and never copies the bytes.
 
-deedar is the writer. A deed is the noun. `quote`, `patch`, and
-`file` are kinds. `DEEDAR_URL` is the contract. Clients speak
-`schema/deedar.capnp`: `create`, `get`, `list`, `trail`, `evidence`,
-`delete`, `leave`, `timestamp`, `current`. `get` accepts a slug or a
-unique `sha256:` of the deed or of one product path. Next work
-takes deed ids as `--input`; they become `sources`. `deedar migrate`
-writes `{store}/layout` when that file is missing; `open` does the
-same.
+Docs and tutorial: https://leidarljos.github.io/deedar/
 
-There is no daemon. Each command opens the store at `DEEDAR_URL`.
+## Install
 
-## First path
-
-Every verb. A quote, a file, a patch that cites the quote. The next
-sitting opens only the patch id.
-
-```sh
-rm -rf /tmp/deedar-demo
-mkdir -p /tmp/deedar-demo
-printf 'a short note\n' > /tmp/deedar-demo/note.md
-printf '%s\n' \
-  '--- a/note.md' '+++ b/note.md' \
-  '@@ -1 +1 @@' '-a short note' '+a named note' \
-  > /tmp/deedar-demo/note.patch
-export DEEDAR_URL=file:///tmp/deedar-demo/store
-
-just deedar create quote \
-  --id deed-quote-rfc2094-nll \
-  --name "NLL: lifetimes from the CFG" \
-  --edition https://rust-lang.github.io/rfcs/2094-nll.html \
-  --excerpt "lifetimes that are based on the control-flow graph" \
-  --src-url https://rust-lang.github.io/rfcs/2094-nll.html \
-  --agent reader
-
-just deedar create file \
-  --id deed-file-note \
-  --name "the note" \
-  --path /tmp/deedar-demo/note.md \
-  --media text/plain \
-  --agent reader
-
-just deedar create patch \
-  --id deed-patch-note \
-  --name "name the note" \
-  --tree /tmp/deedar-demo \
-  --diff /tmp/deedar-demo/note.patch \
-  --functionary reader \
-  --agent reader \
-  --input deed-quote-rfc2094-nll
-
-just deedar get deed-patch-note
-just deedar trail deed-patch-note
-just deedar current deed-patch-note
-just deedar evidence deed-file-note
-just deedar evidence deed-patch-note
-just deedar leave deed-file-note /tmp/deedar-demo/left
-just deedar timestamp deed-file-note
-just deedar list
-just deedar migrate
-just deedar delete deed-file-note
+```console
+$ cargo install --git https://github.com/leidarljos/deedar deedar-cli
+$ export DEEDAR_URL=file://$HOME/.local/share/deedar/store
 ```
 
-`evidence` also takes several ids, or `-` to read them from standard
-input. That is the form a working set arrives in, and the check fails
-closed on the whole list: one deed that cannot be evidenced is enough to
-make the set untrustworthy, and the report says which one rather than
-stopping at it.
+`deedar-mcp` is the read-only MCP surface. There is no daemon: each command
+opens the store.
 
-```sh
-just deedar evidence deed-file-note deed-patch-note
-# deed-file-note ok
-# deed-patch-note ok
-# 2 of 2 verified
+## First minute
 
-# or from whatever holds the citations, one id per line
-vissue recall <id> --deeds-only | deedar evidence -
+```console
+$ echo 'fn main() {}' > note.rs
+$ deedar create file --name "the parser patch" --path note.rs --agent you
+id=deed-file-the-parser-patch kind=file name=the parser patch
+$ deedar evidence deed-file-the-parser-patch
+id=deed-file-the-parser-patch ok
+$ deedar export --into bag/data/deeds deed-file-the-parser-patch
+exported 1 deeds, 4 files
+$ deedar check bag
+1 deeds proven against a log of 1 entries, root f568...
 ```
 
-`current` takes a set the same way, which is the other half of checking
-a citation: `evidence` says the bytes are intact, and `current` says
-whether the thing cited is still the tip. It exits non-zero when any of
-them moved, so a hook can gate on a stale citation.
+## What holds
 
-```sh
-vissue recall <id> --deeds-only | deedar current -
-# deed-file-note current
-# deed-patch-note SUPERSEDED by deed-patch-note-v2
-# 1 of 2 current
-```
+- A deed is never edited; a better take is a new deed that `--supersedes`
+  the old one, and `current` says where a citation moved.
+- `evidence`, `current` and `export` take one id, several, or `-` from a
+  pipe, and exit non-zero on any failure.
+- The log is RFC 9162 hashing (doi:10.17487/RFC9162): inclusion receipts
+  travel with an export, `log bridge` proves a log grew from a head you
+  kept, `log audit` finds a deed that was logged and is gone.
+- `DEEDAR_HOST_SIGNING_KEY` signs heads, sidecars and satchel manifests
+  with Ed25519; a receiver lists accepted keys in its store's `layout`.
+- Bytes and deeds are content addressed; log appends take a file lock, so
+  two processes minting at once write whole lines.
 
-`trail` walks `--input` from the patch to the quote. `current`
-follows a later take (`--supersedes`) to the tip; `get` still
-returns the named frozen deed. `get` also accepts a unique
-`sha256:` of the deed bytes or of one product path. `evidence`
-checks the deed, its write-once bytes, and every deed in
-`sources`. A `DEEDAR_HOST_KEY` (or `{store}/../host.key`) requires
-`{id}.host`; `DEEDAR_HOST_SIGNING_KEY` writes that sidecar as an
-Ed25519 signature instead, which is the only form a store can demand.
-`{store}/layout` says which public keys it accepts and whether an
-attestation is `required`:
+## Kinds
 
-```
-1
-attestation = required
-signer = ed25519:<64 hex>
-```
-
-`leave` copies the file bytes to `dest/{id}/` with a
-hash sidecar (`manifest.json`). `timestamp` writes an RFC 3161
-TimeStampReq over those evidence bytes (`.tsq` when `DEEDAR_TSA` is
-unset; `.tsr` when the authority replies). `migrate` ensures
-`{store}/layout`. `delete` writes a tombstone; `evidence` on that id
-then fails.
-
-## Handing work over
-
-`export` writes deeds, evidence, the host signature, and a `proof.txt`: the
-deed's place in this store's log, the path to the log head, and what the leaf
-hashes over, so a receiver with nothing but the bag can rebuild the leaf.
-`check` is the other end and needs no store; it answers with the head to
-record. `log bridge SIZE` proves the log grew from a recorded head without a
-rewrite, and `check --since` verifies it. The head is signed when the store
-holds a key; `check` says who signed it and whether that key is accepted.
-`vouch sign`/`vouch check` cover the manifest, not the deeds; a receiver wants
-both.
-
-```sh
-just deedar export --into /tmp/bag/data/deeds deed-patch-note
-# or the list a tracker names
-vissue recall <id> --deeds-only | deedar export --into /tmp/bag/data/deeds -
-```
-```sh
-just deedar check /tmp/bag
-# 3 deeds proven against a log of 41 entries, root 9f2c...
-```
-```sh
-# the sender, told which head the receiver holds
-just deedar log bridge 41 > /tmp/bag2/bridge.txt
-# the receiver
-just deedar check /tmp/bag2 --since /tmp/bag2/bridge.txt
-# the log grew from 41 entries to 58 without dropping or rewriting one
-# 2 deeds proven against a log of 58 entries, root 4a71...
-```
-
-Other kinds and store law: [DESIGN.md](DESIGN.md).
-
-```
-work happens
-     |
-deedar.create --> deed + evidence
-                       |
-        get / list ----+--> a viewer paints face
-        next work -----+--> --input ids --> trail
-        evidence ------+--> check the deed, its bytes, and sources
-                       |      (several ids, or - for a list on stdin)
-        leave ---------+--> dest/{id} + hash sidecar
-        timestamp -----+--> RFC 3161 TimeStampReq over evidence
-        current -------+--> follow --supersedes to the tip
-                       |      (several ids, or - for a list on stdin)
-        migrate -------+--> write {store}/layout when missing
-        export --------+--> dest/{id} + proof.txt against the log head
-        check ---------+--> the receiving end: bytes, leaf, path, head
-                       |      (--since a bridge, for a head kept earlier)
-```
-
-## Build
-
-```
-just check
-```
+`file`, `set`, `quote`, `patch`, `mailDraft`, `clip`, `page`, `form`,
+`table`, `procedure`, `event`. The reference page lists each kind's flags.
 
 ## License
 
-MIT
+MIT.

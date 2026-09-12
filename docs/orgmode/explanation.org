@@ -13,6 +13,9 @@ old one still resolves and =current= says where it went.
 
 * Why a log
 
+#+ATTR_HTML: :alt The handover: export with receipts, seal and sign; then three questions and import :width 100%
+[[file:_static/handover.svg]]
+
 Every deed is signed by the store's writer key, and a signature says who
 wrote a deed. It does not say what else the store contains. A holder can
 hand one reader the store and another the same store with a deed removed,

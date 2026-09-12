@@ -18,6 +18,8 @@ old one still resolves and ``current`` says where it went.
 Why a log
 ---------
 
+.. image:: _static/handover.svg
+
 Every deed is signed by the store's writer key, and a signature says who
 wrote a deed. It does not say what else the store contains. A holder can
 hand one reader the store and another the same store with a deed removed,
@@ -51,6 +53,14 @@ was entitled to produce these bytes. The sidecar is a signature and never a
 keyed hash: a keyed-hash (HMAC) verifier has the key and can mint what it
 checks, and with the key beside the store that includes the agent being
 vouched for. A public key cannot mint.
+
+Two writers, one log
+--------------------
+
+Bytes and deeds are content addressed, so two processes minting the same
+product write the same files. The log is the one place order matters: an
+append takes a file lock for the one write, so entries from two processes
+are whole lines in some order, never interleaved bytes.
 
 One identifier
 --------------
