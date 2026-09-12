@@ -46,6 +46,13 @@ keyed hash: a keyed-hash (HMAC) verifier has the key and can mint what it
 checks, and with the key beside the store that includes the agent being
 vouched for. A public key cannot mint.
 
+* Two writers, one log
+
+Bytes and deeds are content addressed, so two processes minting the same
+product write the same files. The log is the one place order matters: an
+append takes a file lock for the one write, so entries from two processes
+are whole lines in some order, never interleaved bytes.
+
 * One identifier
 
 The accession is the only thing that crosses the stack. A tracker cites it
