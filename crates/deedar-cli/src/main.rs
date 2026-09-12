@@ -24,11 +24,8 @@ fn main() -> ExitCode {
     }
 }
 
-/// What a verb produced: text to print, and whether the run succeeded.
-///
-/// Every other verb fails by returning `Err`, which prints one message and
-/// nothing else. Checking a list of ids cannot work that way: the point is to
-/// say which ones failed, so it has to print a report *and* exit non-zero.
+/// What a verb produced: text to print, and whether the run succeeded. A set
+/// check prints its report and exits non-zero.
 struct Report {
     text: String,
     ok: bool,
@@ -59,22 +56,13 @@ fn dispatch(args: Vec<String>) -> Result<Report, String> {
     run(args).map(|text| Report { text, ok: true })
 }
 
-/// Whether an `evidence` call names more than one deed.
-///
-/// A single id keeps the single-deed report it always had. `-` reads the ids
-/// from standard input, one per line, which is the form a working set arrives
-/// in from whatever tool holds the citations. A bare `evidence` stays an error
-/// rather than blocking on a terminal nobody meant to type into.
+/// Whether an `evidence` call names more than one deed; `-` reads ids from
+/// stdin, one per line. A bare call is an error, not a wait on a terminal.
 fn is_many(args: &[String]) -> bool {
     args.len() > 1 || args.first().is_some_and(|a| a == "-")
 }
 
-/// Check every named deed, reporting one line each.
-///
-/// Fails closed on the whole list: one unverifiable deed in a working set is
-/// enough to make the set untrustworthy, and a caller that has to parse the
-/// text to find that out will not.
-/// The ids a set-shaped call names, from the arguments or from stdin.
+/// Check every named deed, one line each; one failure fails the list.
 fn ids_from(args: &[String], verb: &str) -> Result<Vec<String>, String> {
     let ids: Vec<String> = if args.first().is_some_and(|a| a == "-") {
         let mut buf = String::new();
@@ -90,16 +78,8 @@ fn ids_from(args: &[String], verb: &str) -> Result<Vec<String>, String> {
     Ok(ids)
 }
 
-/// Follow every named deed to the tip of its supersede chain.
-///
-/// The set form of `current`, and the reason it exists: a citation is written
-/// once and the thing it names can be superseded afterwards. Whatever holds the
-/// citations, a tracker or a pack, has no way to notice that on its own, so it
-/// hands the list over and this says which of them have moved on.
-///
-/// Exits non-zero when any citation is stale, so a hook can gate on it. A
-/// missing deed is stale too: a citation that resolves to nothing is not a
-/// citation anybody should keep.
+/// Follow every named deed to the tip of its supersede chain; non-zero when
+/// any is stale or missing, so a hook can gate on it.
 fn current_many(url: &str, args: &[String]) -> Result<Report, String> {
     let ids = ids_from(args, "current")?;
     let mut client = Client::open(url).map_err(|e| e.to_string())?;
@@ -158,19 +138,8 @@ fn evidence_many(url: &str, args: &[String]) -> Result<Report, String> {
     })
 }
 
-/// Sign a file somebody else will open, or check the signature on one.
-///
-/// A satchel arrives with a manifest, and checking the payload against that
-/// manifest catches what was corrupted or dropped on the way. It does not
-/// catch a manifest that was rewritten, because a receiver recomputing digests
-/// from the bag they were handed is checking the bag against itself. The
-/// manifest is the right thing to sign: it covers the whole payload already,
-/// so signing it signs everything, and the checker that objects to an unlisted
-/// file is what stops that being a loophole.
-///
-/// The signer list comes from the store's own layout, which is where a reader
-/// says which keys they accept. Without one this reports that the bytes and
-/// the signature go together and says so, rather than calling that a check.
+/// Sign a satchel's manifest, or check the signature on one against the
+/// store's signer list. Without a list, the weaker answer is reported as such.
 fn cmd_vouch(url: &str, args: &[String]) -> Result<String, String> {
     let dir = deedar::store_dir(url).map_err(|e| e.to_string())?;
     match args.first().map(String::as_str) {
@@ -191,18 +160,8 @@ fn cmd_vouch(url: &str, args: &[String]) -> Result<String, String> {
     }
 }
 
-/// Check deeds somebody else handed over.
-///
-/// This is the other end of `export`, and the only verb here that needs no
-/// store: a receiver holds a bag and no log, which is the whole situation the
-/// proofs exist for. It answers with the head every deed in the bag was
-/// against, because that head is what the receiver writes down and hands to
-/// `--since` the next time the same sender gives them something.
-///
-/// A bridge file, when given, is checked before anything else. Without one a
-/// clean answer means every deed is in the tree the sender is showing; with
-/// one it also means that tree is the one the receiver already saw, grown
-/// rather than replaced.
+/// Check deeds somebody else handed over, with no store: every receipt against
+/// the head in the bag, and with `--since` the bridge from a head kept before.
 fn cmd_check(url: &str, args: &[String]) -> Result<String, String> {
     let mut dir: Option<PathBuf> = None;
     let mut bridge: Option<PathBuf> = None;
@@ -231,10 +190,7 @@ fn cmd_check(url: &str, args: &[String]) -> Result<String, String> {
             bridge.from.size, bridge.to.size
         ));
     }
-    // The signer list is the reader's, and it lives in their own store's
-    // layout, the same place `vouch check` reads it from. A reader with no
-    // store gets the weaker answer and is told so rather than being given the
-    // stronger one for free.
+    // The reader's signer list, from their own store; none means the weaker answer.
     let accept = deedar::store_dir(url)
         .ok()
         .and_then(|dir| deedar::Policy::read(&dir).ok())
@@ -245,17 +201,8 @@ fn cmd_check(url: &str, args: &[String]) -> Result<String, String> {
     Ok(out)
 }
 
-/// Write deeds somewhere else, with the proof they were logged here first.
-///
-/// Takes one accession, several, or `-` to read them from stdin, which is how
-/// `evidence` and `current` already take a list. That is what lets a tracker
-/// name what a handover needs without this store having to read the tracker's
-/// format: the list crosses on a pipe, the way the accession crosses
-/// everywhere else in this stack.
-///
-/// Bytes and a signature travel fine on their own and say a writer vouched for
-/// them. They do not say the deed existed before somebody wanted to hand it
-/// over. The inclusion proof beside them does.
+/// Write deeds into a satchel with the inclusion proof they were logged here
+/// first. One accession, several, or `-` for stdin.
 fn cmd_export(client: &mut Client, args: &[String]) -> Result<String, String> {
     let mut into: Option<PathBuf> = None;
     let mut rest: Vec<String> = Vec::new();
@@ -274,12 +221,8 @@ fn cmd_export(client: &mut Client, args: &[String]) -> Result<String, String> {
     }
     let into = into.ok_or("export needs --into DIR")?;
     let ids = ids_from(&rest, "export")?;
-    // The log is read and hashed once for the whole list. Per deed it was a
-    // full read and a full hashing each, which made a hundred-deed handover
-    // cost a hundred readings of a log that did not change between them.
-    // Names resolve first, against the store, and only then is the log read:
-    // resolving mutates the client's view of the store and the exporter
-    // borrows it for the whole handover.
+    // Names resolve first; the exporter then borrows the store and reads the
+    // log once for the whole list.
     let resolved: Vec<(String, deed::Result<DeedId>)> = ids
         .iter()
         .map(|raw| (raw.clone(), client.resolve(raw)))
@@ -306,16 +249,8 @@ fn cmd_export(client: &mut Client, args: &[String]) -> Result<String, String> {
     ))
 }
 
-/// The append-only log: what the store has issued, and whether it still
-/// serves it.
-///
-/// `head` is what a reader keeps between visits. `prove` shows a deed is in
-/// the tree that head names, in the form a reader can check with nothing but
-/// the deed bytes. `bridge` joins a head a reader kept to this one, which is
-/// the only thing that catches a log rewritten between two visits. `audit`
-/// walks the log and asks the store for each deed, which is how a deletion
-/// becomes visible: every signature that is left is still good, and the log is
-/// what says one is missing.
+/// The append-only log: `head` to keep, `prove` for one deed, `bridge` from a
+/// kept head to this one, `audit` of the log against the shelves.
 fn cmd_log(client: &mut Client, args: &[String]) -> Result<String, String> {
     match args.first().map(String::as_str) {
         Some("head") | None => {
@@ -367,10 +302,7 @@ fn cmd_log(client: &mut Client, args: &[String]) -> Result<String, String> {
             for id in &audit.unlogged {
                 out.push_str(&format!("unlogged {id}\n"));
             }
-            // A store that fell behind the log is not one that lost something,
-            // and saying so is more use than a count of complaints. The test
-            // is that nothing is missing, not that the log is empty: a store
-            // holding deeds from both sides of the log still wants this.
+            // Behind the log, not tampered with: say so.
             if audit.backfill_settles_it() {
                 let older = if audit.predates_the_log() {
                     "this store predates the log"
@@ -496,13 +428,8 @@ fn default_store() -> Option<PathBuf> {
     Some(base.join("deedar").join("store"))
 }
 
-/// The store to act on: `--url`, then `DEEDAR_URL`, then the seat's own.
-///
-/// The fallback is taken only when that store is already there. Creating one
-/// wherever a command happened to run is how a seat ends up with two, and a
-/// citation that resolves against one and not the other is worse than a
-/// command that refused. So an absent store still refuses, and names the path
-/// it would have used.
+/// The store to act on: `--url`, then `DEEDAR_URL`, then the seat's own if it
+/// exists; an absent store refuses and names the path.
 fn take_url(args: &[String]) -> Result<(String, Vec<String>), String> {
     let mut url = env::var("DEEDAR_URL").unwrap_or_default();
     let mut rest = Vec::new();
@@ -868,14 +795,7 @@ fn join_grants(grants: &[Grant]) -> String {
 mod url_tests {
     use super::*;
 
-    /// One sitting at a time over the process globals these tests read.
-    ///
-    /// HOME, XDG_DATA_HOME and DEEDAR_URL belong to the process, not to a
-    /// test, and cargo runs these in parallel. Without the lock one test sets
-    /// HOME while another is between its own set and its read, and the second
-    /// resolves a store under the first's temporary directory. The failure is
-    /// a wrong path in an assertion that looks like it is about path
-    /// resolution, so it reads as a bug in the code under test.
+    /// One test at a time over HOME, XDG_DATA_HOME and DEEDAR_URL.
     static ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     /// Point HOME and XDG at a scratch directory for one closure.
