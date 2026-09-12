@@ -189,7 +189,7 @@ mod tests {
         let said = text(&standing[0]);
         assert!(said.contains("deed-file-note"), "{said}");
         ordered(
-            &said,
+            said,
             &[
                 "`deedar_get`",
                 "`deedar_evidence`",
