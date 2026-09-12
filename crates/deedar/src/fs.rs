@@ -12,18 +12,8 @@ use crate::CreateRequest;
 
 type HmacSha256 = Hmac<Sha256>;
 
-/// Directory of deeds, write-once bytes, and tombstones.
-/// What an audit found, in both directions.
-///
-/// The two are different states and only one is tampering. A store written
-/// before the log existed has deeds and no entries, and should be told to
-/// backfill rather than accused; a store that logged a deed and no longer
-/// serves it, or serves one it never logged, is what the log exists to catch.
-/// One reading of the log, held for a handover of many deeds.
-///
-/// See [`FsStore::exporter`]. Every receipt made through this is a lookup in a
-/// tree built once, and every deed in the bag is against the one head this
-/// holds, which is also what a receiver is told to record.
+/// One reading of the log, held for a handover of many deeds; see
+/// [`FsStore::exporter`]. Every receipt is a lookup in a tree built once.
 pub struct Exporter<'a> {
     store: &'a FsStore,
     tree: std::sync::Arc<LogTree>,
@@ -96,6 +86,8 @@ impl Exporter<'_> {
     }
 }
 
+/// What an audit found in both directions: logged and gone is tampering;
+/// served and never logged is a store that wants backfilling.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Audit {
     /// Entries the log holds.
@@ -113,13 +105,7 @@ impl Audit {
         self.missing.is_empty() && self.unlogged.is_empty()
     }
 
-    /// Whether backfilling is the whole answer.
-    ///
-    /// True when nothing was lost and something was never logged, which is a
-    /// store that is behind rather than one that has been tampered with. The
-    /// condition is not that the log is empty: a store with nine deeds from
-    /// before the log and one from after has a log, is missing nothing, and
-    /// still wants exactly this advice.
+    /// Nothing lost and something never logged: backfilling is the answer.
     #[must_use]
     pub fn backfill_settles_it(&self) -> bool {
         self.missing.is_empty() && !self.unlogged.is_empty()
@@ -149,6 +135,7 @@ type LogStamp = (u64, Option<std::time::SystemTime>);
 /// One reading of the log, and the stamp of the file it was read from.
 type TreeCache = std::sync::Mutex<Option<(LogStamp, std::sync::Arc<LogTree>)>>;
 
+/// Directory of deeds, write-once bytes, and tombstones.
 pub struct FsStore {
     dir: PathBuf,
     key: [u8; 32],
@@ -322,18 +309,9 @@ impl FsStore {
         Ok(())
     }
 
-    /// Log every deed the store serves that the log does not name.
-    ///
-    /// A store written before the log existed is not a store that lost
-    /// anything, and telling it so forever is not an answer. This appends what
-    /// is already on the shelves, in accession order so two runs over the same
-    /// store agree.
-    ///
-    /// What this cannot do is date them. The entry takes the evidence's time
-    /// where there is one, and the moment of backfill where there is not, and
-    /// either way the log says these were logged now rather than when they
-    /// were made. A log that starts today is honest about starting today; one
-    /// that claimed to have watched a deed it never saw would not be.
+    /// Log every deed the store serves that the log does not name, in
+    /// accession order. The entry time is the evidence's when there is one,
+    /// else now.
     ///
     /// # Errors
     ///
@@ -367,9 +345,7 @@ impl FsStore {
     ///
     /// # Errors
     ///
-    /// Fails when a line is not an entry, rather than skipping it: a log that
-    /// dropped what it could not read would report a tree the store never
-    /// signed, which is the failure the log exists to make visible.
+    /// Fails when a line is not an entry; nothing is skipped.
     pub fn log_entries(&self) -> Result<Vec<crate::log::Entry>> {
         let path = self.log_path();
         if !path.exists() {
@@ -470,13 +446,8 @@ impl FsStore {
         })
     }
 
-    /// What the log says the store holds, against what it will hand over.
-    ///
-    /// The log is append-only and the store is not: `delete` tombstones a deed
-    /// and the leaf stays. That gap is the detection. A reader walks the log,
-    /// asks for each deed, and gets back the ones that have gone missing or
-    /// changed under their accession, which is a question no pile of
-    /// signatures answers because each signature is still perfectly good.
+    /// The log against the shelves: deeds logged and gone or changed, and
+    /// deeds served and never logged.
     ///
     /// # Errors
     ///
@@ -488,10 +459,7 @@ impl FsStore {
         for entry in &entries {
             logged.insert(entry.id.clone());
         }
-        // The other direction, which is the one an empty log makes vacuous. A
-        // store written before the log existed has deeds and no entries, and
-        // walking only the log calls that clean because there was nothing to
-        // walk. The emptier the log the better the verdict, which is backwards.
+        // The other direction; walking the log alone calls an empty log clean.
         let mut unlogged: Vec<String> = Vec::new();
         for deed in self.list()? {
             let id = deed.id.to_string();
@@ -531,14 +499,8 @@ impl FsStore {
         })
     }
 
-    /// Write one deed into a satchel: its canonical bytes, its evidence, and
-    /// the proof it was in this store's log before the satchel was packed.
-    ///
-    /// The proof is the part that is not a copy. Bytes and a signature travel
-    /// fine on their own and say a writer vouched for them; they do not say
-    /// the deed existed before somebody wanted to hand it over. An inclusion
-    /// path against a head the receiver can record is what separates a deed
-    /// from a deed minted for the occasion.
+    /// Write one deed into a satchel: canonical bytes, evidence, and the
+    /// inclusion proof against a head the receiver can record.
     ///
     /// # Errors
     ///
@@ -788,11 +750,8 @@ impl FsStore {
             .map_err(|_| Error::Evidence("keyed hash".into()))
     }
 
-    /// Check whatever attestation the store demands, and whatever it has.
-    ///
-    /// A keyed hash never satisfies a demand for attestation. It says the bytes
-    /// are the bytes; the demand is about who was entitled to make them, and a
-    /// construction whose verifier can mint cannot answer that.
+    /// Check the attestation the store demands. A keyed hash never satisfies
+    /// it: a verifier that can mint cannot attest.
     fn check_host(&self, deed: &Deed, ev: &Evidence) -> Result<()> {
         let path = crate::host::sidecar(&self.dir, &deed.id);
         let present = path.exists();

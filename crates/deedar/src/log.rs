@@ -1,50 +1,14 @@
-//! An append-only log over the deeds a store has issued.
-//!
-//! Every deed is signed, and a signature says who wrote a deed. It does not
-//! say what else the store holds, and that is a different question. A holder
-//! can hand one reader a store and another reader the same store with a deed
-//! removed, and both sets verify: every signature in them is good. `delete` is
-//! a supported verb here, so this is not hypothetical.
-//!
-//! The log binds the set. Each deed appends a leaf; the leaves hash into a
-//! Merkle tree; the root plus the number of leaves is a tree head, and the
-//! store signs that. Two things follow that a pile of signatures cannot give:
-//!
-//! - an *inclusion* proof, which shows a deed is in the tree a head names, so
-//!   a store that dropped it cannot produce a head that still covers it; and
-//! - a *consistency* proof, which shows a later head extends an earlier one
-//!   rather than replacing it, so a store cannot rewrite what it already
-//!   published without every reader who kept a head noticing.
-//!
-//! The hashing is Certificate Transparency's, specified in RFC 9162
-//! (doi:10.17487/RFC9162), which obsoletes RFC 6962. The tree construction is
-//! unchanged between the two versions and the section numbers cited below are
-//! the ones that carried over; what 2.0 settles, and what this store takes
-//! from it, is that the head a reader keeps is a signed object rather than two
-//! numbers they are told to write down.
-//!
-//! A leaf is `SHA-256(0x00 || entry)` and
-//! a node is `SHA-256(0x01 || left || right)`, with the odd node at each level
-//! carried up. The prefixes are what stop a leaf being passed off as a node.
-//! Certificate Transparency uses this shape for the same reason a provenance
-//! store wants it: the party you are auditing is the party serving the data.
-//!
-//! What this does not do is gossip. One store signing its own heads catches a
-//! holder who rewrites history between two readings by the same reader, and
-//! catches deletion outright. It does not catch a holder who keeps two
-//! consistent logs and shows one to each reader; that needs the heads to be
-//! compared somewhere neither controls, which is a network protocol rather
-//! than a file format.
+//! An append-only Merkle log over the deeds a store has issued, hashed as
+//! RFC 9162 (doi:10.17487/RFC9162): leaf `SHA-256(0x00 || entry)`, node
+//! `SHA-256(0x01 || left || right)`. Inclusion proofs catch a dropped deed;
+//! consistency proofs catch a rewritten log. Signatures alone bind neither.
+//! No gossip: a holder showing two consistent logs to two readers is not caught.
 
 use sha2::{Digest, Sha256};
 
 use deed::{Error, Result};
 
 /// One entry: the deed's content address and the instant it was logged.
-///
-/// The address rather than the deed, because the log is about which deeds
-/// exist and the bytes are already addressed by their hash. A log that
-/// repeated the deed would be a second copy to keep in step.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Entry {
     /// The deed's accession.
@@ -56,10 +20,7 @@ pub struct Entry {
 }
 
 impl Entry {
-    /// The bytes a leaf hashes over.
-    ///
-    /// Tab-separated and in a fixed order, because the leaf hash has to be the
-    /// same on every machine that recomputes it from the same entry.
+    /// The bytes a leaf hashes over: tab-separated, fixed order.
     #[must_use]
     pub fn material(&self) -> Vec<u8> {
         format!("{}\t{}\t{}", self.id, self.digest, self.unix_time).into_bytes()
@@ -75,9 +36,7 @@ impl Entry {
     ///
     /// # Errors
     ///
-    /// Fails when the line is not three tab-separated fields with a numeric
-    /// time, because a log that skipped what it could not read would report a
-    /// tree the store never signed.
+    /// Fails when the line is not three tab-separated fields with a numeric time.
     pub fn parse(line: &str) -> Result<Self> {
         let mut parts = line.trim_end_matches('\n').split('\t');
         let (Some(id), Some(digest), Some(time), None) =
@@ -115,13 +74,9 @@ pub fn node_hash(left: &[u8; 32], right: &[u8; 32]) -> [u8; 32] {
     hasher.finalize().into()
 }
 
-/// The Merkle root over `leaves`, RFC 9162 section 2.1.
-///
-/// Empty is the hash of the empty string, one leaf is its leaf hash, and
-/// otherwise the tree splits at the largest power of two below the width. That
-/// split is not the same tree as pairing adjacent leaves and carrying the odd
-/// one up, and it matters: the proofs below are the RFC's, and they are only
-/// sound over the RFC's shape.
+/// The Merkle root over `leaves`, RFC 9162 section 2.1: the tree splits at
+/// the largest power of two below the width, which is the shape the proofs
+/// below are sound over.
 #[must_use]
 pub fn root(leaves: &[[u8; 32]]) -> [u8; 32] {
     match leaves {
@@ -170,12 +125,8 @@ impl Head {
     }
 }
 
-/// The audit path proving the leaf at `index` is in a tree of these leaves.
-///
-/// RFC 9162 section 2.1.3: the sibling subtree root at each level, innermost
-/// first. A verifier that has the leaf recomputes the root from it and
-/// compares against a head it already trusts, which is what makes the proof
-/// worth more than the store's word.
+/// The audit path for the leaf at `index`, RFC 9162 section 2.1.3: sibling
+/// subtree roots, innermost first.
 #[must_use]
 pub fn inclusion_proof(leaves: &[[u8; 32]], index: usize) -> Option<Vec<[u8; 32]>> {
     if index >= leaves.len() {
@@ -232,22 +183,10 @@ pub fn verify_inclusion(
     steps.next().is_none() && hex(&hash) == root_hex
 }
 
-/// The proof that a tree of `old` leaves is a prefix of these leaves.
-///
-/// An inclusion proof answers "is this deed in the tree you are publishing".
-/// It does not answer "is the tree you are publishing the one you published
-/// last time, with entries added". A store that rewrites its log wholesale and
-/// signs a fresh head passes every inclusion check against that head, because
-/// every entry in the new log is consistent with it.
-///
-/// This is what a reader who kept an old head uses. The nodes let them
-/// recompute both roots: the old one, to see that the head they hold is the
-/// one being extended, and the new one, to see what it was extended to. A log
-/// that dropped or reordered anything already published cannot produce a set
-/// of nodes that yields both.
-///
-/// RFC 9162 section 2.1.4. `None` when `old` is zero or wider than the tree,
-/// since neither names a prefix of it.
+/// The consistency proof that a tree of `old` leaves is a prefix of these,
+/// RFC 9162 section 2.1.4. The nodes recompute both roots; a rewritten log
+/// cannot produce a set that yields both. `None` when `old` is zero or wider
+/// than the tree.
 #[must_use]
 pub fn consistency_proof(leaves: &[[u8; 32]], old: usize) -> Option<Vec<[u8; 32]>> {
     if old == 0 || old > leaves.len() {
@@ -280,11 +219,7 @@ fn subproof(leaves: &[[u8; 32]], old: usize, known: bool) -> Vec<[u8; 32]> {
 }
 
 /// Whether the tree of `old` leaves with `old_root` is a prefix of the tree of
-/// `new` leaves with `new_root`.
-///
-/// Both roots are recomputed from the same nodes, which is what makes this
-/// worth more than the store's word: a log that dropped an already published
-/// entry can produce one of the two and never both.
+/// `new` leaves with `new_root`; both roots are recomputed from `nodes`.
 #[must_use]
 pub fn verify_consistency(
     old: usize,
@@ -341,12 +276,7 @@ pub fn verify_consistency(
     last == 0 && hex(&from_old) == old_root && hex(&from_new) == new_root
 }
 
-/// A hex root back to bytes, for the one case where the reader supplies it.
 /// A 32 byte hash from its hex, or nothing when the text is not one.
-///
-/// Anything that reads a proof off a wire or a file needs this, because every
-/// hash in a proof arrives as hex and a proof half read is worse than one that
-/// was refused.
 #[must_use]
 pub fn from_hex(text: &str) -> Option<[u8; 32]> {
     if text.len() != 64 {
@@ -425,11 +355,7 @@ mod tests {
         assert!(!verify_inclusion(&set[3], 3, 8, &path[..2], &head.root));
     }
 
-    /// Every prefix of every tree proves it is a prefix, at every size.
-    ///
-    /// Exhaustive rather than a fixture, because the recursion has three
-    /// branches and the interesting one is the tree whose width is not a power
-    /// of two, where the old boundary lands inside the right subtree.
+    /// Every prefix of every tree up to the bound proves it is a prefix.
     #[test]
     fn every_prefix_proves_it_is_one() {
         for new in 1..=33usize {
@@ -446,11 +372,7 @@ mod tests {
         }
     }
 
-    /// The attack the proof exists to stop: a log rewritten wholesale.
-    ///
-    /// Every entry in the new log is consistent with the new head, so every
-    /// inclusion proof against it checks out. Only a reader holding the old
-    /// head can tell, and only with this.
+    /// A log rewritten wholesale passes inclusion and fails consistency.
     #[test]
     fn a_rewritten_log_cannot_extend_the_head_it_replaced() {
         let honest = leaves(8);
