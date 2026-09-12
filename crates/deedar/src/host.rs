@@ -1,19 +1,6 @@
-//! Host-issued evidence sidecar.
-//!
-//! Two constructions, and they claim different things.
-//!
-//! The keyed hash came first and attests integrity: these bytes are the bytes
-//! the host saw. It cannot attest authorisation, because a verifier holding the
-//! issuer's key can mint what it checks, and the key sits beside the store where
-//! the agent being vouched for can read it.
-//!
-//! The signature is the one a store can demand. Ed25519 over the same canonical
-//! bytes, so nothing about the canonical form changes; the verifier holds only
-//! a public key and cannot mint. Which keys count lives in the layout, so a
-//! reader who did not set the store up can see what it accepts.
-//!
-//! A sidecar written by either construction stays readable, and a sidecar says
-//! which one it is rather than leaving a reader to guess by length.
+//! Host-issued evidence sidecar, in two constructions: a keyed hash attests
+//! integrity, an Ed25519 signature over the same canonical bytes attests
+//! authorisation. A sidecar says which it is.
 
 use std::env;
 use std::fs;
@@ -96,8 +83,7 @@ pub fn signing_key_path() -> Option<PathBuf> {
 ///
 /// # Errors
 ///
-/// Fails when the file exists and is not a 32-byte seed, because a signing key
-/// that is nearly right is a sidecar nobody can verify.
+/// Fails when the file exists and is not a 32-byte seed.
 pub fn load_signing_key() -> Result<Option<SigningKey>> {
     let Some(path) = signing_key_path() else {
         return Ok(None);
@@ -153,9 +139,7 @@ pub fn sign_ed25519(key: &SigningKey, deed_bytes: &[u8], unix_time: u64) -> Vec<
 ///
 /// # Errors
 ///
-/// [`Error::Evidence`] when no accepted key produced it, which is the same
-/// answer for a wrong key and an absent one: the store cannot tell them apart
-/// and neither should a caller.
+/// [`Error::Evidence`] when no accepted key produced it.
 pub fn verify_ed25519(
     signers: &BTreeSet<[u8; 32]>,
     deed_bytes: &[u8],

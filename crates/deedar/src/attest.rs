@@ -1,23 +1,6 @@
-//! What the store will accept as a host attestation, and from whom.
-//!
-//! A host sidecar is being asked to carry an authorisation claim: that this
-//! agent, under this grant, was entitled to produce these bytes. The writer
-//! hash already covers integrity, so nothing here is about the bytes being
-//! intact.
-//!
-//! That is why the construction is a signature rather than a keyed hash. An
-//! HMAC verifier holds the issuer's key, so anything able to check a sidecar is
-//! able to mint one, and with the key beside the store that includes the agent
-//! whose work is being vouched for. A public key cannot mint.
-//!
-//! Which keys count, and whether an attestation is required at all, belong in
-//! `{store}/layout`, because a reader who did not set the store up has to be
-//! able to see what it demands.
-//!
-//! The claim is worth exactly the separation between signer and signed. A
-//! policy library inside the agent's own process cannot hold a key the agent
-//! cannot read, so signing there attests that a code path ran. That is a real
-//! thing to attest and it is not authorisation.
+//! What the store accepts as a host attestation, and from whom: an Ed25519
+//! signature, never a keyed hash, since an HMAC verifier can mint what it
+//! checks. Which keys count, and whether one is required, is in `{store}/layout`.
 
 use std::collections::BTreeSet;
 use std::path::Path;
