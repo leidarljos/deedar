@@ -10,7 +10,16 @@ deed goes into an append-only Merkle log, so a store can show a deed was
 there before anyone asked and cannot drop one unnoticed. A tracker or a pack
 cites a deed by its accession and never copies the bytes.
 
-Docs and tutorial: https://leidarljos.github.io/deedar/
+Docs: https://leidarljos.github.io/deedar/
+
+| Page | What it answers |
+|---|---|
+| [Getting started](https://leidarljos.github.io/deedar/getting-started.html) | Freeze a file, prove it, supersede it |
+| [How-to](https://leidarljos.github.io/deedar/howto.html) | Export, check, hand a receipt |
+| [Reference](https://leidarljos.github.io/deedar/reference.html) | Kinds, accessions, the log |
+| [Explanation](https://leidarljos.github.io/deedar/explanation.html) | Why a citation is not a merge |
+
+The seat that cites a deed is documented at https://leidarljos.github.io.
 
 ## Install
 
