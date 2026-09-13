@@ -1,8 +1,3 @@
-======
-deedar
-======
-
-
 .. raw:: html
 
    <div class="vi-hero">
@@ -33,27 +28,27 @@ reader who kept a head. A tracker or a pack cites a deed by its
 accession and never copies the bytes.
 
 Install
--------
+=======
 
 .. code:: console
 
-    $ cargo binstall deedar-cli
-    $ cargo binstall deedar-mcp   # optional
-    $ export DEEDAR_URL=file://$HOME/.local/share/deedar/store
+   $ cargo binstall deedar-cli
+   $ cargo binstall deedar-mcp   # optional
+   $ export DEEDAR_URL=file://$HOME/.local/share/deedar/store
 
 First minute
-------------
+============
 
 .. code:: console
 
-    $ echo 'fn main() {}' > note.rs
-    $ deedar create file --name "the parser patch" --path note.rs --agent you
-    id=deed-file-the-parser-patch kind=file name=the parser patch
-    paths=sha256:536e506b...
-    $ deedar evidence deed-file-the-parser-patch
-    id=deed-file-the-parser-patch ok
-    $ deedar log head
-    size=1 root=f56884f1...
+   $ echo 'fn main() {}' > note.rs
+   $ deedar create file --name "the parser patch" --path note.rs --agent you
+   id=deed-file-the-parser-patch kind=file name=the parser patch
+   paths=sha256:536e506b...
+   $ deedar evidence deed-file-the-parser-patch
+   id=deed-file-the-parser-patch ok
+   $ deedar log head
+   size=1 root=f56884f1...
 
 The :doc:`tutorial <getting-started>` goes on to supersede the deed,
 hand it to another store with its receipt, and check it there.
@@ -67,3 +62,4 @@ hand it to another store with its receipt, and check it there.
    howto
    reference
    explanation
+   seat

@@ -1,11 +1,5 @@
-===========
-Explanation
-===========
-
-
-
 A product, frozen
------------------
+=================
 
 Work produces things: a patch, a table, a quote from a source, a page as it
 looked. The next unit of work needs to open the thing, not reread the
@@ -16,9 +10,9 @@ Because a better take is a new deed with ``--supersedes``, a citation of the
 old one still resolves and ``current`` says where it went.
 
 Why a log
----------
+=========
 
-.. image:: _static/handover.svg
+|image1|
 
 Every deed is signed by the store's writer key, and a signature says who
 wrote a deed. It does not say what else the store contains. A holder can
@@ -33,7 +27,7 @@ shows a deed is in the tree a head names, so a store that dropped it cannot
 produce a head that still covers it. A consistency proof shows a later head
 extends an earlier one rather than replacing it, so a store cannot rewrite
 what it published without every reader who kept a head noticing. The
-construction is Certificate Transparency's (https://doi.org/10.17487/RFC9162), and it
+construction is Certificate Transparency's (doi:10.17487/RFC9162), and it
 fits here because the party being audited is the party serving the data.
 
 What the log does not do is gossip. One store signing its own heads catches
@@ -43,7 +37,7 @@ and shows one to each reader. That needs heads compared somewhere neither
 controls, which is a network protocol rather than a file format.
 
 Integrity, authenticity, authorisation
---------------------------------------
+======================================
 
 Three questions, three constructions. A hash answers integrity: these are
 the bytes. A signature over the manifest answers authenticity: this key
@@ -55,7 +49,7 @@ checks, and with the key beside the store that includes the agent being
 vouched for. A public key cannot mint.
 
 Two writers, one log
---------------------
+====================
 
 Bytes and deeds are content addressed, so two processes minting the same
 product write the same files. The log is the one place order matters: an
@@ -63,10 +57,13 @@ append takes a file lock for the one write, so entries from two processes
 are whole lines in some order, never interleaved bytes.
 
 One identifier
---------------
+==============
 
 The accession is the only thing that crosses the stack. A tracker cites it
 on a node; a pack cites it in a claim; this store answers ``get``, ``trail``,
 ``evidence`` and ``current`` for it. None of the three opens another's format.
 The seat composes them by passing accessions on pipes, and a handover
 carries the deeds beside the tracker slice and the claims that cite them.
+
+.. |image1| image:: _static/handover.svg
+   :width: 100.0%

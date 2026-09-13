@@ -66,4 +66,5 @@ hand it to another store with its receipt, and check it there.
    howto
    reference
    explanation
+   seat
 #+end_export
