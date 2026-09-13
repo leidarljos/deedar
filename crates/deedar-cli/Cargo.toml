@@ -5,7 +5,14 @@ edition.workspace = true
 license.workspace = true
 publish.workspace = true
 rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
 description = "Operator path: deedar create/get/list/trail/evidence/delete/leave/timestamp/current/migrate"
+
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/deedar-v{ version }-{ target }.tar.gz"
+bin-dir = "deedar-v{ version }-{ target }/{ bin }{ binary-ext }"
+pkg-fmt = "tgz"
 
 [[bin]]
 name = "deedar"
