@@ -10,7 +10,7 @@ session node does not close a ticket.
 | What did the human freeze? | cards (files) | [[https://leidarljos.github.io/handbook/cards/][cards]] |
 | What does this seat know, standing? | packset | [[https://leidarljos.github.io/packset/][packset]] |
 | What did this unit produce? | deedar | [[https://leidarljos.github.io/deedar/][deedar]] |
-| What does this node stand on, and who agrees? | vissue | [[https://vissue.rgoswami.me][vissue]] |
+| What does this node stand on, and who agrees? | tracker | [[https://vissue.rgoswami.me][tracker site]] |
 | What is this session handing out? | claimdag | [[https://leidarljos.github.io/claimdag/][claimdag]] |
 | Who agrees, weighted? | ljos-consensus | [[https://leidarljos.github.io/consensus/][consensus]] |
 | May this argv run? | ljos-policyd | [[https://leidarljos.github.io/ljos-policyd/][ljos-policyd]] |
