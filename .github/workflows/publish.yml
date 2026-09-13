@@ -25,5 +25,5 @@ jobs:
         run: |
           set -euo pipefail
           for p in deedar-deed deedar deedar-cli deedar-mcp; do
-            cargo publish --locked --no-verify -p "$p" || true
+            cargo publish --locked --no-verify -p "$p"
           done
