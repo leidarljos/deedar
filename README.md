@@ -15,7 +15,7 @@ Docs and tutorial: https://leidarljos.github.io/deedar/
 ## Install
 
 ```console
-$ cargo install --git https://github.com/leidarljos/deedar deedar-cli
+$ cargo binstall deedar-cli
 $ export DEEDAR_URL=file://$HOME/.local/share/deedar/store
 ```
 

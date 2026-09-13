@@ -37,8 +37,8 @@ Install
 
 .. code:: console
 
-    $ cargo install --git https://github.com/leidarljos/deedar deedar-cli
-    $ cargo install --git https://github.com/leidarljos/deedar deedar-mcp   # optional
+    $ cargo binstall deedar-cli
+    $ cargo binstall deedar-mcp   # optional
     $ export DEEDAR_URL=file://$HOME/.local/share/deedar/store
 
 First minute
