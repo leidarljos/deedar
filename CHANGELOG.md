@@ -2,6 +2,11 @@
 
 Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
 
+## 0.3.1 (2026-09-15)
+
+- `deedar --help` and `deedar create --help` print usage. `create file`
+  without `--path` names `--path FILE`. `--help` does not need a store.
+
 ## 0.3.0 (2026-09-12)
 
 - The host key is found at `~/.config/deedar/host.key` when

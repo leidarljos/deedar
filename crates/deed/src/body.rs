@@ -235,7 +235,9 @@ impl Body {
         match self {
             Self::File { path, .. } => {
                 if path.as_os_str().is_empty() {
-                    return Err(Error::InvalidBody("file path is empty".into()));
+                    return Err(Error::InvalidBody(
+                        "create file wants --path FILE".into(),
+                    ));
                 }
             }
             Self::Set { title, members } => {

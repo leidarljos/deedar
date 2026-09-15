@@ -46,6 +46,12 @@ fn dispatch(args: Vec<String>) -> Result<Report, String> {
             ok: true,
         });
     }
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        return Ok(Report {
+            text: help_text(&args),
+            ok: true,
+        });
+    }
     let (url, rest) = take_url(&args)?;
     if rest.first().map(String::as_str) == Some("evidence") && is_many(&rest[1..]) {
         return evidence_many(&url, &rest[1..]);
@@ -407,14 +413,39 @@ fn run(args: Vec<String>) -> Result<String, String> {
             StoreUrl::parse(&url).map_err(|e| e.to_string())?.as_url()
         )),
         Some(other) => Err(format!("unknown command {other}")),
-        None => Err(
-            "usage: deedar [--url FILE] create|get|list|trail|evidence|delete|leave|timestamp|current|log|export|check|vouch|migrate\n\
-             evidence, current and export take one id, several ids, or - to read them from stdin\n\
-             log takes head, list, audit, backfill, prove ID, or bridge SIZE\n\
-             check takes a satchel directory and optionally --since BRIDGE; vouch takes sign FILE or check FILE"
-                .into(),
-        ),
+        None => Err(usage().trim_end().to_string()),
     }
+}
+
+fn usage() -> String {
+    "usage: deedar [--url FILE] create|get|list|trail|evidence|delete|leave|timestamp|current|log|export|check|vouch|migrate\n\
+     deedar --help            this page\n\
+     deedar create --help     kinds and flags, including --path\n\
+     evidence, current and export take one id, several ids, or - to read them from stdin\n\
+     log takes head, list, audit, backfill, prove ID, or bridge SIZE\n\
+     check takes a satchel directory and optionally --since BRIDGE; vouch takes sign FILE or check FILE\n"
+        .into()
+}
+
+fn help_text(args: &[String]) -> String {
+    let verb = args
+        .iter()
+        .map(String::as_str)
+        .find(|a| !a.starts_with('-') && *a != "--url");
+    match verb {
+        Some("create") => create_help(),
+        _ => usage(),
+    }
+}
+
+fn create_help() -> String {
+    "deedar create KIND --agent WHO [flags]\n\
+     kinds: file set quote patch maildraft clip page form table procedure event\n\
+     create file wants --path FILE and --agent WHO\n\
+     create set wants --member PATH (repeatable) and --agent WHO\n\
+     --name NAME     defaults to the kind\n\
+     --path FILE     the bytes for kind file (not --field path=)\n"
+        .into()
 }
 
 /// Where a seat keeps its store when nobody says otherwise.
@@ -499,6 +530,7 @@ fn cmd_create(client: &mut Client, args: &[String]) -> Result<String, String> {
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
+            "--help" | "-h" => return Ok(create_help()),
             "--name" => name = need(args, &mut i)?,
             "--id" => id = Some(DeedId::parse(&need(args, &mut i)?).map_err(|e| e.to_string())?),
             "--excerpt" => excerpt = need(args, &mut i)?,
@@ -562,7 +594,10 @@ fn cmd_create(client: &mut Client, args: &[String]) -> Result<String, String> {
         i += 1;
     }
     if agent.is_empty() {
-        return Err("--agent is required".into());
+        return Err("create wants --agent WHO".into());
+    }
+    if kind == "file" && path.as_os_str().is_empty() {
+        return Err("create file wants --path FILE".into());
     }
     if name.is_empty() {
         name = kind.clone();
@@ -897,6 +932,21 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("deedar-cli-{n}"));
         std::fs::create_dir_all(&dir).expect("dir");
         format!("file://{}", dir.display())
+    }
+
+    #[test]
+    fn help_does_not_need_a_store() {
+        let page = dispatch(vec!["--help".into()]).unwrap();
+        assert!(page.ok);
+        assert!(page.text.contains("deedar create --help"), "{}", page.text);
+        let create = dispatch(vec!["create".into(), "--help".into()]).unwrap();
+        assert!(create.text.contains("--path FILE"), "{}", create.text);
+        let file = dispatch(vec!["create".into(), "file".into(), "--help".into()]).unwrap();
+        assert!(
+            file.text.contains("create file wants --path FILE"),
+            "{}",
+            file.text
+        );
     }
 
     #[test]
