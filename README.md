@@ -17,7 +17,7 @@ Docs: https://leidarljos.github.io/deedar/
 | [Getting started](https://leidarljos.github.io/deedar/getting-started.html) | Freeze a file, prove it, supersede it |
 | [How-to](https://leidarljos.github.io/deedar/howto.html) | Export, check, hand a receipt |
 | [Reference](https://leidarljos.github.io/deedar/reference.html) | Kinds, accessions, the log |
-| [Explanation](https://leidarljos.github.io/deedar/explanation.html) | Why a citation is not a merge |
+| [Explanation](https://leidarljos.github.io/deedar/explanation.html) | Why a citation names a deed |
 
 The seat that cites a deed is documented at https://leidarljos.github.io.
 
