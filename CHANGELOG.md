@@ -2,6 +2,15 @@
 
 Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
 
+## 0.3.2 (2026-09-20)
+
+- `deedar_trail` says what it walks: the deed and every input it was made
+  from, back to the leaves. Whether a citation is still the tip is
+  `deedar_current`'s question.
+- Every MCP row carries `body`, the kind-specific product as the store
+  holds it, so `deedar_get` answers with what `deedar get` prints.
+- Every crate page carries the README.
+
 ## 0.3.1 (2026-09-15)
 
 - `deedar --help` and `deedar create --help` print usage. `create file`

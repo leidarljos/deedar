@@ -42,6 +42,10 @@ pub struct DeedRow {
     pub agent: String,
     /// `sha256:` of the canonical bytes, which `get` also accepts.
     pub digest: String,
+    /// The kind-specific product as the store holds it: a quote's excerpt
+    /// and range, a set's members, a patch's tree, and so on. What
+    /// `deedar get` prints under the envelope.
+    pub body: serde_json::Value,
 }
 
 /// What the log says about itself.
@@ -101,6 +105,7 @@ fn row(deed: &deed::Deed) -> DeedRow {
         sources: deed.sources.iter().map(source_text).collect(),
         agent: deed.produced_by.agent_id.clone(),
         digest: deedar::deed_digest(deed),
+        body: serde_json::to_value(&deed.body).unwrap_or(serde_json::Value::Null),
     }
 }
 
@@ -166,9 +171,9 @@ impl DeedarServer {
     }
 
     #[tool(
-        description = "The supersede chain behind a deed: what it replaced, and what replaced that. Use this when an accession is cited somewhere and you need to know whether it is still the tip.",
+        description = "The deed and every input it was made from: its sources that are deeds, and theirs, walked back to the leaves. Use this to see what a product stands on. Whether a citation is still the tip is deedar_current's question, not this one's.",
         annotations(
-            title = "Follow a supersede chain",
+            title = "Follow the sources",
             read_only_hint = true,
             open_world_hint = false
         )
