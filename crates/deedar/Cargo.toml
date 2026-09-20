@@ -10,6 +10,11 @@ repository.workspace = true
 homepage.workspace = true
 description = "One-writer deed store and Cap'n client"
 
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/deedar-v{ version }-{ target }.tar.gz"
+bin-dir = "deedar-v{ version }-{ target }/deedar{ binary-ext }"
+pkg-fmt = "tgz"
+
 [dependencies]
 libc = "0.2"
 deed.workspace = true
