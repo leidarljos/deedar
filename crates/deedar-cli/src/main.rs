@@ -347,7 +347,11 @@ fn run(args: Vec<String>) -> Result<String, String> {
                     "host key: {public}, a signer {} lists\n",
                     layout.display()
                 )),
-                (Some(_), Some(public)) => Err(unaccepted_signer_warning(&public, client.dir())),
+                (Some(_), Some(public)) => Err(format!(
+                    "host key {public} is not a signer {} lists; deeds signed now fail \
+                     evidence until it carries `signer = {public}`",
+                    layout.display()
+                )),
             }
         }
         Some("create") => {
