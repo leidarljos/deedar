@@ -72,6 +72,12 @@ impl Client {
         self.store.dir()
     }
 
+    /// See [`FsStore::signer_public`].
+    #[must_use]
+    pub fn signer_public(&self) -> Option<String> {
+        self.store.signer_public()
+    }
+
     /// See [`FsStore::unaccepted_signer`].
     #[must_use]
     pub fn unaccepted_signer(&self) -> Option<String> {

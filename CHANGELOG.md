@@ -9,6 +9,8 @@ Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
   Every deed signed that way fails `evidence`, which used to say only
   `host signature`; it now names the layout file and how many signers it
   lists.
+- `deedar host` says whether the store's `layout` lists the host signing
+  key, and exits 1 with the line to add when it does not.
 
 ## 0.3.2 (2026-09-20)
 

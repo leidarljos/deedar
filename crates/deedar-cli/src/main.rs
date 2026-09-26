@@ -339,6 +339,17 @@ fn run(args: Vec<String>) -> Result<String, String> {
     let (url, rest) = take_url(&args)?;
     let mut client = Client::open(&url).map_err(|e| e.to_string())?;
     match rest.first().map(String::as_str) {
+        Some("host") => {
+            let layout = client.dir().join("layout");
+            match (client.signer_public(), client.unaccepted_signer()) {
+                (None, _) => Ok("host key: none; deeds carry no host signature\n".into()),
+                (Some(public), None) => Ok(format!(
+                    "host key: {public}, a signer {} lists\n",
+                    layout.display()
+                )),
+                (Some(_), Some(public)) => Err(unaccepted_signer_warning(&public, client.dir())),
+            }
+        }
         Some("create") => {
             let made = cmd_create(&mut client, &rest[1..]);
             if made.is_ok() {
@@ -426,12 +437,13 @@ fn run(args: Vec<String>) -> Result<String, String> {
 }
 
 fn usage() -> String {
-    "usage: deedar [--url FILE] create|get|list|trail|evidence|delete|leave|timestamp|current|log|export|check|vouch|migrate\n\
+    "usage: deedar [--url FILE] create|get|list|trail|evidence|delete|leave|timestamp|current|log|export|check|vouch|migrate|host\n\
      deedar --help            this page\n\
      deedar create --help     kinds and flags, including --path\n\
      evidence, current and export take one id, several ids, or - to read them from stdin\n\
      log takes head, list, audit, backfill, prove ID, or bridge SIZE\n\
-     check takes a satchel directory and optionally --since BRIDGE; vouch takes sign FILE or check FILE\n"
+     check takes a satchel directory and optionally --since BRIDGE; vouch takes sign FILE or check FILE\n\
+     host says whether the store's layout lists the host signing key, and exits 1 when it does not\n"
         .into()
 }
 

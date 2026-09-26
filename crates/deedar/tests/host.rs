@@ -340,11 +340,16 @@ fn the_client_names_a_signing_key_the_layout_does_not_list() {
     );
     write_layout(&url, &format!("1\nsigner = ed25519:{public}\n"));
     assert_eq!(open(&url).unaccepted_signer(), None);
+    assert_eq!(
+        open(&url).signer_public(),
+        Some(format!("ed25519:{public}"))
+    );
     // SAFETY: ENV is held for the whole sitting.
     unsafe {
         std::env::set_var("DEEDAR_HOST_SIGNING_KEY", "off");
     }
     assert_eq!(open(&url).unaccepted_signer(), None);
+    assert_eq!(open(&url).signer_public(), None);
 }
 
 /// The reason the construction changed. A keyed hash cannot answer "who was

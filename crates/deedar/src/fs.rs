@@ -186,6 +186,18 @@ impl FsStore {
     }
 
     /// The public half of the host signing key, as `ed25519:<hex>`, when the
+    /// host signs at all.
+    #[must_use]
+    pub fn signer_public(&self) -> Option<String> {
+        let public = self.signing_key.as_ref()?.verifying_key().to_bytes();
+        Some(format!(
+            "{}:{}",
+            crate::attest::ED25519,
+            crate::attest::to_hex(&public)
+        ))
+    }
+
+    /// The public half of the host signing key, as `ed25519:<hex>`, when the
     /// host signs and this store's layout does not list that key. Every deed
     /// created then carries a signature `evidence` refuses.
     #[must_use]
