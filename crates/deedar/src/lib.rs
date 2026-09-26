@@ -67,6 +67,17 @@ impl Client {
         })
     }
 
+    /// The store directory this client acts on.
+    pub fn dir(&self) -> &std::path::Path {
+        self.store.dir()
+    }
+
+    /// See [`FsStore::unaccepted_signer`].
+    #[must_use]
+    pub fn unaccepted_signer(&self) -> Option<String> {
+        self.store.unaccepted_signer()
+    }
+
     pub fn create(&mut self, req: CreateRequest) -> Result<(Deed, deed::Evidence)> {
         let bytes = wire::encode_request(&Request::Create(Box::new(req)))?;
         match wire::decode_response(&self.store.handle(&bytes)?)? {

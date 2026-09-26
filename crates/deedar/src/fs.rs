@@ -185,6 +185,22 @@ impl FsStore {
         &self.dir
     }
 
+    /// The public half of the host signing key, as `ed25519:<hex>`, when the
+    /// host signs and this store's layout does not list that key. Every deed
+    /// created then carries a signature `evidence` refuses.
+    #[must_use]
+    pub fn unaccepted_signer(&self) -> Option<String> {
+        let signing = self.signing_key.as_ref()?;
+        let public = signing.verifying_key().to_bytes();
+        (!self.policy.signers.contains(&public)).then(|| {
+            format!(
+                "{}:{}",
+                crate::attest::ED25519,
+                crate::attest::to_hex(&public)
+            )
+        })
+    }
+
     pub fn handle(&mut self, bytes: &[u8]) -> Result<Vec<u8>> {
         let req = wire::decode_request(bytes)?;
         let resp = match req {
@@ -773,7 +789,15 @@ impl FsStore {
                 &deed_bytes,
                 ev.unix_time,
                 &signature,
-            ),
+            )
+            .map_err(|e| match e {
+                Error::Evidence(what) if what == "host signature" => Error::Evidence(format!(
+                    "host signature: no signer {}/layout lists made it ({} listed)",
+                    self.dir.display(),
+                    self.policy.signers.len()
+                )),
+                other => other,
+            }),
             Some(crate::host::Sidecar::KeyedHash(mac)) => {
                 if !self.policy.permits_unattested() {
                     return Err(Error::Evidence("host attestation required".into()));

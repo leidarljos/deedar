@@ -2,6 +2,14 @@
 
 Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
 
+## Unreleased
+
+- `deedar create` warns on stderr when the host signs with a key the
+  store's `layout` does not list, and names the `signer =` line to add.
+  Every deed signed that way fails `evidence`, which used to say only
+  `host signature`; it now names the layout file and how many signers it
+  lists.
+
 ## 0.3.2 (2026-09-20)
 
 - `deedar_trail` says what it walks: the deed and every input it was made

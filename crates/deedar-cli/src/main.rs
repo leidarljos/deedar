@@ -339,7 +339,15 @@ fn run(args: Vec<String>) -> Result<String, String> {
     let (url, rest) = take_url(&args)?;
     let mut client = Client::open(&url).map_err(|e| e.to_string())?;
     match rest.first().map(String::as_str) {
-        Some("create") => cmd_create(&mut client, &rest[1..]),
+        Some("create") => {
+            let made = cmd_create(&mut client, &rest[1..]);
+            if made.is_ok() {
+                if let Some(public) = client.unaccepted_signer() {
+                    eprintln!("{}", unaccepted_signer_warning(&public, client.dir()));
+                }
+            }
+            made
+        }
         Some("get") => {
             let id = client
                 .resolve(rest.get(1).ok_or("get needs an id")?)
@@ -488,6 +496,15 @@ fn take_url(args: &[String]) -> Result<(String, Vec<String>), String> {
         }
     }
     Ok((url, rest))
+}
+
+/// What to tell a seat whose host signs with a key its store does not accept.
+fn unaccepted_signer_warning(public: &str, store: &std::path::Path) -> String {
+    format!(
+        "deedar: warning: this deed is signed by {public}, which {}/layout does not list; \
+         evidence will refuse it until that file carries `signer = {public}`",
+        store.display()
+    )
 }
 
 fn cmd_create(client: &mut Client, args: &[String]) -> Result<String, String> {

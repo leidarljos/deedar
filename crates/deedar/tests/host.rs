@@ -315,6 +315,36 @@ fn a_signature_from_a_key_the_layout_does_not_accept_is_refused() {
         .unwrap();
     let err = client.evidence(&id).expect_err("a signer nobody accepts");
     assert!(matches!(err, Error::Evidence(_)), "{err}");
+    // The refusal says where the accepted signers are listed and how many.
+    let said = err.to_string();
+    assert!(said.contains("/layout lists"), "{said}");
+    assert!(said.contains("(1 listed)"), "{said}");
+}
+
+/// A host that signs with a key its store does not list is told so before
+/// its deeds fail evidence; a listed key is not.
+#[test]
+fn the_client_names_a_signing_key_the_layout_does_not_list() {
+    let (_guard, url, parent) = isolate();
+    let key = parent.join("host.signing");
+    let public = signing_key(&key, 24);
+    // SAFETY: ENV is held for the whole sitting.
+    unsafe {
+        std::env::set_var("DEEDAR_HOST_SIGNING_KEY", &key);
+    }
+    drop(open(&url));
+    write_layout(&url, "1\n");
+    assert_eq!(
+        open(&url).unaccepted_signer(),
+        Some(format!("ed25519:{public}"))
+    );
+    write_layout(&url, &format!("1\nsigner = ed25519:{public}\n"));
+    assert_eq!(open(&url).unaccepted_signer(), None);
+    // SAFETY: ENV is held for the whole sitting.
+    unsafe {
+        std::env::set_var("DEEDAR_HOST_SIGNING_KEY", "off");
+    }
+    assert_eq!(open(&url).unaccepted_signer(), None);
 }
 
 /// The reason the construction changed. A keyed hash cannot answer "who was
