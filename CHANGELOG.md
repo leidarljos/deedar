@@ -2,7 +2,7 @@
 
 Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
 
-## Unreleased
+## 0.3.3 (2026-09-29)
 
 - `deedar create` warns on stderr when the host signs with a key the
   store's `layout` does not list, and names the `signer =` line to add.

@@ -324,7 +324,7 @@ dependencies = [
 
 [[package]]
 name = "deedar"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "criterion",
  "deedar-deed",
@@ -338,7 +338,7 @@ dependencies = [
 
 [[package]]
 name = "deedar-cli"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "deedar",
  "deedar-deed",
@@ -347,14 +347,14 @@ dependencies = [
 
 [[package]]
 name = "deedar-deed"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "deedar-mcp"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "anyhow",
  "deedar",
