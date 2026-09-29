@@ -864,7 +864,7 @@ mod url_tests {
     use super::*;
 
     /// One test at a time over HOME, XDG_DATA_HOME and DEEDAR_URL.
-    static ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    pub(super) static ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     /// Point HOME and XDG at a scratch directory for one closure.
     fn with_home<T>(
@@ -957,7 +957,21 @@ mod tests {
     use super::{dispatch, run};
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    /// The machine's own signing key, when it has one, would sign deeds
+    /// into scratch stores that list no signer. The switch is set once, under
+    /// the environment lock, before the first scratch store is handed out.
+    fn keyless() {
+        static OFF: std::sync::Once = std::sync::Once::new();
+        OFF.call_once(|| {
+            let _env = super::url_tests::ENV
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            std::env::set_var("DEEDAR_HOST_SIGNING_KEY", "off");
+        });
+    }
+
     fn tmp_url() -> String {
+        keyless();
         let n = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("time")

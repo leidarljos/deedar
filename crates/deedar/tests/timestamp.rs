@@ -9,7 +9,17 @@ use deedar::{imprint_hash, timestamp_req, Client, CreateRequest};
 
 const SHA256_OID: &[u8] = &[0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01];
 
+/// The machine's own signing key, when it has one, would sign deeds into
+/// scratch stores that list no signer, and their evidence would fail for that
+/// reason instead. The switch is set once, by the first scratch store any test
+/// here asks for, so every later read of the environment comes after it.
+fn keyless() {
+    static OFF: std::sync::Once = std::sync::Once::new();
+    OFF.call_once(|| std::env::set_var("DEEDAR_HOST_SIGNING_KEY", "off"));
+}
+
 fn tmp_url() -> String {
+    keyless();
     let n = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("time")

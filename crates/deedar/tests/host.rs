@@ -29,6 +29,10 @@ fn isolate() -> (std::sync::MutexGuard<'static, ()>, String, PathBuf) {
     let parent = std::env::temp_dir().join(format!("deedar-host-{n}"));
     let store = parent.join("store");
     fs::create_dir_all(&store).unwrap();
+    // The default signing key is read from the config directory; a machine
+    // that has one would sign every deed here. Each sitting gets an empty one.
+    // SAFETY: ENV is held for the whole sitting that reads it.
+    unsafe { std::env::set_var("XDG_CONFIG_HOME", parent.join("config")) };
     (guard, format!("file://{}", store.display()), parent)
 }
 

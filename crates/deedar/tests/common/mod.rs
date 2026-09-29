@@ -6,7 +6,18 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use deed::{Body, DeedId};
 use deedar::{Client, CreateRequest};
 
+/// The suites attack stores, not a host key: the machine's own signing key,
+/// when it has one, would sign deeds into scratch stores that list no signer,
+/// and their evidence would fail for that reason instead. The switch is set
+/// once per test binary, by the first scratch store or client any test asks
+/// for, so every later read of the environment comes after the one write.
+fn keyless() {
+    static OFF: std::sync::Once = std::sync::Once::new();
+    OFF.call_once(|| std::env::set_var("DEEDAR_HOST_SIGNING_KEY", "off"));
+}
+
 pub fn tmp_url() -> String {
+    keyless();
     let n = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("time")
@@ -58,5 +69,6 @@ pub fn file(id: &str, path: PathBuf) -> CreateRequest {
 }
 
 pub fn open(url: &str) -> Client {
+    keyless();
     Client::open(url).unwrap()
 }
