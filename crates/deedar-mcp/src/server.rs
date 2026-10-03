@@ -20,6 +20,11 @@ const SCHEME: &str = "deed";
 /// A deed's canonical rendering is text, and its bytes are Cap'n.
 const TEXT: &str = "text/plain";
 
+/// How long a resource result stays fresh. An accession may be given as a
+/// prefix, which resolves against a store that grows, so nothing is cached;
+/// MCP protocol 2026-07-28 requires the caching fields on every cacheable result.
+const RESOURCE_TTL_MS: u64 = 0;
+
 #[derive(Clone)]
 pub struct DeedarServer {
     url: String,
@@ -414,7 +419,9 @@ impl ServerHandler for DeedarServer {
         template.description =
             Some("A deed by accession, rendered as the store prints it.".to_string());
         template.mime_type = Some(TEXT.to_string());
-        Ok(ListResourceTemplatesResult::with_all_items(vec![template]))
+        Ok(ListResourceTemplatesResult::with_all_items(vec![template])
+            .with_ttl_ms(RESOURCE_TTL_MS)
+            .with_cache_scope(CacheScope::Private))
     }
 
     async fn read_resource(
@@ -444,6 +451,8 @@ impl ServerHandler for DeedarServer {
                 text,
                 meta: None,
             }])
+            .with_ttl_ms(RESOURCE_TTL_MS)
+            .with_cache_scope(CacheScope::Private)
             .into(),
         )
     }
