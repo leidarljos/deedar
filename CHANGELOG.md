@@ -2,6 +2,13 @@
 
 Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
 
+## Unreleased
+
+- The explanation places the deed log beside Rekor, the Update
+  Framework, and Supply-chain Levels for Software Artifacts. The hash
+  stays Certificate Transparency's. The history tree is Crosby and
+  Wallach, USENIX Security 2009.
+
 ## 0.3.3 (2026-09-29)
 
 - `deedar create` warns on stderr when the host signs with a key the

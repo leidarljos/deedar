@@ -36,6 +36,23 @@ catches deletion. It does not catch a holder who keeps two consistent logs
 and shows one to each reader. That needs heads compared somewhere neither
 controls, which is a network protocol rather than a file format.
 
+The family this log belongs to
+==============================
+
+The hash is Certificate Transparency's, named above
+(doi:10.17487/RFC9162). The shape it descends from is the history tree
+of Crosby and Wallach, USENIX Security 2009. The live systems split by
+the job. Rekor (`sigstore.dev <https://www.sigstore.dev>`__) is a hosted
+log whose monitors compare heads, which is the gossip this file does
+not do. The Update Framework (`theupdateframework.io
+<https://theupdateframework.io>`__) rotates update authority through
+delegations. A receiver here lists accepted keys in ``layout``, and
+replacing that list is the rotation. Supply-chain Levels for Software
+Artifacts (`slsa.dev/provenance <https://slsa.dev/provenance>`__)
+attests a build. A deed's kind says the shape, its trail says the
+inputs, and the host sidecar says the grant. This store does not grow
+a public log or a quorum.
+
 Integrity, authenticity, authorisation
 ======================================
 
