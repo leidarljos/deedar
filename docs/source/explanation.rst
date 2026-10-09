@@ -49,8 +49,9 @@ not do. The Update Framework (`theupdateframework.io
 delegations. A receiver here lists accepted keys in ``layout``, and
 replacing that list is the rotation. Supply-chain Levels for Software
 Artifacts (`slsa.dev/provenance <https://slsa.dev/provenance>`__)
-attests a build. A deed's kind says the shape, its trail says the
-inputs, and the host sidecar says the grant. This store does not grow
+attests a build. A deed's kind says the shape. Its sources name the
+inputs, and ``trail`` walks the sources that are deeds. The host
+sidecar signs the deed. This store does not grow
 a public log or a quorum.
 
 Integrity, authenticity, authorisation
