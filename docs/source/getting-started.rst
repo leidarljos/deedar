@@ -83,8 +83,9 @@ The receiver needs no store and no network.
 Set ``DEEDAR_HOST_SIGNING_KEY`` on the sender to a 32-byte seed and the head
 and the manifest come signed; add the verifying key to the receiver's
 ``layout`` and the last line reads ``(accepted)``. On the next handover from the
-same sender, ``deedar check /tmp/bag2 --since head.txt`` also shows the log
-grew from the head you kept, and was not rewritten.
+same sender, record the head with ``deedar check /tmp/bag --keep head.txt``;
+on the next handover ``deedar check /tmp/bag2 --since head.txt`` also shows the
+log grew from that head, and was not rewritten.
 
 Where next
 ==========

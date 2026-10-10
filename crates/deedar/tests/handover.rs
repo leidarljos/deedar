@@ -203,3 +203,114 @@ fn mint_more(url: &str, id: &str) -> DeedId {
         .unwrap();
     DeedId::parse(id).unwrap()
 }
+
+/// A bridge proves two heads are one log, and the sender picks both heads.
+/// A sender who rewrote the log can bridge from the rewritten log's own early
+/// head, and that bridge checks. Only the head the receiver kept says which
+/// log they saw, so the bridge has to start there.
+#[test]
+fn a_bridge_from_a_rewritten_log_does_not_reach_the_kept_head() {
+    let seen = tmp_url();
+    mint(&seen, 2);
+    let kept = store(&seen).log_head().unwrap();
+
+    // The same sender, after rewriting history: another log of the same size,
+    // grown by one deed.
+    let rewritten = tmp_url();
+    let mut client = Client::open(&rewritten).unwrap();
+    for at in 0..2 {
+        let id = format!("deed-quote-handed{at}");
+        client
+            .create(quote(
+                &id,
+                "what the work said, rewritten",
+                "https://example.invalid/a",
+            ))
+            .unwrap();
+    }
+    let later = mint_more(&rewritten, "deed-quote-afterwards");
+    let store = store(&rewritten);
+    let bag = tempfile::tempdir().unwrap();
+    store
+        .export_into(&later, &bag.path().join("data").join("deeds"))
+        .unwrap();
+    let now = check_handover(bag.path(), &BTreeSet::new())
+        .unwrap()
+        .head
+        .unwrap();
+
+    let bridge = store.bridge(kept.size).unwrap();
+    // On its own the bridge is internally sound, which is the trap.
+    bridge.check().unwrap();
+    let err = deedar::check_since(&kept, Some(&bridge), &now).expect_err("a rewritten log passed");
+    assert!(
+        format!("{err}").contains("not the log you saw before"),
+        "{err}"
+    );
+}
+
+/// The bridge has to end at the head the bag's deeds are proven against, or
+/// it vouches for some other log than the one being handed over.
+#[test]
+fn a_bridge_has_to_end_at_the_bags_head() {
+    let url = tmp_url();
+    mint(&url, 2);
+    let store = store(&url);
+    let kept = store.log_head().unwrap();
+    let first = mint_more(&url, "deed-quote-afterwards");
+    let bag = tempfile::tempdir().unwrap();
+    store
+        .export_into(&first, &bag.path().join("data").join("deeds"))
+        .unwrap();
+    let now = check_handover(bag.path(), &BTreeSet::new())
+        .unwrap()
+        .head
+        .unwrap();
+    deedar::check_since(&kept, Some(&store.bridge(kept.size).unwrap()), &now).unwrap();
+
+    mint_more(&url, "deed-quote-later-still");
+    let past_the_bag = store.bridge(kept.size).unwrap();
+    let err =
+        deedar::check_since(&kept, Some(&past_the_bag), &now).expect_err("bridge to elsewhere");
+    assert!(format!("{err}").contains("bridge ends at"), "{err}");
+}
+
+/// With no bridge in the bag, an unchanged head passes and a moved one does
+/// not, and a log that shrank never passes.
+#[test]
+fn no_bridge_means_the_head_did_not_move() {
+    let url = tmp_url();
+    mint(&url, 2);
+    let store = store(&url);
+    let kept = store.log_head().unwrap();
+    deedar::check_since(&kept, None, &kept).unwrap();
+
+    mint_more(&url, "deed-quote-afterwards");
+    let now = store.log_head().unwrap();
+    let err = deedar::check_since(&kept, None, &now).expect_err("a moved head with no bridge");
+    assert!(format!("{err}").contains("no bridge"), "{err}");
+    let err = deedar::check_since(&now, None, &kept).expect_err("a shrunk log");
+    assert!(format!("{err}").contains("shrank"), "{err}");
+}
+
+/// A kept head reads from what a receiver has to hand, and a bridge file is
+/// refused in its place, since the sender writes bridges.
+#[test]
+fn a_kept_head_is_the_receivers_record() {
+    let root = "ab".repeat(32);
+    let signed = format!(
+        "size=3 root={root} ed25519 {} {}\n",
+        "c".repeat(64),
+        "d".repeat(128)
+    );
+    let head = deedar::kept_head(&signed).unwrap();
+    assert_eq!((head.size, head.root.as_str()), (3, root.as_str()));
+    let proof =
+        format!("id=deed-quote-x\ndigest=sha256:00\ntime=1\nindex=0\nsize=3\nroot={root}\n");
+    assert_eq!(deedar::kept_head(&proof).unwrap(), head);
+
+    let bridge = format!("from=3 {root}\nto=4 {root}\n");
+    let err = deedar::kept_head(&bridge).expect_err("a bridge as a kept head");
+    assert!(format!("{err}").contains("this is a bridge"), "{err}");
+    assert!(deedar::kept_head("nothing here").is_err());
+}

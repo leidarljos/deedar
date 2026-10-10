@@ -19,7 +19,7 @@ else the seat's own store under the user's data directory
 | =leave ID= | a left-behind marker for a deed that moved store |
 | =timestamp ID= | a timestamp token over the deed |
 | =export --into DIR ID... \vert -= | deed, bytes, evidence, receipt (and signed head) into a satchel |
-| =check DIR [--since BRIDGE]= | every receipt against the head in the bag; with a bridge, that the log grew from a kept head |
+| =check DIR [--since KEPT] [--bridge FILE] [--keep FILE]= | every receipt against the head in the bag; with =--since=, that the bag's bridge (=bridge.txt=) grows the head you kept into this one; =--keep= records this head |
 | =log head \vert list \vert audit \vert backfill \vert prove ID \vert bridge SIZE= | the append-only log |
 | =vouch sign FILE \vert check FILE= | a detached Ed25519 signature beside a file |
 | =migrate= | move a store to the current layout |

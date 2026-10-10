@@ -1,7 +1,7 @@
 //! Operator path: create, get, list, trail, evidence, delete, leave, timestamp, current, migrate.
 
 use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use deed::{Body, Deed, DeedId, FormField, Grant, Kind, MailMessageId, Measure, Source, Step};
@@ -167,35 +167,36 @@ fn cmd_vouch(url: &str, args: &[String]) -> Result<String, String> {
 }
 
 /// Check deeds somebody else handed over, with no store: every receipt against
-/// the head in the bag, and with `--since` the bridge from a head kept before.
+/// the head in the bag. With `--since KEPT`, also that this log is the one
+/// whose head the receiver kept last time, grown, by the bridge the bag
+/// carries. With `--keep FILE`, record this bag's head for next time.
 fn cmd_check(url: &str, args: &[String]) -> Result<String, String> {
     let mut dir: Option<PathBuf> = None;
-    let mut bridge: Option<PathBuf> = None;
+    let mut since: Option<PathBuf> = None;
+    let mut bridge_at: Option<PathBuf> = None;
+    let mut keep: Option<PathBuf> = None;
     let mut at = 0;
     while at < args.len() {
-        match args[at].as_str() {
-            "--since" => {
-                at += 1;
-                bridge = Some(PathBuf::from(args.get(at).ok_or("--since needs a file")?));
-            }
-            other if dir.is_none() => dir = Some(PathBuf::from(other)),
-            other => return Err(format!("check takes one directory, and also got {other:?}")),
+        let flag = args[at].as_str();
+        let slot = match flag {
+            "--since" => Some(&mut since),
+            "--bridge" => Some(&mut bridge_at),
+            "--keep" => Some(&mut keep),
+            _ => None,
+        };
+        if let Some(slot) = slot {
+            at += 1;
+            let value = args.get(at).ok_or_else(|| format!("{flag} needs a file"))?;
+            *slot = Some(PathBuf::from(value));
+        } else if dir.is_none() {
+            dir = Some(PathBuf::from(flag));
+        } else {
+            return Err(format!("check takes one directory, and also got {flag:?}"));
         }
         at += 1;
     }
     let dir = dir.ok_or("check needs a satchel directory")?;
 
-    let mut out = String::new();
-    if let Some(path) = bridge {
-        let text = std::fs::read_to_string(&path)
-            .map_err(|_| format!("no bridge at {}", path.display()))?;
-        let bridge = deedar::Bridge::parse(&text).map_err(|e| e.to_string())?;
-        bridge.check().map_err(|e| e.to_string())?;
-        out.push_str(&format!(
-            "the log grew from {} entries to {} without dropping or rewriting one\n",
-            bridge.from.size, bridge.to.size
-        ));
-    }
     // The reader's signer list, from their own store; none means the weaker answer.
     let accept = deedar::store_dir(url)
         .ok()
@@ -203,8 +204,57 @@ fn cmd_check(url: &str, args: &[String]) -> Result<String, String> {
         .map(|policy| policy.signers)
         .unwrap_or_default();
     let done = deedar::check_handover(&dir, &accept).map_err(|e| e.to_string())?;
+
+    let mut out = String::new();
+    if let Some(path) = since {
+        let text = std::fs::read_to_string(&path)
+            .map_err(|_| format!("no kept head at {}", path.display()))?;
+        let kept = deedar::kept_head(&text).map_err(|e| e.to_string())?;
+        let now = done
+            .head
+            .clone()
+            .ok_or("no deeds travelled with this satchel, so there is no head to compare")?;
+        let bridge_at = bridge_at.or_else(|| bridge_in(&dir));
+        let bridge = match &bridge_at {
+            Some(path) => {
+                let text = std::fs::read_to_string(path)
+                    .map_err(|_| format!("no bridge at {}", path.display()))?;
+                Some(deedar::Bridge::parse(&text).map_err(|e| e.to_string())?)
+            }
+            None => None,
+        };
+        deedar::check_since(&kept, bridge.as_ref(), &now).map_err(|e| e.to_string())?;
+        if kept == now {
+            out.push_str("the log is the one you kept, with nothing added\n");
+        } else {
+            out.push_str(&format!(
+                "the log grew from the {} entries you kept to {} without dropping or rewriting one\n",
+                kept.size, now.size
+            ));
+        }
+    }
     out.push_str(&done.render());
+    if let Some(path) = keep {
+        if let Some(head) = &done.head {
+            std::fs::write(&path, format!("size={} root={}\n", head.size, head.root))
+                .map_err(|e| format!("{}: {e}", path.display()))?;
+            out.push_str(&format!(
+                "kept this head in {}; pass it to --since next time\n",
+                path.display()
+            ));
+        }
+    }
     Ok(out)
+}
+
+/// The bridge a sender put in the bag, beside the deeds or at the top.
+fn bridge_in(dir: &Path) -> Option<PathBuf> {
+    [
+        dir.join("bridge.txt"),
+        dir.join("data").join("deeds").join("bridge.txt"),
+    ]
+    .into_iter()
+    .find(|path| path.is_file())
 }
 
 /// Write deeds into a satchel with the inclusion proof they were logged here
@@ -467,7 +517,7 @@ fn usage() -> String {
      deedar create --help     kinds and flags, including --path\n\
      evidence, current and export take one id, several ids, or - to read them from stdin\n\
      log takes head, list, audit, backfill, prove ID, or bridge SIZE\n\
-     check takes a satchel directory and optionally --since BRIDGE; vouch takes sign FILE or check FILE\n\
+     check takes a satchel directory, --since KEPT_HEAD, --bridge FILE and --keep FILE; vouch takes sign FILE or check FILE\n\
      host says whether the store's layout lists the host signing key, and exits 1 when it does not\n\
      host accept adds the host signing key to the layout as a signer, and leaves every other line\n"
         .into()

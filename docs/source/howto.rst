@@ -39,12 +39,14 @@ Keep a head between handovers
 
 .. code:: console
 
-   $ deedar check bag > /dev/null && deedar log head > sender.head
-   $ deedar log bridge 34 > bag2/bridge.txt   # on the sender, at the next export
-   $ deedar check bag2 --since bag2/bridge.txt
+   $ deedar check bag --keep sender.head          # on the receiver
+   $ deedar log bridge 34 > bag2/bridge.txt       # on the sender, at the next export
+   $ deedar check bag2 --since sender.head        # on the receiver
 
 The bridge is the consistency path from the head you kept to the new one.
-A log rewritten in between cannot produce it.
+``check`` requires it to start at the kept head and end at the head the
+bag's deeds are proven against, so a log rewritten in between fails. A
+bridge on its own proves nothing here: the sender picks both of its heads.
 
 Audit a store
 =============
