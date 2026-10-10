@@ -83,6 +83,11 @@ Without the line, attestation is optional and a keyed-hash sidecar still
 opens. A keyed hash proves the bytes are the bytes; it cannot prove who was
 entitled to make them, because whoever can check it can mint it.
 
+The demand is worth what guards =layout= and the key. An agent that can
+edit the layout can list a key of its own, and an agent running as the
+key's owner can read the key. =deedar host accept= refuses to add a signer
+to a store that says required; add the line by hand.
+
 * Retract a deed
 
 #+begin_src console

@@ -16,8 +16,9 @@ old one still resolves and =current= says where it went.
 #+ATTR_HTML: :alt The handover: export with receipts, seal and sign; then three questions and import :width 100%
 [[file:_static/handover.svg]]
 
-Every deed is signed by the store's writer key, and a signature says who
-wrote a deed. It does not say what else the store contains. A holder can
+Every deed carries a keyed hash under the store's writer key, and a
+signature when the host has a signing key. Either says a deed is the one
+the store wrote. It does not say what else the store contains. A holder can
 hand one reader the store and another the same store with a deed removed,
 and both sets verify. =delete= is a supported verb, so this is not a
 hypothetical.
@@ -61,11 +62,20 @@ quorum.
 Three questions, three constructions. A hash answers integrity: these are
 the bytes. A signature over the manifest answers authenticity: this key
 made the bag, and a receiver checks it against the keys they accept. A
-signed host sidecar answers authorisation: this agent, under this grant,
-was entitled to produce these bytes. The sidecar is a signature and never a
-keyed hash: a keyed-hash (HMAC) verifier has the key and can mint what it
-checks, and with the key beside the store that includes the agent being
-vouched for. A public key cannot mint.
+signed host sidecar answers who held the host key when the deed was made.
+The sidecar is a signature and never a keyed hash: a keyed-hash (HMAC)
+verifier has the key and can mint what it checks, and with the key beside
+the store that includes the agent being vouched for. A public key cannot
+mint.
+
+Holding the key is authorisation only when the agent cannot read the key.
+The default key is =~/.config/deedar/host.key=, one per user account, so it
+names an account on one machine. Every seat and agent that runs as that
+user reads the same file and signs as the same host, and a signature does
+not tell them apart. =producedBy= is what the caller passed to =--agent=. To
+make the signature mean one agent was entitled, keep the key under another
+Unix user or behind a signer the agent cannot drive, and keep the store's
+=layout= out of the agent's reach, since the layout lists the keys that count.
 
 * Two writers, one log
 
