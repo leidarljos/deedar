@@ -34,7 +34,9 @@ pub use digest::{deed_digest, resolve};
 pub use fs::{is_write_once_addr, FsStore};
 pub use fs::{Audit, Exporter, Missing};
 pub use log::{Entry as LogEntry, Head as LogHead};
-pub use receipt::{check_handover, sign_head, Bridge, Handover, Receipt, SignedHead};
+pub use receipt::{
+    check_handover, check_since, kept_head, sign_head, Bridge, Handover, Receipt, SignedHead,
+};
 pub use timestamp::{imprint_hash, timestamp_req};
 pub use url::{open, StoreUrl};
 pub use vouch::{Checked, Vouch};

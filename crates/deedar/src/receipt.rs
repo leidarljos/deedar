@@ -364,6 +364,91 @@ impl Bridge {
     }
 }
 
+/// Read the head a receiver kept from an earlier handover.
+///
+/// Any text that carries `size=N` and `root=HEX` will do: a bag's signed
+/// `head` line, a `proof.txt`, or the file `deedar check --keep` wrote. A
+/// bridge file is refused here, because a bridge comes from the sender and a
+/// kept head has to come from the receiver.
+///
+/// # Errors
+///
+/// Fails when the text is a bridge, or names no size or no root.
+pub fn kept_head(text: &str) -> Result<Head> {
+    if text
+        .lines()
+        .any(|line| line.trim_start().starts_with("from="))
+    {
+        return Err(Error::Evidence(
+            "this is a bridge, which the sender writes; --since takes the head you kept from the \
+             last handover, and the bridge travels in the bag as bridge.txt"
+                .into(),
+        ));
+    }
+    let mut size = None;
+    let mut root = None;
+    for token in text.split_whitespace() {
+        if let Some(value) = token.strip_prefix("size=") {
+            size = Some(number(value, "size")? as usize);
+        } else if let Some(value) = token.strip_prefix("root=") {
+            root = Some(value.to_string());
+        }
+    }
+    match (size, root) {
+        (Some(size), Some(root)) => Ok(Head { size, root }),
+        _ => Err(Error::Evidence(
+            "kept head: needs size= and root=, as `deedar check --keep` writes them".into(),
+        )),
+    }
+}
+
+/// Whether the log behind `now` is the log behind `kept`, grown.
+///
+/// The bridge alone cannot answer this. It proves two heads are one log,
+/// and the sender picks both of them; only the receiver's own record of the
+/// earlier head says the sender started from the log the receiver saw. So
+/// the bridge has to start at `kept` and end at `now`, the head every deed in
+/// the bag is proven against.
+///
+/// # Errors
+///
+/// Fails when the log shrank, when no bridge came and the head moved, when
+/// the bridge starts or ends somewhere else, or when its path does not join
+/// the two heads.
+pub fn check_since(kept: &Head, bridge: Option<&Bridge>, now: &Head) -> Result<()> {
+    if now.size < kept.size {
+        return Err(Error::Evidence(format!(
+            "the log shrank from the {} entries you kept to {}",
+            kept.size, now.size
+        )));
+    }
+    let Some(bridge) = bridge else {
+        if kept == now {
+            return Ok(());
+        }
+        return Err(Error::Evidence(format!(
+            "the bag carries no bridge from the head you kept ({} entries); the sender writes one \
+             with `deedar log bridge {} > BAG/bridge.txt`",
+            kept.size, kept.size
+        )));
+    };
+    if bridge.from != *kept {
+        return Err(Error::Evidence(format!(
+            "the bridge starts from a log of {} entries, root {}, and the head you kept is {} \
+             entries, root {}: this is not the log you saw before",
+            bridge.from.size, bridge.from.root, kept.size, kept.root
+        )));
+    }
+    if bridge.to != *now {
+        return Err(Error::Evidence(format!(
+            "the bridge ends at a log of {} entries, root {}, and the deeds in this bag are \
+             proven against {} entries, root {}",
+            bridge.to.size, bridge.to.root, now.size, now.root
+        )));
+    }
+    bridge.check()
+}
+
 /// What checking a whole handover established.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Handover {

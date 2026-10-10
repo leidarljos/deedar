@@ -4,6 +4,14 @@ Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
 
 ## Unreleased
 
+- `deedar check BAG --since KEPT` now compares the bag's bridge with the
+  head the receiver kept. Before, `--since` took the sender's bridge and
+  checked only that its two heads joined, and the sender picks both, so a
+  log rewritten between handovers passed. The bridge now has to start at
+  the kept head and end at the head the bag's deeds are proven against.
+  The bridge travels in the bag as `bridge.txt` (or `--bridge FILE`), and
+  `check --keep FILE` records a head for next time. Passing a bridge to
+  `--since` is refused with a message that says why.
 - `cargo binstall deedar-cli` and `cargo binstall deedar-mcp` build from
   source on a target with no release tarball, such as Windows or musl
   Linux. The `compile` strategy was off, so binstall failed there.
