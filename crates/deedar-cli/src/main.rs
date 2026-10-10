@@ -339,6 +339,23 @@ fn run(args: Vec<String>) -> Result<String, String> {
     let (url, rest) = take_url(&args)?;
     let mut client = Client::open(&url).map_err(|e| e.to_string())?;
     match rest.first().map(String::as_str) {
+        Some("host") if rest.get(1).map(String::as_str) == Some("accept") => {
+            let layout = client.dir().join("layout");
+            match client.accept_host_signer().map_err(|e| e.to_string())? {
+                None => Err(
+                    "host key: none; set DEEDAR_HOST_SIGNING_KEY or run `ljos onboard` first"
+                        .into(),
+                ),
+                Some((public, true)) => Ok(format!(
+                    "host key: {public}, added as a signer to {}\n",
+                    layout.display()
+                )),
+                Some((public, false)) => Ok(format!(
+                    "host key: {public}, already a signer {} lists\n",
+                    layout.display()
+                )),
+            }
+        }
         Some("host") => {
             let layout = client.dir().join("layout");
             match (client.signer_public(), client.unaccepted_signer()) {
@@ -349,7 +366,7 @@ fn run(args: Vec<String>) -> Result<String, String> {
                 )),
                 (Some(_), Some(public)) => Err(format!(
                     "host key {public} is not a signer {} lists; deeds signed now fail \
-                     evidence until it carries `signer = {public}`",
+                     evidence until it carries `signer = {public}`; `deedar host accept` adds it",
                     layout.display()
                 )),
             }
@@ -447,7 +464,8 @@ fn usage() -> String {
      evidence, current and export take one id, several ids, or - to read them from stdin\n\
      log takes head, list, audit, backfill, prove ID, or bridge SIZE\n\
      check takes a satchel directory and optionally --since BRIDGE; vouch takes sign FILE or check FILE\n\
-     host says whether the store's layout lists the host signing key, and exits 1 when it does not\n"
+     host says whether the store's layout lists the host signing key, and exits 1 when it does not\n\
+     host accept adds the host signing key to the layout as a signer, and leaves every other line\n"
         .into()
 }
 
@@ -518,7 +536,7 @@ fn take_url(args: &[String]) -> Result<(String, Vec<String>), String> {
 fn unaccepted_signer_warning(public: &str, store: &std::path::Path) -> String {
     format!(
         "deedar: warning: this deed is signed by {public}, which {}/layout does not list; \
-         evidence will refuse it until that file carries `signer = {public}`",
+         evidence will refuse it until that file carries `signer = {public}`; `deedar host accept` adds it",
         store.display()
     )
 }

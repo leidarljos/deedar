@@ -458,3 +458,51 @@ fn a_store_this_host_creates_lists_its_own_key() {
         Some(format!("ed25519:{other}"))
     );
 }
+
+/// An existing store whose layout predates the host key gains the key
+/// through `accept_host_signer`, keeps every line it had, and a second call
+/// changes nothing.
+#[test]
+fn accepting_the_host_key_adds_one_signer_and_keeps_the_rest() {
+    let (_guard, url, parent) = isolate();
+    drop(open(&url));
+    let other = signing_key(&parent.join("other.signing"), 27);
+    write_layout(&url, &format!("1\n# kept\nsigner = ed25519:{other}"));
+    let key = parent.join("host.signing");
+    let public = signing_key(&key, 28);
+    // SAFETY: ENV is held for the whole sitting.
+    unsafe {
+        std::env::set_var("DEEDAR_HOST_SIGNING_KEY", &key);
+    }
+    let mut client = open(&url);
+    let id = DeedId::parse("deed-quote-late").unwrap();
+    client
+        .create(quote("deed-quote-late", "late", "https://example.com/late"))
+        .unwrap();
+    assert!(client.evidence(&id).is_err(), "not yet a signer");
+
+    let said = client.accept_host_signer().unwrap();
+    assert_eq!(said, Some((format!("ed25519:{public}"), true)));
+    assert_eq!(client.unaccepted_signer(), None);
+    client.evidence(&id).expect("the key the layout now lists");
+    let layout = fs::read_to_string(deedar::store_dir(&url).unwrap().join("layout")).unwrap();
+    assert_eq!(
+        layout,
+        format!("1\n# kept\nsigner = ed25519:{other}\nsigner = ed25519:{public}\n")
+    );
+
+    let again = open(&url).accept_host_signer().unwrap();
+    assert_eq!(again, Some((format!("ed25519:{public}"), false)));
+    let unchanged = fs::read_to_string(deedar::store_dir(&url).unwrap().join("layout")).unwrap();
+    assert_eq!(unchanged, layout);
+}
+
+/// Without a host key there is nothing to accept, and the layout stays.
+#[test]
+fn accepting_with_no_host_key_changes_nothing() {
+    let (_guard, url, _parent) = isolate();
+    let mut client = open(&url);
+    assert_eq!(client.accept_host_signer().unwrap(), None);
+    let layout = fs::read_to_string(deedar::store_dir(&url).unwrap().join("layout")).unwrap();
+    assert_eq!(layout, "1\n");
+}

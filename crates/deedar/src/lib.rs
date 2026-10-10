@@ -280,6 +280,11 @@ impl Client {
     pub fn migrate(&mut self) -> Result<()> {
         self.store.migrate()
     }
+
+    /// See [`FsStore::accept_host_signer`].
+    pub fn accept_host_signer(&mut self) -> Result<Option<(String, bool)>> {
+        self.store.accept_host_signer()
+    }
 }
 
 fn map_err(msg: &str) -> deed::Error {
