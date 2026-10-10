@@ -419,3 +419,42 @@ fn a_layout_nobody_can_read_refuses_to_open_the_store() {
     write_layout(&url, "1\nattestation = sometimes\n");
     assert!(Client::open(&url).is_err());
 }
+
+/// A store this host creates accepts this host's key, so the first deed a
+/// fresh seat signs passes evidence. A store that already has a layout is
+/// left as it is.
+#[test]
+fn a_store_this_host_creates_lists_its_own_key() {
+    let (_guard, url, parent) = isolate();
+    let key = parent.join("host.signing");
+    let public = signing_key(&key, 25);
+    // SAFETY: ENV is held for the whole sitting.
+    unsafe {
+        std::env::set_var("DEEDAR_HOST_SIGNING_KEY", &key);
+    }
+    let mut client = open(&url);
+    assert_eq!(client.unaccepted_signer(), None);
+    let id = DeedId::parse("deed-quote-first").unwrap();
+    client
+        .create(quote(
+            "deed-quote-first",
+            "first deed",
+            "https://example.com/first",
+        ))
+        .unwrap();
+    client.evidence(&id).expect("the host that made the store");
+    let layout = fs::read_to_string(deedar::store_dir(&url).unwrap().join("layout")).unwrap();
+    assert_eq!(layout, format!("1\nsigner = ed25519:{public}\n"));
+
+    // An existing store keeps the signers it lists.
+    write_layout(&url, "1\n");
+    let other = signing_key(&parent.join("other.signing"), 26);
+    // SAFETY: ENV is held for the whole sitting.
+    unsafe {
+        std::env::set_var("DEEDAR_HOST_SIGNING_KEY", parent.join("other.signing"));
+    }
+    assert_eq!(
+        open(&url).unaccepted_signer(),
+        Some(format!("ed25519:{other}"))
+    );
+}

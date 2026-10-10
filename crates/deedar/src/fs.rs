@@ -154,8 +154,18 @@ pub struct FsStore {
 impl FsStore {
     pub fn open(dir: impl AsRef<Path>) -> Result<Self> {
         let dir = dir.as_ref();
+        // A store this host creates accepts this host's key. Without it the
+        // first deed a fresh seat signs fails `evidence` until the person
+        // edits `layout` by hand. An existing store is never widened.
+        let fresh = !dir.join("layout").exists() && dir_is_empty(&dir.join("deeds"));
         fs::create_dir_all(dir.join("bytes")).map_err(|e| Error::Io(e.to_string()))?;
         fs::create_dir_all(dir.join("deeds")).map_err(|e| Error::Io(e.to_string()))?;
+        let signing_key = crate::host::load_signing_key()?;
+        if fresh {
+            if let Some(key) = &signing_key {
+                crate::migrate::write_fresh_layout(dir, &key.verifying_key().to_bytes())?;
+            }
+        }
         crate::migrate::ensure_layout(dir)?;
         let key_path = dir.join("writer.key");
         let key = if key_path.exists() {
@@ -175,7 +185,7 @@ impl FsStore {
             dir: dir.to_path_buf(),
             key,
             host_key: crate::host::load(dir)?,
-            signing_key: crate::host::load_signing_key()?,
+            signing_key,
             policy: crate::attest::Policy::read(dir)?,
             tree: std::sync::Mutex::new(None),
         })
@@ -935,4 +945,9 @@ fn lock_exclusive(file: &fs::File) -> Result<()> {
         return Err(Error::Io(std::io::Error::last_os_error().to_string()));
     }
     Ok(())
+}
+
+/// Whether `dir` is absent or holds no entries.
+fn dir_is_empty(dir: &Path) -> bool {
+    fs::read_dir(dir).map_or(true, |mut entries| entries.next().is_none())
 }

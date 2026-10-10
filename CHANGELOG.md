@@ -4,6 +4,9 @@ Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
 
 ## Unreleased
 
+- A store this host creates lists the host's signing key in its layout.
+  The first deed a fresh seat signs then passes `evidence`. A store that
+  already has a layout or deeds keeps the signers it lists.
 - The explanation places the deed log beside Rekor, the Update
   Framework, and Supply-chain Levels for Software Artifacts. The hash
   stays Certificate Transparency's. The history tree is Crosby and
