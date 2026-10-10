@@ -4,6 +4,14 @@ Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
 
 ## Unreleased
 
+- `deedar host accept` refuses to add a signer to a store whose layout
+  says `attestation = required`, and prints the line to add by hand. Any
+  process running as the store's owner could list a key of its own before.
+- The README and the explanation page say what a host signature names: a
+  user account on one machine. Seats under one account share the key, and
+  `producedBy` is whatever `--agent` said. The explanation no longer calls
+  the writer key's keyed hash a signature, or the host sidecar proof that
+  an agent was entitled to the work.
 - A new store's `writer.key` comes from `/dev/urandom` and is written with
   mode 0600. It was the SHA-256 of the clock in nanoseconds, written with
   the default mode (0644 under a usual umask), and the file's mtime put the

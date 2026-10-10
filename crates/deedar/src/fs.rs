@@ -214,12 +214,27 @@ impl FsStore {
     ///
     /// # Errors
     ///
-    /// Fails when the layout cannot be read or written.
+    /// Fails when the layout cannot be read or written, or when it demands
+    /// attestation and does not list the key yet.
     pub fn accept_host_signer(&mut self) -> Result<Option<(String, bool)>> {
         let Some(signing) = self.signing_key.as_ref() else {
             return Ok(None);
         };
         let public = signing.verifying_key().to_bytes();
+        // A store that demands attestation is only worth the demand if the
+        // signer list is somebody's decision. Whoever can run this as the
+        // store's owner could otherwise list any key they hold and sign with
+        // it, so a required store gains a signer by hand or not at all.
+        if self.policy.demand == crate::attest::Demand::Required
+            && !self.policy.signers.contains(&public)
+        {
+            return Err(Error::Io(format!(
+                "{} says attestation = required, so a signer is added by hand: `signer = {}:{}` if this key should count",
+                self.dir.join("layout").display(),
+                crate::attest::ED25519,
+                crate::attest::to_hex(&public)
+            )));
+        }
         let changed = crate::migrate::add_signer(&self.dir, &public)?;
         self.policy = crate::attest::Policy::read(&self.dir)?;
         Ok(Some((

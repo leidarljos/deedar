@@ -535,3 +535,36 @@ fn accepting_the_host_key_keeps_the_layout_mode() {
         .collect();
     assert!(stray.is_empty(), "{stray:?}");
 }
+
+/// A store that demands attestation never gains a signer from a tool. Any
+/// process running as the store's owner could otherwise list a key it holds
+/// and sign whatever it likes with it. A key already listed is a no-op.
+#[test]
+fn a_required_store_gains_no_signer_by_accept() {
+    let (_guard, url, parent) = isolate();
+    drop(open(&url));
+    let listed = signing_key(&parent.join("listed.signing"), 30);
+    let layout_text = format!("1\nattestation = required\nsigner = ed25519:{listed}\n");
+    write_layout(&url, &layout_text);
+    let key = parent.join("host.signing");
+    let public = signing_key(&key, 31);
+    // SAFETY: ENV is held for the whole sitting.
+    unsafe {
+        std::env::set_var("DEEDAR_HOST_SIGNING_KEY", &key);
+    }
+    let err = open(&url)
+        .accept_host_signer()
+        .expect_err("a required store widened");
+    let said = err.to_string();
+    assert!(said.contains("attestation = required"), "{said}");
+    assert!(said.contains(&public), "{said}");
+    let layout = deedar::store_dir(&url).unwrap().join("layout");
+    assert_eq!(fs::read_to_string(&layout).unwrap(), layout_text);
+
+    // SAFETY: ENV is held for the whole sitting.
+    unsafe {
+        std::env::set_var("DEEDAR_HOST_SIGNING_KEY", parent.join("listed.signing"));
+    }
+    let again = open(&url).accept_host_signer().unwrap();
+    assert_eq!(again, Some((format!("ed25519:{listed}"), false)));
+}
