@@ -14,9 +14,9 @@ description = "Model Context Protocol server over a deed store: what a unit of w
 pkg-url = "{ repo }/releases/download/v{ version }/deedar-v{ version }-{ target }.tar.gz"
 bin-dir = "deedar-v{ version }-{ target }/{ bin }{ binary-ext }"
 pkg-fmt = "tgz"
-# The release tarball or nothing. A target without one fails here, and
-# `cargo install` builds it from source.
-disabled-strategies = ["quick-install", "compile"]
+# The release tarball first. A target without one builds from source,
+# which installs deedar and deedar-mcp both.
+disabled-strategies = ["quick-install"]
 
 [[bin]]
 name = "deedar-mcp"
