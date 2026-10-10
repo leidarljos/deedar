@@ -47,10 +47,20 @@ pub fn add_signer(dir: &Path, public: &[u8; 32]) -> Result<bool> {
         crate::attest::ED25519,
         crate::attest::to_hex(public)
     ));
-    // Write beside it and rename, so a reader never sees half a layout.
-    let tmp = dir.join("layout.tmp");
-    fs::write(&tmp, text).map_err(|e| Error::Io(e.to_string()))?;
-    fs::rename(&tmp, &path).map_err(|e| Error::Io(e.to_string()))?;
+    // Write beside it and rename, so a reader never sees half a layout. The
+    // name carries the pid, so two writers never share one temporary file,
+    // and the new file keeps the old one's mode.
+    let tmp = dir.join(format!("layout.tmp.{}", std::process::id()));
+    let mode = fs::metadata(&path)
+        .map_err(|e| Error::Io(e.to_string()))?
+        .permissions();
+    let written = fs::write(&tmp, text)
+        .and_then(|()| fs::set_permissions(&tmp, mode))
+        .and_then(|()| fs::rename(&tmp, &path));
+    if let Err(e) = written {
+        let _ = fs::remove_file(&tmp);
+        return Err(Error::Io(e.to_string()));
+    }
     Ok(true)
 }
 

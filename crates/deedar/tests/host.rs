@@ -506,3 +506,32 @@ fn accepting_with_no_host_key_changes_nothing() {
     let layout = fs::read_to_string(deedar::store_dir(&url).unwrap().join("layout")).unwrap();
     assert_eq!(layout, "1\n");
 }
+
+/// The rewritten layout keeps the mode the old one had, and no temporary
+/// file is left beside it.
+#[cfg(unix)]
+#[test]
+fn accepting_the_host_key_keeps_the_layout_mode() {
+    use std::os::unix::fs::PermissionsExt;
+    let (_guard, url, parent) = isolate();
+    drop(open(&url));
+    let dir = deedar::store_dir(&url).unwrap();
+    let layout = dir.join("layout");
+    fs::set_permissions(&layout, fs::Permissions::from_mode(0o600)).unwrap();
+    let key = parent.join("host.signing");
+    signing_key(&key, 29);
+    // SAFETY: ENV is held for the whole sitting.
+    unsafe {
+        std::env::set_var("DEEDAR_HOST_SIGNING_KEY", &key);
+    }
+    let (_, changed) = open(&url).accept_host_signer().unwrap().unwrap();
+    assert!(changed);
+    let mode = fs::metadata(&layout).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600);
+    let stray: Vec<_> = fs::read_dir(&dir)
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter(|e| e.file_name().to_string_lossy().starts_with("layout.tmp"))
+        .collect();
+    assert!(stray.is_empty(), "{stray:?}");
+}

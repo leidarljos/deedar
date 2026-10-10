@@ -356,6 +356,10 @@ fn run(args: Vec<String>) -> Result<String, String> {
                 )),
             }
         }
+        Some("host") if rest.len() > 1 => Err(format!(
+            "host takes `accept` or nothing, not `{}`; `deedar host` says whether the layout lists the key",
+            rest[1]
+        )),
         Some("host") => {
             let layout = client.dir().join("layout");
             match (client.signer_public(), client.unaccepted_signer()) {
@@ -1012,6 +1016,15 @@ mod tests {
             "{}",
             file.text
         );
+    }
+
+    /// A misspelled `host` verb is refused, not read as the status check.
+    #[test]
+    fn host_refuses_a_verb_it_does_not_know() {
+        let url = tmp_url();
+        let said = run(vec!["--url".into(), url, "host".into(), "acept".into()]).unwrap_err();
+        assert!(said.contains("host takes `accept` or nothing"), "{said}");
+        assert!(said.contains("`acept`"), "{said}");
     }
 
     #[test]
