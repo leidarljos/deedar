@@ -597,12 +597,43 @@ fn create_of_a_frozen_id_is_frozen() {
             Body::Quote {
                 edition: "ed".into(),
                 start: 0,
-                end: 4,
-                excerpt: "heat".into(),
+                end: 5,
+                excerpt: "heats".into(),
                 urls: vec!["https://www.iea.org/x".into()],
             },
         ))
         .expect_err("frozen");
+    assert!(matches!(err, Error::Frozen(_)), "{err}");
+}
+
+#[test]
+fn the_same_file_again_hands_back_the_deed_it_froze() {
+    let url = tmp_url();
+    let root = deedar::store_dir(&url).unwrap();
+    let survey = write_blob(&root, "survey.md", b"first take\n");
+    let mut client = Client::open(&url).unwrap();
+    let file = |path: &PathBuf| {
+        req(
+            "deed-file-survey",
+            "Survey",
+            Body::File {
+                path: path.clone(),
+                media_type: None,
+            },
+        )
+    };
+    let (first, ev) = client.create(file(&survey)).unwrap();
+    let log = std::fs::read_to_string(root.join("log")).unwrap_or_default();
+    let (again, ev_again) = client.create(file(&survey)).expect("same bytes");
+    assert_eq!(first, again);
+    assert_eq!(ev.unix_time, ev_again.unix_time);
+    assert_eq!(
+        std::fs::read_to_string(root.join("log")).unwrap_or_default(),
+        log,
+        "a rerun appends nothing to the log"
+    );
+    std::fs::write(&survey, b"second take\n").unwrap();
+    let err = client.create(file(&survey)).expect_err("other bytes");
     assert!(matches!(err, Error::Frozen(_)), "{err}");
 }
 
