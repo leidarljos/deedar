@@ -2,7 +2,7 @@
 
 Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
 
-## Unreleased
+## 0.3.4 (2026-10-10)
 
 - A store this host creates lists the host's signing key in its layout.
   The first deed a fresh seat signs then passes `evidence`. A store that
