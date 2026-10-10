@@ -177,8 +177,8 @@ impl FsStore {
             k.copy_from_slice(&bytes);
             k
         } else {
-            let k = seed_key();
-            fs::write(&key_path, k).map_err(|e| Error::Io(e.to_string()))?;
+            let k = seed_key()?;
+            write_private(&key_path, &k)?;
             k
         };
         Ok(Self {
@@ -934,15 +934,34 @@ pub(crate) fn atomic_write(dest: &Path, bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
-fn seed_key() -> [u8; 32] {
-    let n = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(1);
-    let digest = Sha256::digest(n.to_le_bytes());
+/// A fresh writer key from the kernel's random source.
+///
+/// The key keys every evidence hash in the store, so it has to be one nobody
+/// can guess. A hash of the clock is not: the file's own mtime puts the
+/// nanosecond within a few million tries.
+fn seed_key() -> Result<[u8; 32]> {
+    use std::io::Read;
     let mut k = [0u8; 32];
-    k.copy_from_slice(&digest);
-    k
+    fs::File::open("/dev/urandom")
+        .and_then(|mut random| random.read_exact(&mut k))
+        .map_err(|e| Error::Io(format!("writer.key: no random source: {e}")))?;
+    Ok(k)
+}
+
+/// Write a new key file that only its owner can read, and never over one
+/// that is already there.
+fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)
+        .map_err(|e| Error::Io(format!("{}: {e}", path.display())))?;
+    file.write_all(bytes)
+        .and_then(|()| file.sync_all())
+        .map_err(|e| Error::Io(format!("{}: {e}", path.display())))
 }
 
 fn hex_encode(bytes: &[u8]) -> String {

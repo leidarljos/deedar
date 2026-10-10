@@ -4,6 +4,11 @@ Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
 
 ## Unreleased
 
+- A new store's `writer.key` comes from `/dev/urandom` and is written with
+  mode 0600. It was the SHA-256 of the clock in nanoseconds, written with
+  the default mode (0644 under a usual umask), and the file's mtime put the
+  key within about two million guesses. An existing key is read as before;
+  run `chmod 600` on it by hand.
 - `deedar check BAG --since KEPT` now compares the bag's bridge with the
   head the receiver kept. Before, `--since` took the sender's bridge and
   checked only that its two heads joined, and the sender picks both, so a

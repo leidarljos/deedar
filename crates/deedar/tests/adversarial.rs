@@ -195,3 +195,36 @@ fn minted_id_cannot_escape_kind_prefix() {
     assert!(deed.id.as_str().starts_with("deed-quote-"), "{}", deed.id);
     assert!(!deed.id.as_str().contains(".."));
 }
+
+/// The writer key keys every evidence hash, so a new one is readable by its
+/// owner only, and two stores never share one.
+#[test]
+fn a_new_writer_key_is_private_and_random() {
+    use std::os::unix::fs::PermissionsExt;
+    let first = tmp_url();
+    let second = tmp_url();
+    open(&first);
+    open(&second);
+    let key = |url: &str| {
+        let path = deedar::store_dir(url).unwrap().join("writer.key");
+        let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        (fs::read(&path).unwrap(), mode)
+    };
+    let (one, mode) = key(&first);
+    let (two, _) = key(&second);
+    assert_eq!(mode, 0o600, "writer.key is {mode:o}");
+    assert_eq!(one.len(), 32);
+    assert_ne!(one, two, "two stores share a writer key");
+}
+
+/// A key already on disk is the store's identity for its evidence: opening
+/// the store again reads it and never writes a new one.
+#[test]
+fn an_existing_writer_key_is_kept() {
+    let url = tmp_url();
+    open(&url);
+    let path = deedar::store_dir(&url).unwrap().join("writer.key");
+    let before = fs::read(&path).unwrap();
+    open(&url);
+    assert_eq!(fs::read(&path).unwrap(), before);
+}
