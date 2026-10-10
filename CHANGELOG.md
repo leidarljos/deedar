@@ -2,7 +2,7 @@
 
 Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
 
-## Unreleased
+## 0.4.0 (2026-10-10)
 
 - `deedar host accept` lists the host signing key as a signer in an
   existing store's layout and keeps every other line. A store made
