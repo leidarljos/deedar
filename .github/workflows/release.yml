@@ -3,13 +3,25 @@ name: release
 on:
   push:
     tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+  # Builds the release for a tag that already exists, with this workflow and
+  # the tag's own source. The tag is not moved.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to release, such as v0.4.0"
+        required: true
+        type: string
 
 permissions:
   contents: write
 
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
+
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
@@ -22,14 +34,32 @@ jobs:
             target: aarch64-unknown-linux-gnu
     runs-on: ${{ matrix.os }}
     steps:
+      - name: The tag names a release
+        run: |
+          set -eu
+          echo "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
         with:
+          ref: refs/tags/${{ env.TAG }}
+      # rust-toolchain.toml pins the compiler, and cargo builds with the pin
+      # whatever the action sets as default. The target goes on the pin.
+      - name: The pinned toolchain
+        id: pin
+        run: |
+          set -eu
+          channel=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)
+          test -n "$channel"
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.pin.outputs.channel }}
           targets: ${{ matrix.target }}
+      - name: The target is installed for the pin
+        run: rustup target list --installed | grep -qx '${{ matrix.target }}'
       - run: cargo build --locked --release --target ${{ matrix.target }} -p deedar-cli -p deedar-mcp
       - run: |
           set -eu
-          name="deedar-${GITHUB_REF_NAME}-${{ matrix.target }}"
+          name="deedar-${TAG}-${{ matrix.target }}"
           mkdir -p "dist/$name"
           cp target/${{ matrix.target }}/release/deedar target/${{ matrix.target }}/release/deedar-mcp "dist/$name/"
           cp README.md CHANGELOG.md LICENSE* "dist/$name/" 2>/dev/null || true
@@ -44,15 +74,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ env.TAG }}
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
       - name: Release notes from the changelog
         run: |
-          awk -v v="${GITHUB_REF_NAME#v}" '$0 ~ "^## "v {p=1; next} /^## /{if(p) exit} p' CHANGELOG.md > notes.md
+          awk -v v="${TAG#v}" '$0 ~ "^## "v {p=1; next} /^## /{if(p) exit} p' CHANGELOG.md > notes.md
           test -s notes.md || echo "See CHANGELOG.md." > notes.md
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.TAG }}
           body_path: notes.md
           files: dist/*
