@@ -207,6 +207,31 @@ impl FsStore {
         ))
     }
 
+    /// List the host signing key as a signer in this store's layout, so
+    /// `evidence` accepts the deeds this host signs. Returns the key as
+    /// `ed25519:<hex>` and whether the layout changed; `None` when the host
+    /// has no signing key.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the layout cannot be read or written.
+    pub fn accept_host_signer(&mut self) -> Result<Option<(String, bool)>> {
+        let Some(signing) = self.signing_key.as_ref() else {
+            return Ok(None);
+        };
+        let public = signing.verifying_key().to_bytes();
+        let changed = crate::migrate::add_signer(&self.dir, &public)?;
+        self.policy = crate::attest::Policy::read(&self.dir)?;
+        Ok(Some((
+            format!(
+                "{}:{}",
+                crate::attest::ED25519,
+                crate::attest::to_hex(&public)
+            ),
+            changed,
+        )))
+    }
+
     /// The public half of the host signing key, as `ed25519:<hex>`, when the
     /// host signs and this store's layout does not list that key. Every deed
     /// created then carries a signature `evidence` refuses.
