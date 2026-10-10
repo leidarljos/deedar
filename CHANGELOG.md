@@ -4,6 +4,13 @@ Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
 
 ## Unreleased
 
+- `deedar create` run again with the same bytes and flags prints the deed
+  it froze and exits 0, and writes nothing. It exited 1 with `deed
+  frozen`, so a rerun of a script failed and did not say whether the
+  bytes had changed. When they have, the refusal now says the store has
+  that id with other content and prints the flags for a revision:
+  `--name NAME-v2 --supersedes ID`.
+
 - `deedar host accept` refuses to add a signer to a store whose layout
   says `attestation = required`, and prints the line to add by hand. Any
   process running as the store's owner could list a key of its own before.

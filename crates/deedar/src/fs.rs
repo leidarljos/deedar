@@ -306,9 +306,13 @@ impl FsStore {
         wire::encode_response(&resp)
     }
 
+    /// Freeze one deed. Asked again for a deed the store already serves,
+    /// field for field, it answers with that deed and its evidence and
+    /// writes nothing, so a rerun of the same command succeeds. A deed of
+    /// the same id with any other field is refused as frozen.
     pub fn create(&mut self, req: CreateRequest) -> Result<(Deed, Evidence)> {
         if let Some(id) = &req.id {
-            if self.deed_path(id).exists() || self.tomb_path(id).exists() {
+            if self.tomb_path(id).exists() {
                 return Err(Error::Frozen(id.to_string()));
             }
         }
@@ -337,6 +341,14 @@ impl FsStore {
             body,
         };
         let deed = Deed::from_draft(draft)?;
+        if self.deed_path(&deed.id).exists() && req.supersedes.is_none() {
+            if let Ok(prior) = self.get(&deed.id) {
+                if prior == deed {
+                    let evidence = self.load_evidence(&deed.id)?;
+                    return Ok((prior, evidence));
+                }
+            }
+        }
         if self.deed_path(&deed.id).exists() || self.tomb_path(&deed.id).exists() {
             return Err(Error::Frozen(deed.id.to_string()));
         }

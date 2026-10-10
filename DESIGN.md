@@ -95,8 +95,10 @@ Each kind is a handler. The body is what the next unit needs.
 
 ## Store
 
-- Mint `id` as an accession. After create the deed is frozen. A
-  later take mints a new deed and records the old accession in
+- Mint `id` as an accession. After create the deed is frozen. The
+  same create again, field for field, returns the frozen deed and its
+  evidence and writes nothing; any other field under that id is
+  refused as frozen. A later take mints a new deed and records the old accession in
   `sources`. `--supersedes <id>` also writes `{new}.supersedes` and
   `{prior}.successor` sidecar files; `deedar current <id>` walks
   those to the tip. `get` of the old id still returns that frozen
