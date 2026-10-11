@@ -540,7 +540,10 @@ fn create_help() -> String {
      create file wants --path FILE and --agent WHO\n\
      create set wants --member PATH (repeatable) and --agent WHO\n\
      --name NAME     defaults to the kind\n\
-     --path FILE     the bytes for kind file (not --field path=)\n"
+     --path FILE     the bytes for kind file (not --field path=)\n\
+     --supersedes ID the deed this one revises\n\
+     the same create again prints the deed it froze and exits 0; other bytes\n\
+     under the same name are refused: revise with --name NAME-v2 --supersedes ID\n"
         .into()
 }
 
@@ -773,6 +776,7 @@ fn cmd_create(client: &mut Client, args: &[String]) -> Result<String, String> {
         Kind::Procedure => Body::Procedure { steps },
         Kind::Event => Body::Event { when, where_, who },
     };
+    let asked = name.clone();
     let (deed, _) = client
         .create(CreateRequest {
             id,
@@ -784,8 +788,23 @@ fn cmd_create(client: &mut Client, args: &[String]) -> Result<String, String> {
             body,
             supersedes,
         })
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| frozen_hint(&e, &asked))?;
     Ok(format_one(&deed))
+}
+
+/// The create error as it reads, and on a frozen id what to run instead.
+/// The same deed again is no error: the store hands it back. A frozen id
+/// here differs from what the store has, so the revision needs a name of
+/// its own and a `--supersedes` link to the deed it revises.
+fn frozen_hint(e: &deed::Error, name: &str) -> String {
+    match e {
+        deed::Error::Frozen(id) => format!(
+            "{e}; the store has {id} with other content, or it was deleted. \
+             A revision takes a new name and points at the old deed: \
+             --name {name}-v2 --supersedes {id}"
+        ),
+        _ => e.to_string(),
+    }
 }
 
 fn need(args: &[String], i: &mut usize) -> Result<String, String> {
@@ -1075,6 +1094,40 @@ mod tests {
         let said = run(vec!["--url".into(), url, "host".into(), "acept".into()]).unwrap_err();
         assert!(said.contains("host takes `accept` or nothing"), "{said}");
         assert!(said.contains("`acept`"), "{said}");
+    }
+
+    /// A rerun of the same create is a success; other bytes under the
+    /// same name are refused with the flags for a revision.
+    #[test]
+    fn create_again_succeeds_on_the_same_bytes_and_names_a_revision_otherwise() {
+        let url = tmp_url();
+        let dir = std::path::PathBuf::from(url.trim_start_matches("file://"));
+        let survey = dir.join("survey.md");
+        std::fs::write(&survey, "first take\n").unwrap();
+        let create = || {
+            run(vec![
+                "--url".into(),
+                url.clone(),
+                "create".into(),
+                "file".into(),
+                "--name".into(),
+                "survey-md".into(),
+                "--path".into(),
+                survey.display().to_string(),
+                "--agent".into(),
+                "saddle".into(),
+            ])
+        };
+        let first = create().expect("first create");
+        let again = create().expect("same bytes again");
+        assert_eq!(first, again);
+        std::fs::write(&survey, "second take\n").unwrap();
+        let err = create().expect_err("other bytes");
+        assert!(err.contains("deed frozen: deed-file-survey-md"), "{err}");
+        assert!(
+            err.contains("--name survey-md-v2 --supersedes deed-file-survey-md"),
+            "{err}"
+        );
     }
 
     #[test]
