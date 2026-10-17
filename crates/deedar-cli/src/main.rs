@@ -543,7 +543,8 @@ fn create_help() -> String {
      --path FILE     the bytes for kind file (not --field path=)\n\
      --supersedes ID the deed this one revises\n\
      the same create again prints the deed it froze and exits 0; other bytes\n\
-     under the same name are refused: revise with --name NAME-v2 --supersedes ID\n"
+     under the same name are refused: revise with --name NAME-v2 --supersedes ID\n\
+     the last stdout line is accession=ID: cite that ID, not the file= line\n"
         .into()
 }
 
@@ -789,7 +790,9 @@ fn cmd_create(client: &mut Client, args: &[String]) -> Result<String, String> {
             supersedes,
         })
         .map_err(|e| frozen_hint(&e, &asked))?;
-    Ok(format_one(&deed))
+    // The last line is always the accession to cite: the kind lines above
+    // end in a path or a digest, which no citation accepts.
+    Ok(format!("{}accession={}\n", format_one(&deed), deed.id))
 }
 
 /// The create error as it reads, and on a frozen id what to run instead.
@@ -1121,6 +1124,13 @@ mod tests {
         let first = create().expect("first create");
         let again = create().expect("same bytes again");
         assert_eq!(first, again);
+        for out in [&first, &again] {
+            assert_eq!(
+                out.lines().last(),
+                Some("accession=deed-file-survey-md"),
+                "{out}"
+            );
+        }
         std::fs::write(&survey, "second take\n").unwrap();
         let err = create().expect_err("other bytes");
         assert!(err.contains("deed frozen: deed-file-survey-md"), "{err}");
