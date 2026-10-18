@@ -1,5 +1,6 @@
 # Doc site: Sphinx + Shibuya (install into a venv; see docs/build.sh)
 sphinx>=7,<9
-shibuya>=2024.1.0
+# 2026.7.12 is the theme that points view-source at html_baseurl/_sources.
+shibuya>=2026.7.12
 sphinx-design>=0.6,<1
 sphinx-copybutton>=0.5.2,<1

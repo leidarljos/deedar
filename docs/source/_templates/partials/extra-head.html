@@ -1,6 +1,30 @@
 <meta name="theme-color" content="#F6F2E8" media="(prefers-color-scheme: light)" />
 <meta name="theme-color" content="#33302A" media="(prefers-color-scheme: dark)" />
 <meta name="color-scheme" content="dark light" />
+{%- set page_title = title|striptags -%}
+{%- if pagename == root_doc or not docstitle -%}
+  {%- set full_title = (docstitle or page_title)|striptags -%}
+{%- else -%}
+  {%- set full_title = page_title ~ " - " ~ (docstitle|striptags) -%}
+{%- endif -%}
+{%- set description = page_description|default("", true) -%}
+{%- if description -%}
+<meta name="description" content="{{ description|e }}" />
+<meta property="og:description" content="{{ description|e }}" />
+<meta name="twitter:description" content="{{ description|e }}" />
+{%- endif -%}
+<meta property="og:type" content="website" />
+{%- if pageurl -%}
+<meta property="og:url" content="{{ pageurl|e }}" />
+{%- endif -%}
+<meta property="og:title" content="{{ full_title|e }}" />
+<meta property="og:image" content="https://leidarljos.github.io/deedar/_static/og.png" />
+<meta property="og:image:type" content="image/png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="{{ full_title|e }}" />
+<meta name="twitter:image" content="https://leidarljos.github.io/deedar/_static/og.png" />
 <!-- Antics analytics -->
 <script defer src="https://antics-api.turtletech.us/antics.js" data-token="bfd8c73c79ca4b85acff4ecfeedca64d"></script>
 <script>window.antics=window.antics||{event:function(){}};document.addEventListener('click',function(e){var a=e.target.closest('a');if(a&&a.hostname&&a.hostname!==location.hostname)antics.event('Outbound Link',{url:a.href});});</script>

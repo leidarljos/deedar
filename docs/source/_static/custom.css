@@ -512,3 +512,36 @@ body::before {
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
 }
+
+/* The page title is the one h1. It is clipped, and the section headings
+   keep the size and the gaps they had when each of them was an h1. */
+.visually-hidden,
+.yue h1.page-title {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+  pointer-events: none;
+}
+.yue h2.section-title {
+  margin-top: 0;
+  margin-bottom: 0.888889em;
+  font-size: clamp(2.2rem, 5vw, 3.2rem);
+  line-height: 1.08;
+}
+/* .yue h2 + * would otherwise clear the margin the theme gives these. */
+.yue h2.section-title + p { margin-top: 1rem; }
+.yue h2.section-title + ul,
+.yue h2.section-title + ol { margin-top: 1.25em; }
+.yue h2.section-title + dl { margin-top: 1.5rem; }
+.yue h2.section-title + blockquote { margin-top: 1.2rem; }
+@media (min-width: 64rem) {
+  .copy-page-wrapper + .yue > section > h2.section-title:first-of-type {
+    padding-right: 180px;
+  }
+}

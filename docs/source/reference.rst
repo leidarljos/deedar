@@ -5,9 +5,9 @@ Command line
 else the seat's own store under the user's data directory
 (``$XDG_DATA_HOME/deedar/store``) when it already exists.
 
-=================================================================================== ============================================================================================
+=================================================================================== ====================================================================================================================================================================================================================================
 Verb                                                                                Does
-=================================================================================== ============================================================================================
+=================================================================================== ====================================================================================================================================================================================================================================
 ``create KIND --name N --agent A [--path P] [--input DEED]... [--supersedes DEED]`` mint one deed; kind-specific flags below
 ``get ID``                                                                          one deed, flattened
 ``list``                                                                            every deed, newest first
@@ -18,11 +18,11 @@ Verb                                                                            
 ``leave ID``                                                                        a left-behind marker for a deed that moved store
 ``timestamp ID``                                                                    a timestamp token over the deed
 ``export --into DIR ID... \vert -``                                                 deed, bytes, evidence, receipt (and signed head) into a satchel
-``check DIR [--since KEPT] [--bridge FILE] [--keep FILE]``                          every receipt against the head in the bag; with ``--since``, that the bag's bridge (``bridge.txt``) grows the head you kept into this one; ``--keep`` records this head
+``check DIR [--since KEPT] [--bridge FILE] [--keep FILE]``                          every receipt against the head in the bag; with ``--since``, that the bag's bridge (``bridge.txt``) grows the head you kept into this one; ``--keep`` records this head. ``--keep`` is available from the next release, not in 0.4.0
 ``log head \vert list \vert audit \vert backfill \vert prove ID \vert bridge SIZE`` the append-only log
 ``vouch sign FILE \vert check FILE``                                                a detached Ed25519 signature beside a file
 ``migrate``                                                                         move a store to the current layout
-=================================================================================== ============================================================================================
+=================================================================================== ====================================================================================================================================================================================================================================
 
 Kinds
 =====

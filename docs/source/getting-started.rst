@@ -85,7 +85,8 @@ and the manifest come signed; add the verifying key to the receiver's
 ``layout`` and the last line reads ``(accepted)``. On the next handover from the
 same sender, record the head with ``deedar check /tmp/bag --keep head.txt``;
 on the next handover ``deedar check /tmp/bag2 --since head.txt`` also shows the
-log grew from that head, and was not rewritten.
+log grew from that head, and was not rewritten. ``--keep`` is available from
+the next release, not in 0.4.0.
 
 Where next
 ==========

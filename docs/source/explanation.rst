@@ -12,7 +12,8 @@ old one still resolves and ``current`` says where it went.
 Why a log
 =========
 
-|image1|
+.. image:: _static/handover.svg
+   :width: 100.0%
 
 Every deed carries a keyed hash under the store's writer key, and a
 signature when the host has a signing key. Either says a deed is the one
@@ -45,15 +46,16 @@ The hash is Certificate Transparency's, named above
 of Crosby and Wallach, USENIX Security 2009. The live systems split by
 the job. Rekor (`sigstore.dev <https://www.sigstore.dev>`__) is a hosted
 log whose monitors compare heads, which is the gossip this file does
-not do. The Update Framework (`theupdateframework.io
-<https://theupdateframework.io>`__) rotates update authority through
-delegations. A receiver here lists accepted keys in ``layout``, and
-replacing that list is the rotation. Supply-chain Levels for Software
-Artifacts (`slsa.dev/provenance <https://slsa.dev/provenance>`__)
-attests a build. A deed's kind says the shape. Its sources name the
-inputs, and ``trail`` walks the sources that are deeds. The host
-sidecar signs the deed. This store does not grow
-a public log or a quorum.
+not do. The Update Framework
+(`theupdateframework.io <https://theupdateframework.io>`__) rotates
+update authority through delegations. A receiver here lists accepted
+keys in ``layout``, and replacing that list is the rotation. Supply-chain
+Levels for Software Artifacts
+(`slsa.dev/provenance <https://slsa.dev/provenance>`__) attests a build.
+A deed's kind says the shape. Its sources name the inputs, and
+``trail`` walks the sources that are deeds. The host sidecar signs the
+deed. This store does not grow a public log or a
+quorum.
 
 Integrity, authenticity, authorisation
 ======================================
@@ -92,6 +94,3 @@ on a node; a pack cites it in a claim; this store answers ``get``, ``trail``,
 ``evidence`` and ``current`` for it. None of the three opens another's format.
 The seat composes them by passing accessions on pipes, and a handover
 carries the deeds beside the tracker slice and the claims that cite them.
-
-.. |image1| image:: _static/handover.svg
-   :width: 100.0%

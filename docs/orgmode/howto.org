@@ -43,6 +43,8 @@ $ deedar log bridge 34 > bag2/bridge.txt       # on the sender, at the next expo
 $ deedar check bag2 --since sender.head        # on the receiver
 #+end_src
 
+=--keep= is available from the next release, not in 0.4.0.
+
 The bridge is the consistency path from the head you kept to the new one.
 =check= requires it to start at the kept head and end at the head the
 bag's deeds are proven against, so a log rewritten in between fails. A
