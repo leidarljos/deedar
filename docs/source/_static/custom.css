@@ -545,3 +545,13 @@ body::before {
     padding-right: 180px;
   }
 }
+/* A substituted image used to sit in a paragraph, whose bottom margin is
+   1.25rem. The image directive renders a bare link, and the paragraph
+   after it then starts 4px higher. */
+.yue a.image-reference {
+  display: block;
+  margin-bottom: 1.25rem;
+}
+.yue a.image-reference img {
+  display: block;
+}
