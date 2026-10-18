@@ -12,8 +12,8 @@ REQ="$ROOT/docs/requirements.txt"
 SRC="$ROOT/docs/source"
 BUILD="$ROOT/docs/build"
 
-echo "==> 1/4 Open Graph image from docs/logo/icon.svg"
-python3 "$ROOT/docs/scripts/og_image.py"
+echo "==> 1/4 Open Graph image"
+bash "$ROOT/.github/render-og-png.sh"
 
 echo "==> 2/4 export org → rst"
 bash "$ROOT/docs/scripts/export_org_to_rst.sh"
