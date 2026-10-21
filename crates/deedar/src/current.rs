@@ -16,15 +16,24 @@ impl FsStore {
             if !seen.insert(tip.clone()) {
                 break;
             }
-            let Some(next) = read_successor(&self.successor_path(&tip))? else {
+            let Some(next) = self.next_tip(&tip)? else {
                 break;
             };
-            if self.tomb_path(&next).exists() || !self.deed_path(&next).exists() {
-                break;
-            }
             tip = next;
         }
         self.get(&tip)
+    }
+
+    /// The successor `current` steps to from `id`: named by `{id}.successor`,
+    /// held here, and not tombstoned.
+    pub(crate) fn next_tip(&self, id: &DeedId) -> Result<Option<DeedId>> {
+        let Some(next) = read_successor(&self.successor_path(id))? else {
+            return Ok(None);
+        };
+        if self.tomb_path(&next).exists() || !self.deed_path(&next).exists() {
+            return Ok(None);
+        }
+        Ok(Some(next))
     }
 
     pub(crate) fn record_supersedes(&self, new: &DeedId, prior: &DeedId) -> Result<()> {
