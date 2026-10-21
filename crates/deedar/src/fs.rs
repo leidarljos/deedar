@@ -61,13 +61,14 @@ impl Exporter<'_> {
         })
     }
 
-    /// Write one deed into a satchel: bytes, evidence, sidecar, receipt, and
-    /// the signed head when there is one.
+    /// Write one deed into a satchel: its canonical bytes, evidence, sidecar,
+    /// product bytes under `bytes/`, supersede links, the receipt, and the
+    /// signed head when there is one.
     ///
     /// # Errors
     ///
-    /// Fails when the deed is absent, the log has no entry for it, or `into`
-    /// cannot be written.
+    /// Fails when the deed is absent, the log has no entry for it, a product
+    /// path has no bytes here, or `into` cannot be written.
     pub fn export(&self, id: &DeedId, into: &Path) -> Result<Vec<PathBuf>> {
         let deed = self.store.get(id)?;
         let (out, mut written) = self.store.export_files(id, into, &deed)?;
@@ -689,6 +690,34 @@ impl FsStore {
         if let Ok(raw) = fs::read(crate::host::sidecar(&self.dir, id)) {
             let path = out.join("host");
             atomic_write(&path, &raw)?;
+            written.push(path);
+        }
+        for hex in deed
+            .paths
+            .iter()
+            .filter_map(|path| path.to_str()?.strip_prefix("sha256:"))
+        {
+            let raw = fs::read(self.dir.join("bytes").join(hex)).map_err(|_| {
+                Error::Evidence(format!(
+                    "{id}: path sha256:{hex} has no bytes in this store to hand over"
+                ))
+            })?;
+            let dir = out.join("bytes");
+            fs::create_dir_all(&dir).map_err(|e| Error::Io(e.to_string()))?;
+            let path = dir.join(hex);
+            atomic_write(&path, &raw)?;
+            written.push(path);
+        }
+        if let Ok(raw) = fs::read(self.supersedes_path(id)) {
+            let path = out.join("supersedes");
+            atomic_write(&path, &raw)?;
+            written.push(path);
+        }
+        // Only a successor `current` would step to: one tombstoned here
+        // cannot be exported, and a receiver would refuse a bag that names it.
+        if let Some(next) = self.next_tip(id)? {
+            let path = out.join("successor");
+            atomic_write(&path, format!("{next}\n").as_bytes())?;
             written.push(path);
         }
         Ok((out, written))

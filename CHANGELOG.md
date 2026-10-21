@@ -4,6 +4,12 @@ Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
 
 ## Unreleased
 
+- `deedar export` writes each product path's bytes into the deed's
+  folder as `bytes/<sha256>`, and its `supersedes` and `successor`
+  links beside them. The reference listed bytes and no bag carried them,
+  so a file deed arrived without its product, and a revision without the
+  chain `current` walks. A successor `current` would not step to, such
+  as a tombstoned one, is left out.
 - Each release archive gets a GitHub build attestation from the release workflow, so `gh attestation verify` and the ljos installer can check that this repository built it. Releases before this one have none, and the installer counts them as not published.
 - `deedar create` run again with the same bytes and flags prints the deed
   it froze and exits 0, and writes nothing. It exited 1 with `deed

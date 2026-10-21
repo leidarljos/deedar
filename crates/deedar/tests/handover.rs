@@ -12,7 +12,7 @@ use std::collections::BTreeSet;
 use deed::DeedId;
 use deedar::{check_handover, Bridge, Client, FsStore, Receipt};
 
-use common::{quote, tmp_url};
+use common::{file, quote, tmp_url, write_blob};
 
 fn store(url: &str) -> FsStore {
     FsStore::open(deedar::store_dir(url).unwrap()).unwrap()
@@ -194,6 +194,64 @@ fn a_receipt_is_the_entry_the_log_holds() {
     }
     let done = check_handover(bag.path(), &BTreeSet::new()).unwrap();
     assert_eq!(done.proven.into_iter().collect::<BTreeSet<_>>(), asked);
+}
+
+/// A file deed travels with its product bytes, and a revision with the links
+/// `current` walks, so a receiver gets more than the record.
+#[test]
+fn an_export_carries_product_bytes_and_supersede_links() {
+    let url = tmp_url();
+    let dir = deedar::store_dir(&url).unwrap();
+    let mut client = Client::open(&url).unwrap();
+    let blob = write_blob(&dir, "letter.txt", b"the letter itself");
+    let (letter, _) = client.create(file("deed-file-letter", blob)).unwrap();
+    client
+        .create(quote(
+            "deed-quote-first",
+            "first take",
+            "https://example.invalid/a",
+        ))
+        .unwrap();
+    let first = DeedId::parse("deed-quote-first").unwrap();
+    let mut revision = quote(
+        "deed-quote-second",
+        "second take",
+        "https://example.invalid/a",
+    );
+    revision.supersedes = Some(first.clone());
+    let (second, _) = client.create(revision).unwrap();
+    let store = store(&url);
+
+    let bag = tempfile::tempdir().unwrap();
+    let deeds = bag.path().join("data").join("deeds");
+    for id in [&letter.id, &first, &second.id] {
+        store.export_into(id, &deeds).unwrap();
+    }
+    let hex = letter.paths[0]
+        .to_str()
+        .and_then(|path| path.strip_prefix("sha256:"))
+        .unwrap();
+    assert_eq!(
+        std::fs::read(deeds.join(letter.id.as_str()).join("bytes").join(hex)).unwrap(),
+        b"the letter itself"
+    );
+    let link =
+        |id: &DeedId, name: &str| std::fs::read_to_string(deeds.join(id.as_str()).join(name));
+    assert_eq!(link(&first, "successor").unwrap(), "deed-quote-second\n");
+    assert_eq!(
+        link(&second.id, "supersedes").unwrap(),
+        "deed-quote-first\n"
+    );
+    assert!(link(&first, "supersedes").is_err());
+    assert!(link(&second.id, "successor").is_err());
+    let done = check_handover(bag.path(), &BTreeSet::new()).unwrap();
+    assert_eq!(done.proven.len(), 3);
+
+    // A successor `current` no longer steps to is not handed over.
+    client.delete(&second.id).unwrap();
+    let after = tempfile::tempdir().unwrap();
+    store.export_into(&first, after.path()).unwrap();
+    assert!(!after.path().join(first.as_str()).join("successor").exists());
 }
 
 fn mint_more(url: &str, id: &str) -> DeedId {
