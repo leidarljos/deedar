@@ -1,4 +1,4 @@
-//! Operator path: create, get, list, trail, evidence, delete, leave, timestamp, current, migrate.
+//! Operator path: create, get, list, trail, evidence, delete, leave, timestamp, current, import, migrate.
 
 use std::env;
 use std::path::{Path, PathBuf};
@@ -305,6 +305,31 @@ fn cmd_export(client: &mut Client, args: &[String]) -> Result<String, String> {
     ))
 }
 
+/// Check a satchel and append the deeds it carried to this store with the
+/// receipt fields they travelled with.
+fn cmd_import(client: &mut Client, args: &[String]) -> Result<String, String> {
+    let bag = args.first().ok_or("import needs a satchel directory")?;
+    if args.len() > 1 {
+        return Err(format!(
+            "import takes one directory, and also got {:?}",
+            args[1]
+        ));
+    }
+    let bag = PathBuf::from(bag);
+    let before_deeds = client.list().map_err(|e| e.to_string())?.len();
+    let before_log = client.log_entries().map_err(|e| e.to_string())?.len();
+    let checked = client.import_handover(&bag).map_err(|e| e.to_string())?;
+    let after_deeds = client.list().map_err(|e| e.to_string())?.len();
+    let after_log = client.log_entries().map_err(|e| e.to_string())?.len();
+    let mut out = checked.render();
+    out.push_str(&format!(
+        "imported {} deeds, appended {} log entries\n",
+        after_deeds.saturating_sub(before_deeds),
+        after_log.saturating_sub(before_log)
+    ));
+    Ok(out)
+}
+
 /// The append-only log: `head` to keep, `prove` for one deed, `bridge` from a
 /// kept head to this one, `audit` of the log against the shelves.
 fn cmd_log(client: &mut Client, args: &[String]) -> Result<String, String> {
@@ -496,6 +521,7 @@ fn run(args: Vec<String>) -> Result<String, String> {
         }
         Some("log") => cmd_log(&mut client, &rest[1..]),
         Some("export") => cmd_export(&mut client, &rest[1..]),
+        Some("import") => cmd_import(&mut client, &rest[1..]),
         Some("check") => cmd_check(&url, &rest[1..]),
         Some("vouch") => cmd_vouch(&url, &rest[1..]),
         Some("migrate") => {
@@ -512,12 +538,12 @@ fn run(args: Vec<String>) -> Result<String, String> {
 }
 
 fn usage() -> String {
-    "usage: deedar [--url FILE] create|get|list|trail|evidence|delete|leave|timestamp|current|log|export|check|vouch|migrate|host\n\
+    "usage: deedar [--url FILE] create|get|list|trail|evidence|delete|leave|timestamp|current|log|export|import|check|vouch|migrate|host\n\
      deedar --help            this page\n\
      deedar create --help     kinds and flags, including --path\n\
      evidence, current and export take one id, several ids, or - to read them from stdin\n\
      log takes head, list, audit, backfill, prove ID, or bridge SIZE\n\
-     check takes a satchel directory, --since KEPT_HEAD, --bridge FILE and --keep FILE; vouch takes sign FILE or check FILE\n\
+     import takes a satchel directory; check takes one too, with --since KEPT_HEAD, --bridge FILE and --keep FILE; vouch takes sign FILE or check FILE\n\
      host says whether the store's layout lists the host signing key, and exits 1 when it does not\n\
      host accept adds the host signing key to the layout as a signer, and leaves every other line\n"
         .into()

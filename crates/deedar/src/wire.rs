@@ -768,6 +768,20 @@ pub fn deed_bytes(d: &Deed) -> Vec<u8> {
     p
 }
 
+/// A deed from its canonical bytes, as `deed.bin` exports it.
+///
+/// # Errors
+///
+/// Fails when the bytes do not decode as one deed exactly.
+pub fn deed_from_bytes(bytes: &[u8]) -> Result<Deed> {
+    let (deed, rest) = take_deed(bytes)?;
+    if rest.is_empty() {
+        Ok(deed)
+    } else {
+        Err(Error::Decode("deed bytes: trailing".into()))
+    }
+}
+
 fn put_deed(p: &mut Vec<u8>, d: &Deed) {
     put_str(p, d.id.as_str());
     put_kind(p, &d.kind);

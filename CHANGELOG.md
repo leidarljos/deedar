@@ -33,6 +33,9 @@ Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
   The bridge travels in the bag as `bridge.txt` (or `--bridge FILE`), and
   `check --keep FILE` records a head for next time. Passing a bridge to
   `--since` is refused with a message that says why.
+- `deedar import BAG` checks the bag, then copies each deed into this
+  store and appends the log entry fields from its receipt. Importing the
+  same bag again appends nothing.
 - `cargo binstall deedar-cli` and `cargo binstall deedar-mcp` build from
   source on a target with no release tarball, such as Windows or musl
   Linux. The `compile` strategy was off, so binstall failed there.

@@ -178,6 +178,17 @@ impl Client {
         self.store.export_into(id, into)
     }
 
+    /// Check a handover and append the deeds it carried with their receipts.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the handover does not check out, when an accession is frozen
+    /// to other bytes in this store, or when its logged fields disagree with
+    /// the receipt that travelled.
+    pub fn import_handover(&mut self, dir: &Path) -> Result<crate::receipt::Handover> {
+        self.store.import_handover(dir)
+    }
+
     /// What the log says the store holds, against what it will hand over.
     ///
     /// # Errors

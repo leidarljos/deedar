@@ -18,6 +18,7 @@ Verb                                                                            
 ``leave ID``                                                                        a left-behind marker for a deed that moved store
 ``timestamp ID``                                                                    a timestamp token over the deed
 ``export --into DIR ID... \vert -``                                                 deed, bytes, evidence, receipt (and signed head) into a satchel
+``import DIR``                                                                      check a satchel and append its deeds with the receipt fields they travelled with
 ``check DIR [--since KEPT] [--bridge FILE] [--keep FILE]``                          every receipt against the head in the bag; with ``--since``, that the bag's bridge (``bridge.txt``) grows the head you kept into this one; ``--keep`` records this head. ``--keep`` is available from the next release, not in 0.4.0
 ``log head \vert list \vert audit \vert backfill \vert prove ID \vert bridge SIZE`` the append-only log
 ``vouch sign FILE \vert check FILE``                                                a detached Ed25519 signature beside a file

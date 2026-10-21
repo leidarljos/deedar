@@ -1,3 +1,4 @@
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -134,6 +135,15 @@ type LogStamp = (u64, Option<std::time::SystemTime>);
 
 /// One reading of the log, and the stamp of the file it was read from.
 type TreeCache = std::sync::Mutex<Option<(LogStamp, std::sync::Arc<LogTree>)>>;
+
+/// One deed folder read from a handover: deed bytes plus the receipt and any
+/// sidecars that travelled with it.
+struct ImportedRecord {
+    deed: Deed,
+    receipt: crate::receipt::Receipt,
+    evidence_frame: Option<Vec<u8>>,
+    host_sidecar: Option<Vec<u8>>,
+}
 
 /// Directory of deeds, write-once bytes, and tombstones.
 pub struct FsStore {
@@ -622,6 +632,111 @@ impl FsStore {
         exporter.export(id, into)
     }
 
+    /// Check a handover and append each deed with the receipt it travelled
+    /// with. Deeds and sidecars already present are kept when they match.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the handover does not check out, when an accession is
+    /// already frozen to other bytes here, or when a logged entry for an
+    /// accession disagrees with the receipt that travelled.
+    pub fn import_handover(&mut self, dir: &Path) -> Result<crate::receipt::Handover> {
+        let checked = crate::receipt::check_handover(dir, &self.policy.signers)?;
+        let root = handover_deeds_root(dir)?;
+        let records = read_import_records(&root)?;
+
+        let checked_ids: BTreeSet<String> = checked.proven.iter().cloned().collect();
+        let read_ids: BTreeSet<String> = records.iter().map(|r| r.receipt.id.clone()).collect();
+        if checked_ids != read_ids {
+            return Err(Error::Evidence(
+                "this handover changed while it was being imported".into(),
+            ));
+        }
+
+        let mut logged: BTreeMap<String, crate::log::Entry> = BTreeMap::new();
+        for entry in self.log_entries()? {
+            if let Some(held) = logged.get(&entry.id) {
+                if held != &entry {
+                    return Err(Error::Evidence(format!(
+                        "{} is logged here more than once with different receipt fields",
+                        entry.id
+                    )));
+                }
+            } else {
+                logged.insert(entry.id.clone(), entry);
+            }
+        }
+
+        for record in records {
+            self.import_record(&record)?;
+
+            match logged.get(&record.receipt.id) {
+                Some(held)
+                    if held.digest == record.receipt.digest
+                        && held.unix_time == record.receipt.unix_time => {}
+                Some(held) => {
+                    return Err(Error::Evidence(format!(
+                        "{} is already logged here as {} at time {}, and this handover says {} at time {}",
+                        held.id,
+                        held.digest,
+                        held.unix_time,
+                        record.receipt.digest,
+                        record.receipt.unix_time
+                    )));
+                }
+                None => {
+                    self.append_log(&record.deed, record.receipt.unix_time)?;
+                    logged.insert(
+                        record.receipt.id.clone(),
+                        crate::log::Entry {
+                            id: record.receipt.id.clone(),
+                            digest: record.receipt.digest.clone(),
+                            unix_time: record.receipt.unix_time,
+                        },
+                    );
+                }
+            }
+        }
+        Ok(checked)
+    }
+
+    fn import_record(&self, record: &ImportedRecord) -> Result<()> {
+        let id = &record.deed.id;
+        if self.tomb_path(id).exists() {
+            return Err(Error::Frozen(id.to_string()));
+        }
+
+        if self.deed_path(id).exists() {
+            let held = self.get(id)?;
+            if held != record.deed {
+                return Err(Error::Frozen(id.to_string()));
+            }
+        } else {
+            let frame = wire::encode_response(&Response::Deed(record.deed.clone()))?;
+            atomic_write(&self.deed_path(id), &frame)?;
+        }
+
+        if let Some(raw) = &record.evidence_frame {
+            keep_or_write(
+                &self.evidence_path(id),
+                raw,
+                &format!(
+                    "{id}: evidence in this handover differs from what this store already has"
+                ),
+            )?;
+        }
+        if let Some(raw) = &record.host_sidecar {
+            keep_or_write(
+                &crate::host::sidecar(&self.dir, id),
+                raw,
+                &format!(
+                    "{id}: host sidecar in this handover differs from what this store already has"
+                ),
+            )?;
+        }
+        Ok(())
+    }
+
     /// The log file's size and modification time, which is what says whether a
     /// tree built over it is still the tree.
     fn log_stamp(&self) -> LogStamp {
@@ -951,6 +1066,133 @@ impl FsStore {
 
     pub(crate) fn tomb_path(&self, id: &DeedId) -> PathBuf {
         self.dir.join("deeds").join(format!("{id}.tomb"))
+    }
+}
+
+fn handover_deeds_root(dir: &Path) -> Result<PathBuf> {
+    let nested = dir.join("data").join("deeds");
+    if nested.is_dir() {
+        return Ok(nested);
+    }
+    if dir.is_dir() {
+        return Ok(dir.to_path_buf());
+    }
+    Err(Error::Evidence(format!(
+        "{}: no deeds here and none under data/deeds",
+        dir.display()
+    )))
+}
+
+fn read_import_records(root: &Path) -> Result<Vec<ImportedRecord>> {
+    let mut folders: Vec<PathBuf> = fs::read_dir(root)
+        .map_err(|e| Error::Io(e.to_string()))?
+        .filter_map(std::result::Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .collect();
+    folders.sort();
+
+    let mut seen: BTreeSet<String> = BTreeSet::new();
+    let mut out = Vec::new();
+    for folder in folders {
+        let folder_name = folder
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "folder".into());
+
+        let proof_path = folder.join("proof.txt");
+        let proof_text = fs::read_to_string(&proof_path).map_err(|_| {
+            Error::Evidence(format!(
+                "{folder_name}: no proof.txt, so nothing says this deed was logged before it was \
+                 handed over"
+            ))
+        })?;
+        let receipt = crate::receipt::Receipt::parse(&proof_text)?;
+        if !seen.insert(receipt.id.clone()) {
+            return Err(Error::Evidence(format!(
+                "{} appears more than once in this handover",
+                receipt.id
+            )));
+        }
+
+        let deed_path = folder.join("deed.bin");
+        let deed_bytes = fs::read(&deed_path).map_err(|_| {
+            Error::Evidence(format!(
+                "{}: a receipt with no deed.bin beside it",
+                receipt.id
+            ))
+        })?;
+        receipt.check(&deed_bytes)?;
+        let deed = wire::deed_from_bytes(&deed_bytes)?;
+        if deed.id.as_str() != receipt.id {
+            return Err(Error::Evidence(format!(
+                "{}: deed.bin says {}, and proof.txt says {}",
+                folder_name, deed.id, receipt.id
+            )));
+        }
+
+        let evidence_path = folder.join("evidence.bin");
+        let evidence_frame = if evidence_path.is_file() {
+            let raw = fs::read(&evidence_path).map_err(|e| Error::Io(e.to_string()))?;
+            match wire::decode_response(&raw)? {
+                Response::Created {
+                    deed: in_frame,
+                    evidence,
+                } if in_frame == deed && evidence.deed_id == deed.id => {}
+                Response::Created { .. } => {
+                    return Err(Error::Evidence(format!(
+                        "{}: evidence.bin does not match deed.bin",
+                        receipt.id
+                    )));
+                }
+                _ => {
+                    return Err(Error::Decode(format!(
+                        "{}: evidence.bin is not a created frame",
+                        receipt.id
+                    )));
+                }
+            }
+            Some(raw)
+        } else {
+            None
+        };
+
+        let host_path = folder.join("host");
+        let host_sidecar = if host_path.is_file() {
+            let raw = fs::read(&host_path).map_err(|e| Error::Io(e.to_string()))?;
+            if crate::host::read_sidecar(&raw).is_none() {
+                return Err(Error::Evidence(format!(
+                    "{}: host sidecar unreadable",
+                    receipt.id
+                )));
+            }
+            Some(raw)
+        } else {
+            None
+        };
+
+        out.push(ImportedRecord {
+            deed,
+            receipt,
+            evidence_frame,
+            host_sidecar,
+        });
+    }
+    out.sort_by_key(|record| record.receipt.index);
+    Ok(out)
+}
+
+fn keep_or_write(path: &Path, raw: &[u8], mismatch: &str) -> Result<()> {
+    match fs::read(path) {
+        Ok(held) => {
+            if held == raw {
+                Ok(())
+            } else {
+                Err(Error::Evidence(mismatch.into()))
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => atomic_write(path, raw),
+        Err(e) => Err(Error::Io(e.to_string())),
     }
 }
 
