@@ -338,25 +338,34 @@ impl FsStore {
 
         // A receipt already kept for the same entry stays, with the head it
         // was against: it still proves the entry, against an earlier head.
+        // A later bag's head is that log grown. Writing it beside the kept
+        // proof makes the two disagree, and refusing the bag blocks every
+        // deed that travelled with it. The head is written only when it is
+        // the head the kept proof names. A proof this store does not have
+        // yet is written with its head in the same plan, so the pair lands
+        // together or not at all.
         let proof_path = self.proof_path(id);
         match read_if_there(&proof_path)? {
             Some(held) => {
                 let kept = String::from_utf8(held)
                     .ok()
-                    .and_then(|text| Receipt::parse(&text).ok());
-                if !kept.is_some_and(|kept| {
-                    kept.id == c.receipt.id
-                        && kept.digest == c.receipt.digest
-                        && kept.unix_time == c.receipt.unix_time
-                }) {
+                    .and_then(|text| Receipt::parse(&text).ok())
+                    .filter(|kept| {
+                        kept.id == c.receipt.id
+                            && kept.digest == c.receipt.digest
+                            && kept.unix_time == c.receipt.unix_time
+                    });
+                let Some(kept) = kept else {
                     return Err(Error::Evidence(format!(
                         "{id}: the receipt this store kept for it names another entry"
                     )));
-                }
-                if let Some(head) = &bag.head {
-                    plan.put(self.kept_head_path(id), head.clone().into_bytes(), || {
-                        format!("{id}: this store kept another head for it")
-                    })?;
+                };
+                if let Some(head) = bag.head.as_deref().filter(|head| proof_names(head, &kept)) {
+                    plan.put(
+                        self.kept_head_path(id),
+                        head.to_string().into_bytes(),
+                        || format!("{id}: this store kept another head for it"),
+                    )?;
                 }
             }
             None => {
@@ -796,6 +805,12 @@ fn parse_digest(raw: Option<&str>, path: &Path) -> Result<String> {
         .filter(|hex| crate::fs::is_sha256_hex(hex))
         .ok_or_else(|| Error::Evidence(format!("{}: invalid sha256 digest", path.display())))?;
     Ok(format!("sha256:{hex}"))
+}
+
+/// Whether `head_line` is the head `proof` was built against. A signed line
+/// and a bare `size`/`root` both carry those two fields.
+fn proof_names(head_line: &str, proof: &Receipt) -> bool {
+    crate::receipt::kept_head(head_line).is_ok_and(|head| head == proof.head())
 }
 
 fn read_if_there(path: &Path) -> Result<Option<Vec<u8>>> {

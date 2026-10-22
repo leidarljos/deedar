@@ -33,6 +33,10 @@ Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
 - Re-importing a bag now restores `deeds/ID.head` whenever `deeds/ID.proof`
   already matches and the bag carried a signed head. A partial write that
   left only `.proof` no longer leaves that head missing forever.
+- A later bag no longer refuses a deed whose receipt is already kept, and
+  no longer fills a missing `deeds/ID.head` from a head that receipt is not
+  against. The head is written when it is the head the kept proof names.
+  A proof this store does not have yet is written with its head together.
 - `--allow-unsigned-head` now waives only a missing head signature. A
   head signed by a key the store's layout does not list is refused with
   or without the flag.
