@@ -641,20 +641,28 @@ fn real_dir(path: &Path) -> Result<bool> {
     }
 }
 
+/// Domain separation for the links transcript. The transcript before it had
+/// no tag, ended a folder name at a newline, and gave a missing sidecar the
+/// length of an empty one, so two bags could share it. A head over that
+/// transcript is refused.
+const LINKS_DOMAIN: &[u8] = b"deedar-links-v2";
+
 /// Hex SHA-256 of the link sidecars under a deeds directory.
 ///
-/// Deed folders are taken in byte order of their names. Each contributes its
-/// name and the exact bytes of `sources`, `supersedes` and `successor`, in
-/// that order. A missing file contributes a length of zero. A symlink or
-/// other non-regular file is refused, not read. The line is
-/// `<name>\n` then, for each kind, `<kind>\n<len>\n<bytes>`.
+/// The transcript is `deedar-links-v2` and a zero byte, then each deed folder
+/// in byte order of the names: `<len>\n<name>`, then for `sources`,
+/// `supersedes` and `successor` in that order `<kind>\n` followed by `-\n`
+/// when the file is absent or `<len>\n<bytes>` when it is present. Every
+/// field is framed, so other folders or other files make another transcript.
+/// A symlink or other non-regular file is refused, not read.
 ///
 /// This is what a bag's head signature covers beyond the log root. The
 /// receipt does not: a file edited after export still sits beside a proof
 /// that checks, until this digest is checked against the signature. An
 /// unsigned head has no signature, so it does not authenticate these files.
 pub(crate) fn link_commitment(root: &Path) -> Result<String> {
-    let mut transcript = Vec::new();
+    let mut transcript = Vec::from(LINKS_DOMAIN);
+    transcript.push(0);
     for folder in deed_folders(root)? {
         let name = folder
             .file_name()
@@ -665,15 +673,18 @@ pub(crate) fn link_commitment(root: &Path) -> Result<String> {
                     folder.display()
                 ))
             })?;
+        transcript.extend_from_slice(format!("{}\n", name.len()).as_bytes());
         transcript.extend_from_slice(name.as_bytes());
-        transcript.push(b'\n');
         for kind in ["sources", "supersedes", "successor"] {
-            let path = folder.join(kind);
-            let bytes = read_regular_opt(&path)?.unwrap_or_default();
             transcript.extend_from_slice(kind.as_bytes());
             transcript.push(b'\n');
-            transcript.extend_from_slice(format!("{}\n", bytes.len()).as_bytes());
-            transcript.extend_from_slice(&bytes);
+            match read_regular_opt(&folder.join(kind))? {
+                None => transcript.extend_from_slice(b"-\n"),
+                Some(bytes) => {
+                    transcript.extend_from_slice(format!("{}\n", bytes.len()).as_bytes());
+                    transcript.extend_from_slice(&bytes);
+                }
+            }
         }
     }
     Ok(log::hex(&Sha256::digest(&transcript)))
@@ -689,7 +700,10 @@ pub(crate) fn links_bound(root: &Path, signed: &SignedHead) -> Result<()> {
             let got = link_commitment(root)?;
             if got != *links {
                 return Err(Error::Evidence(
-                    "the head signature does not cover the link sidecars in this bag".into(),
+                    "the head signature does not cover the link sidecars in this bag as \
+                     deedar-links-v2 frames them; a head signed over the earlier transcript is \
+                     refused too, and exporting the bag again writes this one"
+                        .into(),
                 ));
             }
             Ok(())
@@ -1071,13 +1085,13 @@ mod tests {
         let supersedes = b"deed-quote-v1\nsha256:abababababababababababababababababababababababababababababababab\n";
         std::fs::write(folder.join("supersedes"), supersedes).unwrap();
 
-        let mut transcript = Vec::new();
-        transcript.extend_from_slice(b"deed-quote-a\n");
-        transcript.extend_from_slice(b"sources\n0\n");
+        let mut transcript = b"deedar-links-v2\0".to_vec();
+        transcript.extend_from_slice(b"12\ndeed-quote-a");
+        transcript.extend_from_slice(b"sources\n-\n");
         transcript.extend_from_slice(b"supersedes\n");
         transcript.extend_from_slice(format!("{}\n", supersedes.len()).as_bytes());
         transcript.extend_from_slice(supersedes);
-        transcript.extend_from_slice(b"successor\n0\n");
+        transcript.extend_from_slice(b"successor\n-\n");
         let want = log::hex(&Sha256::digest(&transcript));
         assert_eq!(link_commitment(root.path()).unwrap(), want);
 
@@ -1094,6 +1108,50 @@ mod tests {
 
         message.truncate(message.len() - 1 - want.len());
         assert_eq!(head_message(&head, None), message);
+    }
+
+    /// One folder name cannot stand for two folders, and a missing sidecar
+    /// is not an empty one. A head over the transcript before
+    /// `deedar-links-v2`, which allowed both, is refused.
+    #[test]
+    fn the_link_transcript_tells_bags_apart() {
+        let links = |folders: &[&str], files: &[&str]| {
+            let root = tempfile::tempdir().unwrap();
+            for name in folders {
+                std::fs::create_dir(root.path().join(name)).unwrap();
+            }
+            for file in files {
+                std::fs::write(root.path().join(file), b"").unwrap();
+            }
+            (link_commitment(root.path()).unwrap(), root)
+        };
+        let (two, _) = links(&["deed-quote-a", "deed-quote-b"], &[]);
+        let crafted = "deed-quote-a\nsources\n0\nsupersedes\n0\nsuccessor\n0\ndeed-quote-b";
+        let (one, _) = links(&[crafted], &[]);
+        assert_ne!(one, two, "one folder name stood for two folders");
+        let (missing, bare) = links(&["deed-quote-a"], &[]);
+        let (empty, _) = links(&["deed-quote-a"], &["deed-quote-a/supersedes"]);
+        assert_ne!(missing, empty, "an empty sidecar passed for a missing one");
+
+        let earlier = b"deed-quote-a\nsources\n0\nsupersedes\n0\nsuccessor\n0\n";
+        let earlier = log::hex(&Sha256::digest(earlier));
+        let key = ed25519_dalek::SigningKey::from_bytes(&[5u8; 32]);
+        let head = Head {
+            size: 1,
+            root: "ab".repeat(32),
+        };
+        let signature = ed25519_dalek::Signer::sign(&key, &head_message(&head, Some(&earlier)));
+        let signed = SignedHead {
+            head,
+            links: Some(earlier),
+            signer: key.verifying_key().to_bytes(),
+            signature: signature.to_bytes(),
+        };
+        signed
+            .check(&BTreeSet::new())
+            .expect("the signature verifies");
+        let err = links_bound(bare.path(), &signed).expect_err("the earlier transcript passed");
+        assert!(format!("{err}").contains("deedar-links-v2"), "{err}");
     }
 
     /// The report distinguishes an unsigned head, a named signer, and an

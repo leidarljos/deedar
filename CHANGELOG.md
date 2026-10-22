@@ -47,6 +47,12 @@ Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
   folder's links under the folder's name, so another deed's files moved
   into a revision's folder kept the signature, and `current` of the
   revision's prior stepped to that deed.
+- The `links=` digest a bag's head signs is over the `deedar-links-v2`
+  transcript, which gives each folder name its length and marks an
+  absent sidecar apart from an empty one. One crafted folder name could
+  stand for two folders, and `check` took an empty sidecar that import
+  refused. A head over the earlier transcript is refused. No release
+  wrote one.
 - Each release archive gets a GitHub build attestation from the release workflow, so `gh attestation verify` and the ljos installer can check that this repository built it. Releases before this one have none, and the installer counts them as not published.
 - `deedar create` run again with the same bytes and flags prints the deed
   it froze and exits 0, and writes nothing. It exited 1 with `deed

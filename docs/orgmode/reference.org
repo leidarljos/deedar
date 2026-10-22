@@ -117,10 +117,13 @@ size=<n> root=<64 hex> links=<64 hex> ed25519 <key hex> <signature hex>
 #+end_example
 
 =links= is lowercase hex with no =sha256:= prefix. It is the SHA-256 of
-this transcript. Deed directories are taken in byte order of their names.
-For each, write the name and a newline, then for =sources=, =supersedes=
-and =successor= in that order write the kind, a newline, the decimal byte
-length, a newline, and the raw file bytes. A missing file has length 0.
+this transcript. Write =deedar-links-v2= and a =0x00= byte, then take
+the deed directories in byte order of their names. For each, write the
+decimal byte length of the name, a newline, and the name. Then for
+=sources=, =supersedes= and =successor= in that order write the kind
+and a newline, then =-= and a newline when the file is absent, or the
+decimal byte length, a newline, and the raw file bytes when it is present.
+An empty file has length 0, which is not the same as an absent one.
 The Ed25519 signature covers, with =||= concatenation:
 
 =deedar-head-v1 || 0x00 || "<size> <root>" || 0x00 || <links hex>=
@@ -128,10 +131,16 @@ The Ed25519 signature covers, with =||= concatenation:
 =<size>= and the root are the decimal length and the hex root, separated
 by one space. A head line with no =links= field still verifies, and only
 when none of those three files is present. An export always writes
-=links=, including when every sidecar is empty, so adding one later
+=links=, including when no folder has a sidecar, so adding one later
 breaks the signature. An unsigned bag omits =head=. The sidecars are
 then not authenticated. =deedar log head= prints the size and the root
 only. It is not this line.
+
+The transcript before =deedar-links-v2= had no tag, ended a name at a
+newline, and gave an absent file length 0, so one directory name could
+stand for two folders and an empty file for a missing one. A head over
+that transcript is refused, not verified. No release wrote it, and
+exporting the bag again writes the current one.
 
 Import stores =<id>.supersedes= as the same two lines. A file that
 already holds just the accession is completed with the digest.

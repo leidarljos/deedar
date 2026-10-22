@@ -348,6 +348,13 @@ fn a_forged_link_sidecar_fails_the_head_signature() {
         );
         assert!(err.contains("does not cover"), "{name}: {err}");
     }
+
+    // Import refuses an empty sidecar, so check cannot take it for none.
+    let bag = seats.bag("empty");
+    export(&sender, &bag, &["deed-quote-v2"]);
+    fs::write(bag.join("data/deeds/deed-quote-v2/successor"), b"").unwrap();
+    let err = deedar::check_handover(&bag, &accept).expect_err("an empty sidecar passed");
+    assert!(err.to_string().contains("does not cover"), "{err}");
 }
 
 /// The head signs each folder's links under the folder's name. Another
