@@ -239,6 +239,54 @@ fn a_signed_bag_is_evidenced_by_the_store_that_took_it() {
     holds(&sender, "deed-quote-shared");
 }
 
+/// A deed already kept under an earlier head must not block a later bag, and
+/// a missing head is not filled from a head the kept proof is not against.
+#[test]
+fn a_later_bag_imports_beside_a_deed_kept_under_an_earlier_head() {
+    let seats = Seats::new();
+    let sender = seats.url("sender");
+    let public = seats.sign_as(41);
+    mint(&sender, quote("deed-quote-a", "first"));
+    let first = seats.bag("first");
+    export(&sender, &first, &["deed-quote-a"]);
+
+    seats.sign_nothing();
+    let receiver = seats.url("receiver");
+    layout(&receiver, &format!("1\nsigner = {public}\n"));
+    import(&receiver, &first, UnsignedHead::Refuse);
+    let shelf = deedar::store_dir(&receiver).unwrap().join("deeds");
+    let kept_head = fs::read(shelf.join("deed-quote-a.head")).unwrap();
+    let kept_proof = fs::read(shelf.join("deed-quote-a.proof")).unwrap();
+
+    seats.sign_as(41);
+    mint(&sender, quote("deed-quote-b", "second"));
+    let both = seats.bag("both");
+    export(&sender, &both, &["deed-quote-a", "deed-quote-b"]);
+
+    seats.sign_nothing();
+    let done = import(&receiver, &both, UnsignedHead::Refuse);
+    assert_eq!((done.deeds, done.logged), (1, 1));
+    holds(&receiver, "deed-quote-a");
+    holds(&receiver, "deed-quote-b");
+    assert_eq!(
+        fs::read(shelf.join("deed-quote-a.proof")).unwrap(),
+        kept_proof,
+        "a grown log replaced the proof the store kept"
+    );
+    assert_eq!(
+        fs::read(shelf.join("deed-quote-a.head")).unwrap(),
+        kept_head,
+        "a grown log replaced the head the kept proof is against"
+    );
+
+    fs::remove_file(shelf.join("deed-quote-a.head")).unwrap();
+    import(&receiver, &both, UnsignedHead::Refuse);
+    assert!(
+        !shelf.join("deed-quote-a.head").exists(),
+        "a later bag repaired a head the kept proof is not against"
+    );
+}
+
 /// A kept receipt with no kept head is a partial write. Re-importing the same
 /// bag must put the head back.
 #[test]
