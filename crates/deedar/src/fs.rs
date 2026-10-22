@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -713,16 +714,35 @@ impl FsStore {
             atomic_write(&path, &raw)?;
             written.push(path);
         }
-        if let Ok(raw) = fs::read(self.supersedes_path(id)) {
+        if let Some(prior) = read_sidecar_id(&self.supersedes_path(id))? {
+            let digest = self.deed_digest_in_store(&prior)?;
             let path = out.join("supersedes");
-            atomic_write(&path, &raw)?;
+            atomic_write(&path, format!("{prior}\n{digest}\n").as_bytes())?;
             written.push(path);
         }
         // Only a successor `current` would step to: one tombstoned here
         // cannot be exported, and a receiver would refuse a bag that names it.
         if let Some(next) = self.next_tip(id)? {
+            let digest = self.deed_digest_in_store(&next)?;
             let path = out.join("successor");
-            atomic_write(&path, format!("{next}\n").as_bytes())?;
+            atomic_write(&path, format!("{next}\n{digest}\n").as_bytes())?;
+            written.push(path);
+        }
+        let trail = self.trail(id)?;
+        let mut source_digests = BTreeMap::new();
+        for source in trail.into_iter().skip(1) {
+            source_digests.insert(source.id.to_string(), crate::digest::deed_digest(&source));
+        }
+        if !source_digests.is_empty() {
+            let mut sidecar = String::new();
+            for (source, digest) in source_digests {
+                sidecar.push_str(&source);
+                sidecar.push('\t');
+                sidecar.push_str(&digest);
+                sidecar.push('\n');
+            }
+            let path = out.join("sources");
+            atomic_write(&path, sidecar.as_bytes())?;
             written.push(path);
         }
         Ok((out, written))
@@ -846,6 +866,19 @@ impl FsStore {
         match wire::decode_response(&bytes)? {
             Response::Created { evidence, .. } => Ok(evidence),
             _ => Err(Error::Decode("expected evidence frame".into())),
+        }
+    }
+
+    pub(crate) fn deed_digest_in_store(&self, id: &DeedId) -> Result<String> {
+        let bytes = fs::read(self.deed_path(id)).map_err(|_| Error::NotFound(id.to_string()))?;
+        match wire::decode_response(&bytes)? {
+            Response::Deed(d) => {
+                if d.id != *id {
+                    return Err(Error::Decode(format!("accession {id} holds {}", d.id)));
+                }
+                Ok(crate::digest::deed_digest(&d))
+            }
+            _ => Err(Error::Decode("expected deed frame".into())),
         }
     }
 
@@ -1073,4 +1106,16 @@ fn lock_exclusive(file: &fs::File) -> Result<()> {
 /// Whether `dir` is absent or holds no entries.
 fn dir_is_empty(dir: &Path) -> bool {
     fs::read_dir(dir).map_or(true, |mut entries| entries.next().is_none())
+}
+
+fn read_sidecar_id(path: &Path) -> Result<Option<DeedId>> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    let raw = fs::read_to_string(path).map_err(|e| Error::Io(e.to_string()))?;
+    let id = raw.trim();
+    if id.is_empty() {
+        return Ok(None);
+    }
+    DeedId::parse(id).map(Some)
 }
