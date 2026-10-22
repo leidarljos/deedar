@@ -1007,6 +1007,40 @@ mod tests {
         assert!(format!("{err}").contains("dropped or rewritten"), "{err}");
     }
 
+    /// The bytes a producer hashes and signs for `links=`.
+    #[test]
+    fn the_link_commitment_is_the_transcript_a_producer_signs() {
+        let root = tempfile::tempdir().unwrap();
+        let folder = root.path().join("deed-quote-a");
+        std::fs::create_dir(&folder).unwrap();
+        let supersedes = b"deed-quote-v1\nsha256:abababababababababababababababababababababababababababababababab\n";
+        std::fs::write(folder.join("supersedes"), supersedes).unwrap();
+
+        let mut transcript = Vec::new();
+        transcript.extend_from_slice(b"deed-quote-a\n");
+        transcript.extend_from_slice(b"sources\n0\n");
+        transcript.extend_from_slice(b"supersedes\n");
+        transcript.extend_from_slice(format!("{}\n", supersedes.len()).as_bytes());
+        transcript.extend_from_slice(supersedes);
+        transcript.extend_from_slice(b"successor\n0\n");
+        let want = log::hex(&Sha256::digest(&transcript));
+        assert_eq!(link_commitment(root.path()).unwrap(), want);
+
+        let head = Head {
+            size: 2,
+            root: "cd".repeat(32),
+        };
+        let mut message = b"deedar-head-v1".to_vec();
+        message.push(0);
+        message.extend_from_slice(format!("2 {}", "cd".repeat(32)).as_bytes());
+        message.push(0);
+        message.extend_from_slice(want.as_bytes());
+        assert_eq!(head_message(&head, Some(&want)), message);
+
+        message.truncate(message.len() - 1 - want.len());
+        assert_eq!(head_message(&head, None), message);
+    }
+
     /// The report distinguishes an unsigned head, a named signer, and an
     /// accepted one.
     #[test]

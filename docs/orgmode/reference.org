@@ -63,6 +63,77 @@ taken in with =import= keeps its receipt and the head it is against beside
 it, as =deeds/ID.proof= and =deeds/ID.head=, so its inclusion proof
 outlives the bag.
 
+* A handover
+
+=export --into DIR= writes =DIR/<id>/= for each deed and one =head=
+beside those folders. Wrapped as a satchel, that directory is
+=data/deeds=. A producer writing the bag by hand uses the same files.
+Every path is a regular file or a real directory. A symlink or a fifo is
+refused, and a symlinked deed folder is not entered.
+
+=deed.bin= is the canonical deed bytes. =proof.txt= names that digest
+and the inclusion path:
+
+#+begin_example
+id=<accession>
+digest=sha256:<64 lowercase hex>
+time=<unix seconds>
+index=<leaf index>
+size=<log length>
+root=<64 lowercase hex>
+path=<64 lowercase hex>
+#+end_example
+
+one =path= line per step from the leaf to the root. The digest is
+SHA-256 of =deed.bin=. The log entry is =<id><tab><digest><tab><time>=,
+and the leaf is SHA-256 of a =0x00= byte followed by that entry.
+
+=bytes/<hex>= is the product file for a deed path =sha256:<hex>=.
+=<hex>= is 64 lowercase hex digits and is the SHA-256 of that file.
+
+=supersedes= and =successor= are two lines, the accession and then the
+digest:
+
+#+begin_example
+<accession>
+sha256:<64 lowercase hex>
+#+end_example
+
+=sources= is one tab-separated line per deed the bag names:
+
+#+begin_example
+<accession><tab>sha256:<64 lowercase hex>
+#+end_example
+
+=evidence.bin= and =host= are copied when the store has them. =check=
+does not read =evidence.bin=.
+
+=head=, when the bag is signed, is one line:
+
+#+begin_example
+size=<n> root=<64 hex> links=<64 hex> ed25519 <key hex> <signature hex>
+#+end_example
+
+=links= is lowercase hex with no =sha256:= prefix. It is the SHA-256 of
+this transcript. Deed directories are taken in byte order of their names.
+For each, write the name and a newline, then for =sources=, =supersedes=
+and =successor= in that order write the kind, a newline, the decimal byte
+length, a newline, and the raw file bytes. A missing file has length 0.
+The Ed25519 signature covers, with =||= concatenation:
+
+=deedar-head-v1 || 0x00 || "<size> <root>" || 0x00 || <links hex>=
+
+=<size>= and the root are the decimal length and the hex root, separated
+by one space. A head line with no =links= field still verifies, and only
+when none of those three files is present. An export always writes
+=links=, including when every sidecar is empty, so adding one later
+breaks the signature. An unsigned bag omits =head=. The sidecars are
+then not authenticated. =deedar log head= prints the size and the root
+only. It is not this line.
+
+Import stores =<id>.supersedes= as the same two lines. A file that
+already holds just the accession is completed with the digest.
+
 * The log
 
 Certificate Transparency hashing, RFC 9162 (doi:10.17487/RFC9162): a leaf is =SHA-256(0x00 || entry)=,
