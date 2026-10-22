@@ -164,10 +164,11 @@ impl FsStore {
             && self.policy().demand != crate::attest::Demand::Required;
         let (checked, accept) = match crate::receipt::check_handover(dir, &listed) {
             Ok(checked) => (checked, listed),
-            Err(e) if waive_unlisted && said(&e).contains("not a key this reader accepts") => (
-                crate::receipt::check_handover(dir, &BTreeSet::new())?,
-                BTreeSet::new(),
-            ),
+            Err(e) if waive_unlisted && said(&e).contains("not a key this reader accepts") => {
+                let mut checked = crate::receipt::check_handover(dir, &BTreeSet::new())?;
+                checked.signers_listed = true;
+                (checked, BTreeSet::new())
+            }
             Err(e) => return Err(e),
         };
         if checked.proven.is_empty() {
