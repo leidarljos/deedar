@@ -239,6 +239,35 @@ fn a_signed_bag_is_evidenced_by_the_store_that_took_it() {
     holds(&sender, "deed-quote-shared");
 }
 
+/// A kept receipt with no kept head is a partial write. Re-importing the same
+/// bag must put the head back.
+#[test]
+fn a_kept_proof_with_no_head_is_repaired_on_reimport() {
+    let seats = Seats::new();
+    let sender = seats.url("sender");
+    let public = seats.sign_as(41);
+    mint(&sender, quote("deed-quote-shared", "shared excerpt"));
+    let bag = seats.bag("bag");
+    export(&sender, &bag, &["deed-quote-shared"]);
+
+    seats.sign_nothing();
+    let receiver = seats.url("receiver");
+    layout(&receiver, &format!("1\nsigner = {public}\n"));
+    let shelf = deedar::store_dir(&receiver).unwrap().join("deeds");
+    fs::copy(
+        bag.join("data/deeds/deed-quote-shared/proof.txt"),
+        shelf.join("deed-quote-shared.proof"),
+    )
+    .unwrap();
+
+    import(&receiver, &bag, UnsignedHead::Refuse);
+    let kept = shelf.join("deed-quote-shared.head");
+    assert!(kept.exists(), "first import did not restore the kept head");
+    fs::remove_file(&kept).unwrap();
+    import(&receiver, &bag, UnsignedHead::Refuse);
+    assert!(kept.exists(), "second import did not restore the kept head");
+}
+
 /// A file deed lands with its product bytes; a bag without them is refused.
 #[test]
 fn a_file_deed_lands_with_its_bytes() {
