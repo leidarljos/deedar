@@ -41,6 +41,8 @@ Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
   `successor` files. Those sidecars are not what the receipt proved: editing
   one used to leave `check` green. An unsigned head still does not
   authenticate them.
+- A supersede link that names a deed the same bag carries is checked
+  against that deed's receipt digest even when the other sidecar is absent.
 - `--allow-unsigned-head` now waives only a missing head signature. A
   head signed by a key the store's layout does not list is refused with
   or without the flag.
