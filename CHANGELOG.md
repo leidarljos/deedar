@@ -43,6 +43,9 @@ Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
   authenticate them.
 - A supersede link that names a deed the same bag carries is checked
   against that deed's receipt digest even when the other sidecar is absent.
+- An imported supersedes sidecar keeps the prior deed's digest. A later
+  copy of that prior with other bytes is refused, and exporting the
+  revision names the digest even when the prior is not in this store.
 - `--allow-unsigned-head` now waives only a missing head signature. A
   head signed by a key the store's layout does not list is refused with
   or without the flag.

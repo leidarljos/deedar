@@ -716,10 +716,24 @@ impl FsStore {
             atomic_write(&path, &raw)?;
             written.push(path);
         }
-        if let Some(prior) = read_sidecar_id(&self.supersedes_path(id))? {
-            let digest = self.deed_digest_in_store(&prior)?;
+        if let Some(link) = read_supersedes(&self.supersedes_path(id))? {
+            let digest = match &link.digest {
+                Some(bound) => {
+                    if self.deed_path(&link.id).exists() {
+                        let held = self.deed_digest_in_store(&link.id)?;
+                        if held != *bound {
+                            return Err(Error::Evidence(format!(
+                                "{id}: supersedes {} as {bound}, and this store holds it as {held}",
+                                link.id
+                            )));
+                        }
+                    }
+                    bound.clone()
+                }
+                None => self.deed_digest_in_store(&link.id)?,
+            };
             let path = out.join("supersedes");
-            atomic_write(&path, format!("{prior}\n{digest}\n").as_bytes())?;
+            atomic_write(&path, format!("{}\n{digest}\n", link.id).as_bytes())?;
             written.push(path);
         }
         // Only a successor `current` would step to: one tombstoned here
@@ -1124,14 +1138,45 @@ pub(crate) fn write_once_hex(path: &Path) -> Option<&str> {
         .filter(|hex| is_sha256_hex(hex))
 }
 
-fn read_sidecar_id(path: &Path) -> Result<Option<DeedId>> {
+pub(crate) struct SupersedesLink {
+    pub id: DeedId,
+    /// Bound digest, when the sidecar carries one. A create writes the id
+    /// alone; an import keeps the digest the bag named.
+    pub digest: Option<String>,
+}
+
+/// Read `{id}.supersedes`. The first line is the accession. A second line, when
+/// present, is the `sha256:` digest that accession was bound to.
+pub(crate) fn read_supersedes(path: &Path) -> Result<Option<SupersedesLink>> {
     if !path.exists() {
         return Ok(None);
     }
     let raw = fs::read_to_string(path).map_err(|e| Error::Io(e.to_string()))?;
-    let id = raw.trim();
-    if id.is_empty() {
+    let mut lines = raw.lines().map(str::trim).filter(|line| !line.is_empty());
+    let Some(id) = lines.next() else {
         return Ok(None);
+    };
+    let digest = match lines.next() {
+        Some(raw) => {
+            let hex = raw.strip_prefix("sha256:").filter(|hex| is_sha256_hex(hex));
+            let Some(hex) = hex else {
+                return Err(Error::Evidence(format!(
+                    "{}: digest is not sha256",
+                    path.display()
+                )));
+            };
+            Some(format!("sha256:{hex}"))
+        }
+        None => None,
+    };
+    if lines.next().is_some() {
+        return Err(Error::Evidence(format!(
+            "{}: expected an id and an optional digest",
+            path.display()
+        )));
     }
-    DeedId::parse(id).map(Some)
+    Ok(Some(SupersedesLink {
+        id: DeedId::parse(id)?,
+        digest,
+    }))
 }
