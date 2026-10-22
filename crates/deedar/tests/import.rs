@@ -367,6 +367,26 @@ fn a_source_left_out_of_the_bag_is_refused() {
     holds(&receiver, "deed-quote-made");
 }
 
+/// A source omitted from the bag still has to match the sender's bytes. The
+/// source digest sidecar names those bytes.
+#[test]
+fn a_local_source_with_other_bytes_is_refused() {
+    let seats = Seats::new();
+    let sender = seats.url("sender");
+    mint(&sender, quote("deed-quote-src", "source from sender"));
+    let mut made = quote("deed-quote-made", "made from the source");
+    made.sources = vec![Source::deed(id("deed-quote-src"))];
+    mint(&sender, made);
+    let bag = seats.bag("bag");
+    export(&sender, &bag, &["deed-quote-made"]);
+
+    let receiver = seats.url("receiver");
+    mint(&receiver, quote("deed-quote-src", "other local bytes"));
+    let err = refused(&receiver, &bag, UnsignedHead::Allow);
+    assert!(err.contains("made from deed-quote-src"), "{err}");
+    assert!(err.contains("serves it as"), "{err}");
+}
+
 /// A deed superseded where it came from, handed over without its successor,
 /// would stop `current` short here, so it is refused. The successor alone
 /// imports, and then the deed it supersedes does, and current steps on.
@@ -401,6 +421,79 @@ fn a_successor_left_out_of_the_bag_is_refused() {
             .id,
         id("deed-quote-v2")
     );
+}
+
+/// A sidecar link to a local successor holds only when that successor's bytes
+/// match what the sender named.
+#[test]
+fn a_local_successor_with_other_bytes_is_refused() {
+    let seats = Seats::new();
+    let sender = seats.url("sender");
+    mint(&sender, quote("deed-quote-v1", "first take"));
+    let mut v2 = quote("deed-quote-v2", "second take");
+    v2.supersedes = Some(id("deed-quote-v1"));
+    mint(&sender, v2);
+    let bag = seats.bag("bag");
+    export(&sender, &bag, &["deed-quote-v1"]);
+
+    let receiver = seats.url("receiver");
+    mint(&receiver, quote("deed-quote-v2", "receiver bytes"));
+    let err = refused(&receiver, &bag, UnsignedHead::Allow);
+    assert!(err.contains("deed-quote-v2"), "{err}");
+    assert!(err.contains("serves deed-quote-v2 as"), "{err}");
+}
+
+/// A sidecar link from a local prior deed holds only when that prior deed's
+/// bytes match what the sender named.
+#[test]
+fn a_local_superseded_deed_with_other_bytes_is_refused() {
+    let seats = Seats::new();
+    let sender = seats.url("sender");
+    mint(&sender, quote("deed-quote-v1", "first take"));
+    let mut v2 = quote("deed-quote-v2", "second take");
+    v2.supersedes = Some(id("deed-quote-v1"));
+    mint(&sender, v2);
+    let bag = seats.bag("bag");
+    export(&sender, &bag, &["deed-quote-v2"]);
+
+    let receiver = seats.url("receiver");
+    mint(&receiver, quote("deed-quote-v1", "receiver bytes"));
+    let err = refused(&receiver, &bag, UnsignedHead::Allow);
+    assert!(err.contains("deed-quote-v1"), "{err}");
+    assert!(err.contains("holds deed-quote-v1 as"), "{err}");
+}
+
+/// A tombstoned local deed still cannot gain a successor sidecar.
+#[test]
+fn a_tombstoned_deed_does_not_gain_a_successor_on_import() {
+    let seats = Seats::new();
+    let sender = seats.url("sender");
+    mint(&sender, quote("deed-quote-v1", "first take"));
+    let mut v2 = quote("deed-quote-v2", "second take");
+    v2.supersedes = Some(id("deed-quote-v1"));
+    mint(&sender, v2);
+    let bag = seats.bag("bag");
+    export(&sender, &bag, &["deed-quote-v2"]);
+
+    let receiver = seats.url("receiver");
+    mint(&receiver, quote("deed-quote-v1", "first take"));
+    Client::open(&receiver)
+        .unwrap()
+        .delete(&id("deed-quote-v1"))
+        .unwrap();
+
+    import(&receiver, &bag, UnsignedHead::Allow);
+    let mut client = Client::open(&receiver).unwrap();
+    client.evidence(&id("deed-quote-v2")).unwrap();
+    assert_eq!(
+        client.current(&id("deed-quote-v2")).unwrap().id,
+        id("deed-quote-v2")
+    );
+    assert!(!deedar::store_dir(&receiver)
+        .unwrap()
+        .join("deeds")
+        .join("deed-quote-v1.successor")
+        .exists());
 }
 
 /// One deed the receiver cannot take stops the whole bag before anything is

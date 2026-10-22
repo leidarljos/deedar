@@ -61,14 +61,22 @@ impl Imported {
 }
 
 /// One deed folder of a bag, read once.
+#[derive(Clone)]
+struct LinkedDeed {
+    id: DeedId,
+    digest: String,
+}
+
+/// One deed folder of a bag, read once.
 struct Carried {
     deed: Deed,
     receipt: Receipt,
     /// `proof.txt` as it travelled.
     proof: String,
     host: Option<Vec<u8>>,
-    supersedes: Option<DeedId>,
-    successor: Option<DeedId>,
+    supersedes: Option<LinkedDeed>,
+    successor: Option<LinkedDeed>,
+    sources: BTreeMap<String, String>,
 }
 
 /// A whole bag, read once.
@@ -366,57 +374,108 @@ impl FsStore {
         carried: &BTreeMap<&str, &Carried>,
         plan: &mut Plan,
     ) -> Result<()> {
-        let mut by_old: BTreeMap<String, (DeedId, DeedId)> = BTreeMap::new();
-        let mut by_new: BTreeMap<String, DeedId> = BTreeMap::new();
+        let mut by_old: BTreeMap<String, (LinkedDeed, LinkedDeed)> = BTreeMap::new();
+        let mut by_new: BTreeMap<String, LinkedDeed> = BTreeMap::new();
         for c in &bag.carried {
             let id = &c.deed.id;
             if let Some(next) = &c.successor {
-                if !carried.contains_key(next.as_str()) && !self.serves(next) {
-                    return Err(Error::Evidence(format!(
-                        "{id} is superseded by {next} where it came from, and {next} is in \
-                         neither this handover nor this store, so current here would stop at \
-                         {id}"
-                    )));
+                if !carried.contains_key(next.id.as_str()) {
+                    if !self.serves(&next.id) {
+                        return Err(Error::Evidence(format!(
+                            "{id} is superseded by {} where it came from, and {} is in \
+                             neither this handover nor this store, so current here would stop \
+                             at {id}",
+                            next.id, next.id
+                        )));
+                    }
+                    let held = self.deed_digest_in_store(&next.id)?;
+                    if held != next.digest {
+                        return Err(Error::Evidence(format!(
+                            "{id} is superseded by {} where it came from, and this store serves \
+                             {} as {held}, not {}",
+                            next.id, next.id, next.digest
+                        )));
+                    }
                 }
             }
+            let here = LinkedDeed {
+                id: id.clone(),
+                digest: c.receipt.digest.clone(),
+            };
             let links = c
                 .supersedes
                 .iter()
-                .map(|old| (old, id))
-                .chain(c.successor.iter().map(|new| (id, new)));
+                .cloned()
+                .map(|old| (old, here.clone()))
+                .chain(c.successor.iter().cloned().map(|new| (here.clone(), new)));
             for (old, new) in links {
-                if old == new {
-                    return Err(Error::Evidence(format!("{new} supersedes itself")));
+                if old.id == new.id {
+                    return Err(Error::Evidence(format!("{} supersedes itself", new.id)));
                 }
-                if let Some((_, held)) = by_old.get(old.as_str()) {
-                    if held != new {
+                if let Some((held_old, held_new)) = by_old.get(old.id.as_str()) {
+                    if held_new.id != new.id
+                        || held_new.digest != new.digest
+                        || held_old.digest != old.digest
+                    {
                         return Err(Error::Evidence(format!(
-                            "this handover has {old} superseded by both {held} and {new}"
+                            "this handover has {} superseded by both {} and {}",
+                            old.id, held_new.id, new.id
                         )));
                     }
                 }
-                if let Some(held) = by_new.get(new.as_str()) {
-                    if held != old {
+                if let Some(held) = by_new.get(new.id.as_str()) {
+                    if held.id != old.id || held.digest != old.digest {
                         return Err(Error::Evidence(format!(
-                            "this handover has {new} superseding both {held} and {old}"
+                            "this handover has {} superseding both {} and {}",
+                            new.id, held.id, old.id
                         )));
                     }
                 }
-                by_old.insert(old.to_string(), (old.clone(), new.clone()));
-                by_new.insert(new.to_string(), old.clone());
+                by_old.insert(old.id.to_string(), (old.clone(), new.clone()));
+                by_new.insert(new.id.to_string(), old.clone());
             }
         }
         for (old, new) in by_old.values() {
+            if !carried.contains_key(new.id.as_str()) && self.deed_path(&new.id).exists() {
+                let held = self.deed_digest_in_store(&new.id)?;
+                if held != new.digest {
+                    return Err(Error::Evidence(format!(
+                        "{} supersedes {} where it came from, and this store holds {} as \
+                         {held}, not {}",
+                        new.id, old.id, new.id, new.digest
+                    )));
+                }
+            }
             plan.put(
-                self.supersedes_path(new),
-                format!("{old}\n").into_bytes(),
-                || format!("{new}: this store says it supersedes another deed than {old}"),
+                self.supersedes_path(&new.id),
+                format!("{}\n", old.id).into_bytes(),
+                || {
+                    format!(
+                        "{}: this store says it supersedes another deed than {}",
+                        new.id, old.id
+                    )
+                },
             )?;
-            if carried.contains_key(old.as_str()) || self.deed_path(old).exists() {
+            if !carried.contains_key(old.id.as_str()) && self.deed_path(&old.id).exists() {
+                let held = self.deed_digest_in_store(&old.id)?;
+                if held != old.digest {
+                    return Err(Error::Evidence(format!(
+                        "{} is superseded by {} where it came from, and this store holds {} as \
+                         {held}, not {}",
+                        old.id, new.id, old.id, old.digest
+                    )));
+                }
+            }
+            if carried.contains_key(old.id.as_str()) || self.serves(&old.id) {
                 plan.put(
-                    self.successor_path(old),
-                    format!("{new}\n").into_bytes(),
-                    || format!("{old}: this store says another deed than {new} supersedes it"),
+                    self.successor_path(&old.id),
+                    format!("{}\n", new.id).into_bytes(),
+                    || {
+                        format!(
+                            "{}: this store says another deed than {} supersedes it",
+                            old.id, new.id
+                        )
+                    },
                 )?;
             }
         }
@@ -431,14 +490,40 @@ impl FsStore {
         for c in &bag.carried {
             let id = &c.deed.id;
             let trail = walk_trail(&c.deed, |next| match carried.get(next.as_str()) {
-                Some(other) => Ok(other.deed.clone()),
-                None => self.get(next).map_err(|e| {
-                    Error::Evidence(format!(
-                        "{id}: made from {next}, which this handover does not carry and this \
-                         store cannot serve: {}",
-                        said(&e)
-                    ))
-                }),
+                Some(other) => {
+                    if let Some(want) = c.sources.get(next.as_str()) {
+                        if want != &other.receipt.digest {
+                            return Err(Error::Evidence(format!(
+                                "{id}: made from {next} as {want}, and this handover carries \
+                                 {next} as {}",
+                                other.receipt.digest
+                            )));
+                        }
+                    }
+                    Ok(other.deed.clone())
+                }
+                None => {
+                    let deed = self.get(next).map_err(|e| {
+                        Error::Evidence(format!(
+                            "{id}: made from {next}, which this handover does not carry and this \
+                             store cannot serve: {}",
+                            said(&e)
+                        ))
+                    })?;
+                    let Some(want) = c.sources.get(next.as_str()) else {
+                        return Err(Error::Evidence(format!(
+                            "{id}: made from {next}, which this handover does not carry and does \
+                             not name with a digest"
+                        )));
+                    };
+                    let got = crate::digest::deed_digest(&deed);
+                    if got != *want {
+                        return Err(Error::Evidence(format!(
+                            "{id}: made from {next} as {want}, and this store serves it as {got}"
+                        )));
+                    }
+                    Ok(deed)
+                }
             })?;
             for deed in trail {
                 if carried.contains_key(deed.id.as_str()) || !passed.insert(deed.id.to_string()) {
@@ -590,6 +675,7 @@ fn read_folder(folder: &Path, bytes: &mut BTreeMap<String, Vec<u8>>) -> Result<C
     Ok(Carried {
         supersedes: read_link(&folder.join("supersedes"))?,
         successor: read_link(&folder.join("successor"))?,
+        sources: read_sources(&folder.join("sources"))?,
         deed,
         receipt,
         proof,
@@ -637,13 +723,72 @@ fn same_as_checked(bag: &Bag, checked: &Handover, accept: &BTreeSet<[u8; 32]>) -
     Ok(())
 }
 
-fn read_link(path: &Path) -> Result<Option<DeedId>> {
+fn read_link(path: &Path) -> Result<Option<LinkedDeed>> {
     let Some(raw) = read_if_there(path)? else {
         return Ok(None);
     };
     let text = String::from_utf8(raw)
         .map_err(|_| Error::Evidence(format!("{}: not text", path.display())))?;
-    DeedId::parse(text.trim()).map(Some)
+    let mut lines = text.lines().map(str::trim).filter(|line| !line.is_empty());
+    let id = lines
+        .next()
+        .ok_or_else(|| Error::Evidence(format!("{}: empty", path.display())))
+        .and_then(DeedId::parse)?;
+    let digest = parse_digest(lines.next(), path)?;
+    if lines.next().is_some() {
+        return Err(Error::Evidence(format!(
+            "{}: expected id and digest only",
+            path.display()
+        )));
+    }
+    Ok(Some(LinkedDeed { id, digest }))
+}
+
+fn read_sources(path: &Path) -> Result<BTreeMap<String, String>> {
+    let Some(raw) = read_if_there(path)? else {
+        return Ok(BTreeMap::new());
+    };
+    let text = String::from_utf8(raw)
+        .map_err(|_| Error::Evidence(format!("{}: not text", path.display())))?;
+    let mut out = BTreeMap::new();
+    for line in text.lines().map(str::trim).filter(|line| !line.is_empty()) {
+        let Some((raw_id, raw_digest)) = line.split_once('\t') else {
+            return Err(Error::Evidence(format!(
+                "{}: expected `<id><tab><digest>` per line",
+                path.display()
+            )));
+        };
+        let id = DeedId::parse(raw_id)?;
+        let digest = parse_digest(Some(raw_digest), path)?;
+        match out.insert(id.to_string(), digest.clone()) {
+            Some(held) if held != digest => {
+                return Err(Error::Evidence(format!(
+                    "{}: {} named with two digests",
+                    path.display(),
+                    id
+                )));
+            }
+            _ => {}
+        }
+    }
+    Ok(out)
+}
+
+fn parse_digest(raw: Option<&str>, path: &Path) -> Result<String> {
+    let digest = raw
+        .map(str::trim)
+        .filter(|text| text.starts_with("sha256:"))
+        .ok_or_else(|| {
+            Error::Evidence(format!(
+                "{}: expected a sha256 digest beside the id",
+                path.display()
+            ))
+        })?;
+    let hex = digest
+        .strip_prefix("sha256:")
+        .filter(|hex| is_sha256_hex(hex))
+        .ok_or_else(|| Error::Evidence(format!("{}: invalid sha256 digest", path.display())))?;
+    Ok(format!("sha256:{hex}"))
 }
 
 fn read_if_there(path: &Path) -> Result<Option<Vec<u8>>> {

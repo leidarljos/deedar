@@ -237,10 +237,16 @@ fn an_export_carries_product_bytes_and_supersede_links() {
     );
     let link =
         |id: &DeedId, name: &str| std::fs::read_to_string(deeds.join(id.as_str()).join(name));
-    assert_eq!(link(&first, "successor").unwrap(), "deed-quote-second\n");
+    assert_eq!(
+        link(&first, "successor").unwrap(),
+        format!("deed-quote-second\n{}\n", deedar::deed_digest(&second))
+    );
     assert_eq!(
         link(&second.id, "supersedes").unwrap(),
-        "deed-quote-first\n"
+        format!(
+            "deed-quote-first\n{}\n",
+            deedar::deed_digest(&client.get(&first).unwrap())
+        )
     );
     assert!(link(&first, "supersedes").is_err());
     assert!(link(&second.id, "successor").is_err());

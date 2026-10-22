@@ -15,6 +15,11 @@ Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
   The head has to be signed by a key the layout lists;
   `--allow-unsigned-head` takes one that is not, except under
   `attestation = required`. Importing the same bag again writes nothing.
+- Supersede links carried in a bag now name the linked deed's digest as
+  well as its accession, and import checks any local deed with that id
+  matches before writing sidecars. A tombstoned local deed no longer
+  gains a successor sidecar, and source digests carried with a deed are
+  checked before a local source is accepted.
 - `deedar export` writes each product path's bytes into the deed's
   folder as `bytes/<sha256>`, and its `supersedes` and `successor`
   links beside them. The reference listed bytes and no bag carried them,
