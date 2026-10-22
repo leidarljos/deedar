@@ -71,10 +71,11 @@ whole bag, and so does one made from a source or revised by a successor
 that neither the bag nor the store has. Importing the same bag again
 writes nothing.
 
-The bag's head has to be signed by a key this store's =layout= lists. A
-head signed by one the layout does not list is always refused.
-=--allow-unsigned-head= waives a missing signature only, except in a
-store that says =attestation = required=.
+The bag's head has to be signed by a key this store's =layout= lists.
+=--allow-unsigned-head= waives a missing signature and a signature by a
+key the layout does not list: deleting =head= makes those the same case.
+A store that says =attestation = required= refuses both. =check= still
+refuses a signer the layout does not list.
 
 * Audit a store
 
