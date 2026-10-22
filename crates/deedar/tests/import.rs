@@ -563,6 +563,48 @@ fn a_successor_left_out_of_the_bag_is_refused() {
     );
 }
 
+/// One sidecar, naming a deed the bag also carries, has to name that deed's
+/// receipt digest. The two sidecars are compared only when both are present.
+#[test]
+fn a_one_sided_link_to_a_carried_deed_must_name_its_digest() {
+    let seats = Seats::new();
+    let sender = seats.url("sender");
+    mint(&sender, quote("deed-quote-v1", "first take"));
+    let mut v2 = quote("deed-quote-v2", "second take");
+    v2.supersedes = Some(id("deed-quote-v1"));
+    mint(&sender, v2);
+
+    let successor_only = seats.bag("successor-only");
+    export(
+        &sender,
+        &successor_only,
+        &["deed-quote-v1", "deed-quote-v2"],
+    );
+    fs::remove_file(successor_only.join("data/deeds/deed-quote-v2/supersedes")).unwrap();
+    flip_last_byte(&successor_only.join("data/deeds/deed-quote-v1/successor"));
+    let err = refused(
+        &seats.url("recv-successor"),
+        &successor_only,
+        UnsignedHead::Allow,
+    );
+    assert!(err.contains("carries it as"), "{err}");
+
+    let supersedes_only = seats.bag("supersedes-only");
+    export(
+        &sender,
+        &supersedes_only,
+        &["deed-quote-v1", "deed-quote-v2"],
+    );
+    fs::remove_file(supersedes_only.join("data/deeds/deed-quote-v1/successor")).unwrap();
+    flip_last_byte(&supersedes_only.join("data/deeds/deed-quote-v2/supersedes"));
+    let err = refused(
+        &seats.url("recv-supersedes"),
+        &supersedes_only,
+        UnsignedHead::Allow,
+    );
+    assert!(err.contains("carries it as"), "{err}");
+}
+
 /// A sidecar link to a local successor holds only when that successor's bytes
 /// match what the sender named.
 #[test]

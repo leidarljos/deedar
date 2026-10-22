@@ -399,6 +399,7 @@ impl FsStore {
         for c in &bag.carried {
             let id = &c.deed.id;
             if let Some(next) = &c.successor {
+                require_carried_digest(next, carried)?;
                 if !carried.contains_key(next.id.as_str()) {
                     if !self.serves(&next.id) {
                         return Err(Error::Evidence(format!(
@@ -417,6 +418,9 @@ impl FsStore {
                         )));
                     }
                 }
+            }
+            if let Some(old) = &c.supersedes {
+                require_carried_digest(old, carried)?;
             }
             let here = LinkedDeed {
                 id: id.clone(),
@@ -815,6 +819,22 @@ fn parse_digest(raw: Option<&str>, path: &Path) -> Result<String> {
         .filter(|hex| crate::fs::is_sha256_hex(hex))
         .ok_or_else(|| Error::Evidence(format!("{}: invalid sha256 digest", path.display())))?;
     Ok(format!("sha256:{hex}"))
+}
+
+/// A link to a deed this bag carries has to name that deed's receipt digest.
+/// The two sidecars are only compared with each other when both are present,
+/// so a one-sided link would otherwise bind a carried deed to other bytes.
+fn require_carried_digest(link: &LinkedDeed, carried: &BTreeMap<&str, &Carried>) -> Result<()> {
+    let Some(other) = carried.get(link.id.as_str()) else {
+        return Ok(());
+    };
+    if other.receipt.digest != link.digest {
+        return Err(Error::Evidence(format!(
+            "this handover names {} as {}, and carries it as {}",
+            link.id, link.digest, other.receipt.digest
+        )));
+    }
+    Ok(())
 }
 
 /// Whether `head_line` is the head `proof` was built against. A signed line
