@@ -12,55 +12,36 @@ Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
   as `deeds/ID.proof` and `deeds/ID.head`. Every deed is checked before
   anything is written, so a frozen, tombstoned or differently logged
   accession, or a source or successor neither side has, writes nothing.
-  The head has to be signed by a key the layout lists;
-  `--allow-unsigned-head` takes one that is not, except under
-  `attestation = required`. Importing the same bag again writes nothing.
-- Supersede links carried in a bag now name the linked deed's digest as
-  well as its accession, and import checks any local deed with that id
-  matches before writing sidecars. A tombstoned local deed no longer
-  gains a successor sidecar, and source digests carried with a deed are
-  checked before a local source is accepted.
+  The head has to be signed by a key the layout lists.
+  `--allow-unsigned-head` takes a head that is not, whether the
+  signature is missing or by some other key. Deleting `head` is that
+  same case. `attestation = required` refuses both, and `deedar check`
+  still refuses a signer it was not given. Importing the same bag
+  again writes nothing. A receipt already kept stays against the head
+  it names: a later bag is not refused for carrying a grown head, and
+  a missing head is filled only from that same head. A proof this
+  store does not have yet is written with its head together. A link
+  that names a deed the bag also carries has to name that deed's
+  receipt digest. The imported supersedes file keeps the digest, so a
+  later copy of that prior with other bytes is refused. A symlink,
+  fifo, or other non-regular file in the bag is refused.
+- Supersede links in a bag name the linked deed's digest as well as
+  its accession. Import checks a local deed with that id before
+  writing the sidecar. A tombstoned local deed does not gain a
+  successor sidecar, and a source digest carried with a deed is
+  checked before a local source is accepted. Exporting a revision
+  names the stored digest when the prior deed is absent.
 - `deedar export` writes each product path's bytes into the deed's
-  folder as `bytes/<sha256>`, and its `supersedes` and `successor`
-  links beside them. The reference listed bytes and no bag carried them,
-  so a file deed arrived without its product, and a revision without the
-  chain `current` walks. A successor `current` would not step to, such
-  as a tombstoned one, is left out.
-- A path already written as `sha256:...` is now accepted only when the
-  digest suffix is exactly 64 lowercase hex digits. `create` refuses
-  malformed `sha256:` paths, and `export` now checks both the digest
-  syntax and that the copied bytes still hash to that digest.
-- Re-importing a bag now restores `deeds/ID.head` whenever `deeds/ID.proof`
-  already matches and the bag carried a signed head. A partial write that
-  left only `.proof` no longer leaves that head missing forever.
-- A later bag no longer refuses a deed whose receipt is already kept, and
-  no longer fills a missing `deeds/ID.head` from a head that receipt is not
-  against. The head is written when it is the head the kept proof names.
-  A proof this store does not have yet is written with its head together.
-- A bag's head signature covers each deed's `sources`, `supersedes` and
-  `successor` files. Those sidecars are not what the receipt proved: editing
-  one used to leave `check` green. An unsigned head still does not
-  authenticate them.
-- A supersede link that names a deed the same bag carries is checked
-  against that deed's receipt digest even when the other sidecar is absent.
-- An imported supersedes sidecar keeps the prior deed's digest. A later
-  copy of that prior with other bytes is refused, and exporting the
-  revision names the digest even when the prior is not in this store.
-- Import and check refuse a symlink or any other non-regular file in a
-  bag. Those were followed, and a fifo could block the reader. A deed
-  folder that is a symlink is refused rather than skipped or entered.
-- Export's refusal of a non-hex `sha256:` path is checked with the file
-  that path would have read planted beside the store, so the refusal is
-  the path check and not a missing file.
-- `leave` and `evidence` refuse a `sha256:` path that is not 64
-  lowercase hex digits. `sha256:../planted` was read from outside the
-  bytes directory, and `leave` wrote it outside the destination.
-- `--allow-unsigned-head` waives a head this store did not accept,
-  whether the signature is missing or by a key the layout does not
-  list. Deleting `head` turned an unlisted signature into a missing
-  one, and the flag took that while refusing the signed file.
-  `attestation = required` still refuses both, and `deedar check`
-  still refuses a signer it was not given.
+  folder as `bytes/<sha256>`, and its `sources`, `supersedes` and
+  `successor` beside them. The reference listed bytes and no bag
+  carried them, so a file deed arrived without its product, and a
+  revision without the chain `current` walks. The signed head covers
+  those three sidecars as well as the log root. An unsigned head does
+  not. A successor `current` would not step to, such as a tombstoned
+  one, is left out.
+- A `sha256:` path is accepted only when the suffix is 64 lowercase
+  hex digits. `create`, `export`, `leave` and `evidence` refuse any
+  other suffix, so `sha256:../planted` is neither read nor written.
 - Each release archive gets a GitHub build attestation from the release workflow, so `gh attestation verify` and the ljos installer can check that this repository built it. Releases before this one have none, and the installer counts them as not published.
 - `deedar create` run again with the same bytes and flags prints the deed
   it froze and exits 0, and writes nothing. It exited 1 with `deed
