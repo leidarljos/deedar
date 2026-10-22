@@ -937,3 +937,128 @@ fn evidence_dated_other_than_the_receipt_is_refused() {
     let err = refused(&receiver, &bag, UnsignedHead::Allow);
     assert!(err.contains("evidence.bin says time"), "{err}");
 }
+
+fn point_symlink(path: &Path, aside: &Path) {
+    fs::rename(path, aside).unwrap();
+    std::os::unix::fs::symlink(aside, path).unwrap();
+}
+
+fn check_err(bag: &Path) -> String {
+    deedar::check_handover(bag, &std::collections::BTreeSet::new())
+        .expect_err("check passed")
+        .to_string()
+}
+
+/// `check` returns, even when `head` is a fifo. A blocked open would leave
+/// this waiting.
+fn check_soon(bag: &Path) -> String {
+    let bag = bag.to_path_buf();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let msg = match deedar::check_handover(&bag, &std::collections::BTreeSet::new()) {
+            Ok(_) => "checked".into(),
+            Err(e) => e.to_string(),
+        };
+        let _ = tx.send(msg);
+    });
+    rx.recv_timeout(std::time::Duration::from_secs(2))
+        .unwrap_or_else(|_| "check blocked on the bag".into())
+}
+
+/// A bag is read as the files it contains. A symlink is not followed, a
+/// symlinked deed folder is not entered, and a fifo does not block the read.
+#[test]
+fn a_symlink_or_fifo_in_a_bag_is_refused() {
+    let seats = Seats::new();
+    let sender = seats.url("sender");
+    mint(&sender, quote("deed-quote-plain", "plain"));
+
+    let proof_bag = seats.bag("proof");
+    export(&sender, &proof_bag, &["deed-quote-plain"]);
+    point_symlink(
+        &proof_bag.join("data/deeds/deed-quote-plain/proof.txt"),
+        &seats.root.path().join("proof-real.txt"),
+    );
+    let err = check_err(&proof_bag);
+    assert!(err.contains("not a regular file"), "{err}");
+
+    let folder_bag = seats.bag("folder");
+    export(&sender, &folder_bag, &["deed-quote-plain"]);
+    point_symlink(
+        &folder_bag.join("data/deeds/deed-quote-plain"),
+        &seats.root.path().join("deed-real"),
+    );
+    let err = check_err(&folder_bag);
+    assert!(err.contains("symlink"), "{err}");
+
+    let root_bag = seats.bag("root");
+    export(&sender, &root_bag, &["deed-quote-plain"]);
+    point_symlink(
+        &root_bag.join("data/deeds"),
+        &seats.root.path().join("deeds-real"),
+    );
+    let err = check_err(&root_bag);
+    assert!(err.contains("symlink"), "{err}");
+
+    let letter = seats.root.path().join("letter.txt");
+    fs::write(&letter, b"the letter itself").unwrap();
+    let (deed, _) = Client::open(&sender)
+        .unwrap()
+        .create(CreateRequest {
+            id: Some(id("deed-file-letter")),
+            name: "letter".into(),
+            sources: Vec::new(),
+            agent_id: "reader".into(),
+            activity_id: None,
+            grants: Vec::new(),
+            body: Body::File {
+                path: letter,
+                media_type: Some("text/plain".into()),
+            },
+            supersedes: None,
+        })
+        .unwrap();
+    let hex = deed.paths[0]
+        .to_str()
+        .unwrap()
+        .strip_prefix("sha256:")
+        .unwrap();
+    let bytes_bag = seats.bag("bytes");
+    export(&sender, &bytes_bag, &["deed-file-letter"]);
+    point_symlink(
+        &bytes_bag
+            .join("data/deeds/deed-file-letter/bytes")
+            .join(hex),
+        &seats.root.path().join("letter-bytes"),
+    );
+    deedar::check_handover(&bytes_bag, &std::collections::BTreeSet::new()).unwrap();
+    let err = refused(&seats.url("recv-bytes"), &bytes_bag, UnsignedHead::Allow);
+    assert!(err.contains("not a regular file"), "{err}");
+
+    seats.sign_as(7);
+    mint(&sender, quote("deed-quote-v1", "first"));
+    let mut v2 = quote("deed-quote-v2", "second");
+    v2.supersedes = Some(id("deed-quote-v1"));
+    mint(&sender, v2);
+    let signed = seats.bag("signed");
+    export(&sender, &signed, &["deed-quote-v1", "deed-quote-v2"]);
+    seats.sign_nothing();
+    point_symlink(
+        &signed.join("data/deeds/deed-quote-v2/supersedes"),
+        &seats.root.path().join("supersedes-real"),
+    );
+    let err = check_err(&signed);
+    assert!(err.contains("not a regular file"), "{err}");
+
+    let fifo_bag = seats.bag("fifo");
+    export(&sender, &fifo_bag, &["deed-quote-plain"]);
+    let head = fifo_bag.join("data/deeds/head");
+    let _ = fs::remove_file(&head);
+    assert!(std::process::Command::new("mkfifo")
+        .arg(&head)
+        .status()
+        .expect("mkfifo")
+        .success());
+    let err = check_soon(&fifo_bag);
+    assert!(err.contains("not a regular file"), "{err}");
+}

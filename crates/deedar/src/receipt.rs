@@ -540,11 +540,113 @@ pub fn head_beside(deeds: &Path) -> PathBuf {
     deeds.join("head")
 }
 
+/// Read a regular file, or `Ok(None)` when it is absent.
+///
+/// A symlink, fifo, or other non-regular file is refused. The open uses
+/// `O_NOFOLLOW` and `O_NONBLOCK`, so a file replaced by a symlink or a fifo
+/// between the type check and the read is not followed and does not block.
+pub(crate) fn read_regular_opt(path: &Path) -> Result<Option<Vec<u8>>> {
+    match std::fs::symlink_metadata(path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(Error::Io(format!("{}: {e}", path.display()))),
+        Ok(meta) if !meta.file_type().is_file() => {
+            return Err(Error::Evidence(format!(
+                "{}: not a regular file",
+                path.display()
+            )));
+        }
+        Ok(_) => {}
+    }
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut file = match std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(path)
+    {
+        Ok(file) => file,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) if e.raw_os_error() == Some(libc::ELOOP) => {
+            return Err(Error::Evidence(format!(
+                "{}: not a regular file",
+                path.display()
+            )));
+        }
+        Err(e) => return Err(Error::Io(format!("{}: {e}", path.display()))),
+    };
+    let meta = file
+        .metadata()
+        .map_err(|e| Error::Io(format!("{}: {e}", path.display())))?;
+    if !meta.file_type().is_file() {
+        return Err(Error::Evidence(format!(
+            "{}: not a regular file",
+            path.display()
+        )));
+    }
+    let mut bytes = Vec::new();
+    std::io::Read::read_to_end(&mut file, &mut bytes)
+        .map_err(|e| Error::Io(format!("{}: {e}", path.display())))?;
+    Ok(Some(bytes))
+}
+
+/// Deed folders in `root`, in name order. A symlink is refused rather than
+/// followed or skipped, and so is a fifo or anything else that is not a
+/// directory or a regular file.
+pub(crate) fn deed_folders(root: &Path) -> Result<Vec<PathBuf>> {
+    if !real_dir(root)? {
+        return Err(Error::Evidence(format!(
+            "{}: not a directory",
+            root.display()
+        )));
+    }
+    let mut folders = Vec::new();
+    for entry in std::fs::read_dir(root).map_err(|e| Error::Io(e.to_string()))? {
+        let path = entry.map_err(|e| Error::Io(e.to_string()))?.path();
+        let meta = std::fs::symlink_metadata(&path)
+            .map_err(|e| Error::Io(format!("{}: {e}", path.display())))?;
+        let kind = meta.file_type();
+        if kind.is_symlink() {
+            return Err(Error::Evidence(format!(
+                "{}: symlink in the deeds directory",
+                path.display()
+            )));
+        }
+        if kind.is_dir() {
+            folders.push(path);
+        } else if !kind.is_file() {
+            return Err(Error::Evidence(format!(
+                "{}: not a regular file",
+                path.display()
+            )));
+        }
+    }
+    folders.sort();
+    Ok(folders)
+}
+
+/// Whether `path` is a real directory. Absent is `Ok(false)`. A symlink is
+/// refused, including when the final component is `data/deeds`.
+fn real_dir(path: &Path) -> Result<bool> {
+    match std::fs::symlink_metadata(path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(Error::Io(format!("{}: {e}", path.display()))),
+        Ok(meta) if meta.file_type().is_symlink() => Err(Error::Evidence(format!(
+            "{}: symlink in the deeds directory",
+            path.display()
+        ))),
+        Ok(meta) if meta.file_type().is_dir() => Ok(true),
+        Ok(_) => Err(Error::Evidence(format!(
+            "{}: not a directory",
+            path.display()
+        ))),
+    }
+}
+
 /// Hex SHA-256 of the link sidecars under a deeds directory.
 ///
 /// Deed folders are taken in byte order of their names. Each contributes its
 /// name and the exact bytes of `sources`, `supersedes` and `successor`, in
-/// that order. A missing file contributes a length of zero. The line is
+/// that order. A missing file contributes a length of zero. A symlink or
+/// other non-regular file is refused, not read. The line is
 /// `<name>\n` then, for each kind, `<kind>\n<len>\n<bytes>`.
 ///
 /// This is what a bag's head signature covers beyond the log root. The
@@ -552,17 +654,8 @@ pub fn head_beside(deeds: &Path) -> PathBuf {
 /// that checks, until this digest is checked against the signature. An
 /// unsigned head has no signature, so it does not authenticate these files.
 pub(crate) fn link_commitment(root: &Path) -> Result<String> {
-    let mut folders = Vec::new();
-    let entries = std::fs::read_dir(root).map_err(|e| Error::Io(e.to_string()))?;
-    for entry in entries {
-        let path = entry.map_err(|e| Error::Io(e.to_string()))?.path();
-        if path.is_dir() {
-            folders.push(path);
-        }
-    }
-    folders.sort();
     let mut transcript = Vec::new();
-    for folder in folders {
+    for folder in deed_folders(root)? {
         let name = folder
             .file_name()
             .and_then(|name| name.to_str())
@@ -576,13 +669,7 @@ pub(crate) fn link_commitment(root: &Path) -> Result<String> {
         transcript.push(b'\n');
         for kind in ["sources", "supersedes", "successor"] {
             let path = folder.join(kind);
-            let bytes = match std::fs::read(&path) {
-                Ok(bytes) => bytes,
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
-                Err(e) => {
-                    return Err(Error::Io(format!("{}: {e}", path.display())));
-                }
-            };
+            let bytes = read_regular_opt(&path)?.unwrap_or_default();
             transcript.extend_from_slice(kind.as_bytes());
             transcript.push(b'\n');
             transcript.extend_from_slice(format!("{}\n", bytes.len()).as_bytes());
@@ -616,15 +703,14 @@ pub(crate) fn links_bound(root: &Path, signed: &SignedHead) -> Result<()> {
 }
 
 fn link_sidecars_present(root: &Path) -> Result<bool> {
-    let entries = std::fs::read_dir(root).map_err(|e| Error::Io(e.to_string()))?;
-    for entry in entries {
-        let path = entry.map_err(|e| Error::Io(e.to_string()))?.path();
-        if !path.is_dir() {
-            continue;
-        }
+    for folder in deed_folders(root)? {
         for kind in ["sources", "supersedes", "successor"] {
-            if path.join(kind).is_file() {
-                return Ok(true);
+            match std::fs::symlink_metadata(folder.join(kind)) {
+                Ok(_) => return Ok(true),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => {
+                    return Err(Error::Io(format!("{}: {e}", folder.join(kind).display())));
+                }
             }
         }
     }
@@ -642,20 +728,14 @@ fn link_sidecars_present(root: &Path) -> Result<bool> {
 /// a path does not reach the head, or when the receipts disagree about which
 /// head they are against.
 pub fn check_handover(dir: &Path, accept: &BTreeSet<[u8; 32]>) -> Result<Handover> {
-    let root = deeds_in(dir).ok_or_else(|| {
+    let root = deeds_in(dir)?.ok_or_else(|| {
         Error::Evidence(format!(
             "{}: no deeds here and none under data/deeds",
             dir.display()
         ))
     })?;
 
-    let mut folders: Vec<PathBuf> = std::fs::read_dir(&root)
-        .map_err(|e| Error::Io(e.to_string()))?
-        .filter_map(std::result::Result::ok)
-        .map(|entry| entry.path())
-        .filter(|path| path.is_dir())
-        .collect();
-    folders.sort();
+    let folders = deed_folders(&root)?;
 
     let mut proven = Vec::new();
     let mut head: Option<Head> = None;
@@ -665,12 +745,25 @@ pub fn check_handover(dir: &Path, accept: &BTreeSet<[u8; 32]>) -> Result<Handove
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
-        let Ok(text) = std::fs::read_to_string(folder.join("proof.txt")) else {
-            wrong.push(format!(
-                "{name}: no proof.txt, so nothing says this deed was logged before it was handed \
-                 over"
-            ));
-            continue;
+        let text = match read_regular_opt(&folder.join("proof.txt")) {
+            Ok(Some(bytes)) => match String::from_utf8(bytes) {
+                Ok(text) => text,
+                Err(_) => {
+                    wrong.push(format!("{name}: proof.txt is not text"));
+                    continue;
+                }
+            },
+            Ok(None) => {
+                wrong.push(format!(
+                    "{name}: no proof.txt, so nothing says this deed was logged before it was \
+                     handed over"
+                ));
+                continue;
+            }
+            Err(e) => {
+                wrong.push(said(&e));
+                continue;
+            }
         };
         let receipt = match Receipt::parse(&text) {
             Ok(receipt) => receipt,
@@ -679,9 +772,16 @@ pub fn check_handover(dir: &Path, accept: &BTreeSet<[u8; 32]>) -> Result<Handove
                 continue;
             }
         };
-        let Ok(bytes) = std::fs::read(folder.join("deed.bin")) else {
-            wrong.push(format!("{name}: a receipt with no deed.bin beside it"));
-            continue;
+        let bytes = match read_regular_opt(&folder.join("deed.bin")) {
+            Ok(Some(bytes)) => bytes,
+            Ok(None) => {
+                wrong.push(format!("{name}: a receipt with no deed.bin beside it"));
+                continue;
+            }
+            Err(e) => {
+                wrong.push(said(&e));
+                continue;
+            }
         };
         if let Err(e) = receipt.check(&bytes) {
             wrong.push(said(&e));
@@ -706,7 +806,21 @@ pub fn check_handover(dir: &Path, accept: &BTreeSet<[u8; 32]>) -> Result<Handove
     // against.
     let mut head_signer = None;
     let mut head_accepted = false;
-    if let Ok(text) = std::fs::read_to_string(head_beside(&root)) {
+    let head_text = match read_regular_opt(&head_beside(&root)) {
+        Ok(Some(bytes)) => match String::from_utf8(bytes) {
+            Ok(text) => Some(text),
+            Err(_) => {
+                wrong.push("head: not text".into());
+                None
+            }
+        },
+        Ok(None) => None,
+        Err(e) => {
+            wrong.push(said(&e));
+            None
+        }
+    };
+    if let Some(text) = head_text {
         match SignedHead::parse(&text).and_then(|signed| {
             let accepted = signed.check(accept)?;
             Ok((signed, accepted))
@@ -756,12 +870,18 @@ pub(crate) fn said(e: &Error) -> String {
 }
 
 /// Where the deeds are, given either the bag or the directory inside it.
-pub(crate) fn deeds_in(dir: &Path) -> Option<PathBuf> {
+///
+/// A symlink at `data/deeds`, or a symlink passed as the deeds directory, is
+/// refused. Falling through to the parent would hide it.
+pub(crate) fn deeds_in(dir: &Path) -> Result<Option<PathBuf>> {
     let nested = dir.join("data").join("deeds");
-    if nested.is_dir() {
-        return Some(nested);
+    if real_dir(&nested)? {
+        return Ok(Some(nested));
     }
-    dir.is_dir().then(|| dir.to_path_buf())
+    if real_dir(dir)? {
+        return Ok(Some(dir.to_path_buf()));
+    }
+    Ok(None)
 }
 
 fn head(value: &str) -> Result<Head> {

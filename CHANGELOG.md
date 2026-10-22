@@ -46,6 +46,9 @@ Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
 - An imported supersedes sidecar keeps the prior deed's digest. A later
   copy of that prior with other bytes is refused, and exporting the
   revision names the digest even when the prior is not in this store.
+- Import and check refuse a symlink or any other non-regular file in a
+  bag. Those were followed, and a fifo could block the reader. A deed
+  folder that is a symlink is refused rather than skipped or entered.
 - Export's refusal of a non-hex `sha256:` path is checked with the file
   that path would have read planted beside the store, so the refusal is
   the path check and not a missing file.
