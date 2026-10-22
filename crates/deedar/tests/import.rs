@@ -742,6 +742,37 @@ fn an_imported_supersedes_keeps_the_bound_digest() {
     assert!(err.contains(&digest), "{err}");
 }
 
+/// A supersedes file holding only the accession, as `create` writes it and
+/// import once did, is completed with the digest the bag names. One naming
+/// another accession is refused.
+#[test]
+fn an_id_only_supersedes_file_gains_the_digest() {
+    let seats = Seats::new();
+    let sender = seats.url("sender");
+    mint(&sender, quote("deed-quote-v1", "first take"));
+    let mut v2 = quote("deed-quote-v2", "second take");
+    v2.supersedes = Some(id("deed-quote-v1"));
+    mint(&sender, v2);
+    let bag = seats.bag("v2");
+    export(&sender, &bag, &["deed-quote-v2"]);
+
+    let receiver = seats.url("receiver");
+    import(&receiver, &bag, UnsignedHead::Allow);
+    let stored = deedar::store_dir(&receiver)
+        .unwrap()
+        .join("deeds/deed-quote-v2.supersedes");
+    let both_lines = fs::read_to_string(&stored).unwrap();
+    fs::write(&stored, "deed-quote-v1\n").unwrap();
+    let again = import(&receiver, &bag, UnsignedHead::Allow);
+    assert_eq!((again.deeds, again.logged), (0, 0));
+    assert_eq!(fs::read_to_string(&stored).unwrap(), both_lines);
+    holds(&receiver, "deed-quote-v2");
+
+    fs::write(&stored, "deed-quote-v0\n").unwrap();
+    let err = refused(&receiver, &bag, UnsignedHead::Allow);
+    assert!(err.contains("another deed than deed-quote-v1"), "{err}");
+}
+
 /// A sidecar link to a local successor holds only when that successor's bytes
 /// match what the sender named.
 #[test]
