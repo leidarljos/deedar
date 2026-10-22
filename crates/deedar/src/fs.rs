@@ -196,6 +196,11 @@ impl FsStore {
         &self.dir
     }
 
+    /// What this store's layout accepts.
+    pub(crate) fn policy(&self) -> &crate::attest::Policy {
+        &self.policy
+    }
+
     /// The public half of the host signing key, as `ed25519:<hex>`, when the
     /// host signs at all.
     #[must_use]
@@ -383,7 +388,7 @@ impl FsStore {
     }
 
     /// Add one deed to the append-only log.
-    fn append_log(&self, deed: &Deed, unix_time: u64) -> Result<()> {
+    pub(crate) fn append_log(&self, deed: &Deed, unix_time: u64) -> Result<()> {
         let entry = crate::log::Entry {
             id: deed.id.to_string(),
             digest: crate::digest::deed_digest(deed),
@@ -820,7 +825,7 @@ impl FsStore {
         tip.ok_or_else(|| Error::Evidence("trail missing tip".into()))
     }
 
-    fn evidence_local(&self, deed: &Deed) -> Result<Evidence> {
+    pub(crate) fn evidence_local(&self, deed: &Deed) -> Result<Evidence> {
         let ev = self.load_evidence(&deed.id)?;
         self.check_paths(deed)?;
         self.check_signature(deed, &ev)?;
@@ -876,17 +881,30 @@ impl FsStore {
     /// it: a verifier that can mint cannot attest.
     fn check_host(&self, deed: &Deed, ev: &Evidence) -> Result<()> {
         let path = crate::host::sidecar(&self.dir, &deed.id);
-        let present = path.exists();
-        if !present {
+        let sidecar = if path.exists() {
+            Some(fs::read(&path).map_err(|e| Error::Io(e.to_string()))?)
+        } else {
+            None
+        };
+        self.check_host_sidecar(deed, ev, sidecar.as_deref())
+    }
+
+    /// [`Self::check_host`] over sidecar bytes in hand rather than on disk.
+    pub(crate) fn check_host_sidecar(
+        &self,
+        deed: &Deed,
+        ev: &Evidence,
+        sidecar: Option<&[u8]>,
+    ) -> Result<()> {
+        let Some(bytes) = sidecar else {
             return if self.policy.permits_unattested() && self.host_key.is_none() {
                 Ok(())
             } else {
                 Err(Error::Evidence("host sidecar".into()))
             };
-        }
-        let bytes = fs::read(&path).map_err(|e| Error::Io(e.to_string()))?;
+        };
         let deed_bytes = wire::deed_bytes(deed);
-        match crate::host::read_sidecar(&bytes) {
+        match crate::host::read_sidecar(bytes) {
             Some(crate::host::Sidecar::Signature(signature)) => crate::host::verify_ed25519(
                 &self.policy.signers,
                 &deed_bytes,
@@ -948,6 +966,11 @@ impl FsStore {
             .duration_since(UNIX_EPOCH)
             .map_err(|e| Error::Io(e.to_string()))?
             .as_secs();
+        self.evidence_at(deed, unix_time)
+    }
+
+    /// Evidence for `deed` under this store's `writer.key`, at `unix_time`.
+    pub(crate) fn evidence_at(&self, deed: &Deed, unix_time: u64) -> Result<Evidence> {
         let mut mac =
             HmacSha256::new_from_slice(&self.key).map_err(|e| Error::Io(e.to_string()))?;
         mac.update(&wire::deed_bytes(deed));
@@ -966,7 +989,7 @@ impl FsStore {
         self.dir.join("deeds").join(format!("{id}.cap"))
     }
 
-    fn evidence_path(&self, id: &DeedId) -> PathBuf {
+    pub(crate) fn evidence_path(&self, id: &DeedId) -> PathBuf {
         self.dir.join("deeds").join(format!("{id}.evidence"))
     }
 

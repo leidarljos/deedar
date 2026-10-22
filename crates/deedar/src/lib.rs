@@ -16,6 +16,7 @@ mod current;
 mod digest;
 mod fs;
 mod host;
+mod import;
 mod leave;
 pub mod log;
 mod migrate;
@@ -33,6 +34,7 @@ pub use deed::{
 pub use digest::{deed_digest, resolve};
 pub use fs::{is_write_once_addr, FsStore};
 pub use fs::{Audit, Exporter, Missing};
+pub use import::{Imported, UnsignedHead};
 pub use log::{Entry as LogEntry, Head as LogHead};
 pub use receipt::{
     check_handover, check_since, kept_head, sign_head, Bridge, Handover, Receipt, SignedHead,
@@ -176,6 +178,18 @@ impl Client {
     /// Fails when the deed is absent, unlogged, or `into` cannot be written.
     pub fn export_into(&self, id: &DeedId, into: &Path) -> Result<Vec<PathBuf>> {
         self.store.export_into(id, into)
+    }
+
+    /// Check a handover and add the deeds it carried to this store; see
+    /// [`FsStore::import_handover`].
+    ///
+    /// # Errors
+    ///
+    /// Fails, having written nothing, when the bag does not check out, its
+    /// head is not one `unsigned` lets through, or a deed in it cannot be held
+    /// here as the sender held it.
+    pub fn import_handover(&mut self, dir: &Path, unsigned: UnsignedHead) -> Result<Imported> {
+        self.store.import_handover(dir, unsigned)
     }
 
     /// What the log says the store holds, against what it will hand over.
