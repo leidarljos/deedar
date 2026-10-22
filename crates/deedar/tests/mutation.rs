@@ -81,6 +81,26 @@ fn flipped_product_bytes_fail_evidence() {
 }
 
 #[test]
+fn evidence_refuses_a_sha256_path_that_is_not_hex() {
+    let url = tmp_url();
+    let root = deedar::store_dir(&url).unwrap();
+    let blob = write_blob(&root, "note.md", b"a short note\n");
+    let mut client = open(&url);
+    let id = DeedId::parse("deed-file-note").unwrap();
+    client.create(file("deed-file-note", blob)).unwrap();
+    let mut deed = client.get(&id).unwrap();
+    deed.paths[0] = std::path::PathBuf::from("sha256:../planted");
+    fs::write(
+        deeds_dir(&url).join("deed-file-note.cap"),
+        encode_response(&Response::Deed(deed)).unwrap(),
+    )
+    .unwrap();
+    fs::write(root.join("planted"), b"outside the bytes directory").unwrap();
+    let err = client.evidence(&id).expect_err("dotdot path");
+    assert!(err.to_string().contains("not write-once"), "{err}");
+}
+
+#[test]
 fn missing_product_bytes_fail_evidence() {
     let url = tmp_url();
     let root = deedar::store_dir(&url).unwrap();

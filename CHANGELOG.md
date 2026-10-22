@@ -46,6 +46,9 @@ Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
 - An imported supersedes sidecar keeps the prior deed's digest. A later
   copy of that prior with other bytes is refused, and exporting the
   revision names the digest even when the prior is not in this store.
+- `leave` and `evidence` refuse a `sha256:` path that is not 64
+  lowercase hex digits. `sha256:../planted` was read from outside the
+  bytes directory, and `leave` wrote it outside the destination.
 - `--allow-unsigned-head` waives a head this store did not accept,
   whether the signature is missing or by a key the layout does not
   list. Deleting `head` turned an unlisted signature into a missing

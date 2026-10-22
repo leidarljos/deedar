@@ -2,8 +2,10 @@
 
 mod common;
 
+use std::fs;
+
 use deed::{DeedId, Error};
-use deedar::{imprint_hash, timestamp_req};
+use deedar::{encode_response, imprint_hash, timestamp_req, Response};
 use sha2::{Digest, Sha256};
 
 use common::{file, open, quote, tmp_url, write_blob};
@@ -103,6 +105,36 @@ fn leave_requests_timestamp_over_evidence_bytes() {
     client
         .evidence(&id)
         .expect("evidence after leave timestamp");
+}
+
+/// `sha256:../planted` is not a digest. Leave must not copy the planted
+/// file out of the store and into the parent of `dest`.
+#[test]
+fn leave_does_not_write_outside_dest_for_a_dotdot_path() {
+    offline();
+    let url = tmp_url();
+    let root = deedar::store_dir(&url).unwrap();
+    let blob = write_blob(&root, "note.md", b"a short note\n");
+    let mut client = open(&url);
+    let id = DeedId::parse("deed-file-note").unwrap();
+    client.create(file("deed-file-note", blob)).unwrap();
+    let mut deed = client.get(&id).unwrap();
+    deed.paths[0] = std::path::PathBuf::from("sha256:../planted");
+    fs::write(
+        root.join("deeds").join("deed-file-note.cap"),
+        encode_response(&Response::Deed(deed)).unwrap(),
+    )
+    .unwrap();
+    fs::write(root.join("planted"), b"not for the destination").unwrap();
+
+    let scratch = tempfile::tempdir().unwrap();
+    let dest = scratch.path().join("dest");
+    let err = client.leave(&id, &dest).expect_err("dotdot path");
+    assert!(err.to_string().contains("not write-once"), "{err}");
+    assert!(
+        !scratch.path().join("planted").exists(),
+        "leave wrote outside dest"
+    );
 }
 
 #[test]
