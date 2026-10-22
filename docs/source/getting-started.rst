@@ -91,6 +91,6 @@ the next release, not in 0.4.0.
 Where next
 ==========
 
--  :doc:`How-to <howto>`: sign a satchel, audit a store, backfill a log, demand attestation.
+-  :doc:`How-to <howto>`: sign a satchel, take a handover in, audit a store, backfill a log, demand attestation.
 -  :doc:`Reference <reference>`: kinds, verbs, the log, the store layout.
 -  :doc:`Explanation <explanation>`: why signatures alone do not bind a set, and what the log adds.

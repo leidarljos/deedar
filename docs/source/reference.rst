@@ -18,6 +18,7 @@ Verb                                                                            
 ``leave ID``                                                                        a left-behind marker for a deed that moved store
 ``timestamp ID``                                                                    a timestamp token over the deed
 ``export --into DIR ID... \vert -``                                                 deed, bytes, evidence, receipt (and signed head) into a satchel
+``import DIR [--allow-unsigned-head]``                                              check a satchel, then hold its deeds here with the receipt fields they travelled with and evidence under this store's key; writes nothing unless every deed can be held. A head no listed key signed needs ``--allow-unsigned-head``, and a store that says ``attestation = required`` refuses it anyway
 ``check DIR [--since KEPT] [--bridge FILE] [--keep FILE]``                          every receipt against the head in the bag; with ``--since``, that the bag's bridge (``bridge.txt``) grows the head you kept into this one; ``--keep`` records this head. ``--keep`` is available from the next release, not in 0.4.0
 ``log head \vert list \vert audit \vert backfill \vert prove ID \vert bridge SIZE`` the append-only log
 ``vouch sign FILE \vert check FILE``                                                a detached Ed25519 signature beside a file
@@ -62,7 +63,10 @@ The store
 
 A directory with ``bytes/`` (content-addressed), ``deeds/`` (canonical
 records), ``log`` (one entry a line: content address, time), ``layout``
-(version, attestation policy, accepted signers), and ``writer.key``.
+(version, attestation policy, accepted signers), and ``writer.key``. A deed
+taken in with ``import`` keeps its receipt and the head it is against beside
+it, as ``deeds/ID.proof`` and ``deeds/ID.head``, so its inclusion proof
+outlives the bag.
 
 The log
 =======
