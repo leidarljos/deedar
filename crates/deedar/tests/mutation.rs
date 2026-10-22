@@ -124,17 +124,22 @@ fn export_rejects_a_non_hex_write_once_path() {
     let id = DeedId::parse("deed-file-note").unwrap();
     client.create(file("deed-file-note", blob)).unwrap();
     let mut deed = client.get(&id).unwrap();
-    deed.paths[0] = std::path::PathBuf::from("sha256:../../outside");
+    // `store/bytes/../planted` is `store/planted`. The file has to be there:
+    // a missing target makes an old export fail for a benign reason and the
+    // test passes while the traversal still copies whatever is planted.
+    deed.paths[0] = std::path::PathBuf::from("sha256:../planted");
     fs::write(
         deeds_dir(&url).join("deed-file-note.cap"),
         encode_response(&Response::Deed(deed)).unwrap(),
     )
     .unwrap();
+    fs::write(root.join("planted"), b"outside the bytes directory").unwrap();
     let out = tempfile::tempdir().unwrap();
     let err = client
         .export_into(&id, out.path())
         .expect_err("bad write-once path");
     assert!(matches!(err, Error::Evidence(_)), "{err}");
+    assert!(err.to_string().contains("not write-once"), "{err}");
 }
 
 #[test]
