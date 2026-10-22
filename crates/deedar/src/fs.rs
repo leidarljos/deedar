@@ -900,7 +900,7 @@ impl FsStore {
 
     fn check_paths(&self, deed: &Deed) -> Result<()> {
         for path in &deed.paths {
-            let Some(hex) = path.to_str().and_then(|s| s.strip_prefix("sha256:")) else {
+            let Some(hex) = write_once_hex(path) else {
                 return Err(Error::Evidence(format!(
                     "path {} is not write-once",
                     path.display()

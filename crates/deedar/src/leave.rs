@@ -25,7 +25,7 @@ pub fn leave(store: &mut FsStore, id: &DeedId, dest: &Path) -> Result<PathBuf> {
     fs::create_dir_all(&out).map_err(|e| Error::Io(e.to_string()))?;
     let mut concat = Vec::new();
     for path in &deed.paths {
-        let Some(hex) = path.to_str().and_then(|s| s.strip_prefix("sha256:")) else {
+        let Some(hex) = crate::fs::write_once_hex(path) else {
             return Err(Error::InvalidBody(format!(
                 "path {} is not write-once",
                 path.display()
