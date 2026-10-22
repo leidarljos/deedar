@@ -726,12 +726,8 @@ fn read_folder(folder: &Path, bytes: &mut BTreeMap<String, Vec<u8>>) -> Result<C
     };
     receipt.check(&deed_bytes)?;
     let deed = wire::deed_from_bytes(&deed_bytes)?;
-    if deed.id.as_str() != receipt.id {
-        return Err(Error::Evidence(format!(
-            "{name}: deed.bin says {}, and proof.txt says {}",
-            deed.id, receipt.id
-        )));
-    }
+    crate::receipt::named_for(folder, &receipt.id, deed.id.as_str())
+        .map_err(|e| Error::Evidence(format!("{name}: {}", said(&e))))?;
     if crate::digest::deed_digest(&deed) != receipt.digest {
         return Err(Error::Evidence(format!(
             "{name}: deed.bin is not in canonical form, so this store would log another digest \

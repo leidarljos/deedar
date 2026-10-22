@@ -68,6 +68,8 @@ outlives the bag.
 =export --into DIR= writes =DIR/<id>/= for each deed and one =head=
 beside those folders. Wrapped as a satchel, that directory is
 =data/deeds=. A producer writing the bag by hand uses the same files.
+Each folder is named for the accession in its =deed.bin= and
+=proof.txt=, and a folder with any other name is refused.
 Every path is a regular file or a real directory. A symlink or a fifo is
 refused, and a symlinked deed folder is not entered.
 
