@@ -1123,9 +1123,18 @@ fn a_symlink_or_fifo_in_a_bag_is_refused() {
             .join(hex),
         &seats.root.path().join("letter-bytes"),
     );
-    deedar::check_handover(&bytes_bag, &std::collections::BTreeSet::new()).unwrap();
+    let err = check_err(&bytes_bag);
+    assert!(err.contains("not a regular file"), "{err}");
     let err = refused(&seats.url("recv-bytes"), &bytes_bag, UnsignedHead::Allow);
     assert!(err.contains("not a regular file"), "{err}");
+    let dir_bag = seats.bag("bytes-dir");
+    export(&sender, &dir_bag, &["deed-file-letter"]);
+    point_symlink(
+        &dir_bag.join("data/deeds/deed-file-letter/bytes"),
+        &seats.root.path().join("letter-dir"),
+    );
+    let err = check_err(&dir_bag);
+    assert!(err.contains("not a directory"), "{err}");
 
     seats.sign_as(7);
     mint(&sender, quote("deed-quote-v1", "first"));
