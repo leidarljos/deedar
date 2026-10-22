@@ -351,6 +351,11 @@ impl FsStore {
                         "{id}: the receipt this store kept for it names another entry"
                     )));
                 }
+                if let Some(head) = &bag.head {
+                    plan.put(self.kept_head_path(id), head.clone().into_bytes(), || {
+                        format!("{id}: this store kept another head for it")
+                    })?;
+                }
             }
             None => {
                 plan.put(proof_path, c.proof.clone().into_bytes(), || {
