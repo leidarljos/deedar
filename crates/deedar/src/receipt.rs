@@ -154,6 +154,9 @@ impl Receipt {
 pub struct SignedHead {
     /// What is being vouched for.
     pub head: Head,
+    /// Hex SHA-256 of the bag's link sidecars, when this signature covers
+    /// them. A log head has none.
+    pub links: Option<String>,
     /// The verifying key, as 32 bytes.
     pub signer: [u8; 32],
     /// The signature over the covered bytes.
@@ -165,10 +168,18 @@ pub struct SignedHead {
 const HEAD_DOMAIN: &[u8] = b"deedar-head-v1";
 
 /// The bytes a head signature actually covers.
-fn head_message(head: &Head) -> Vec<u8> {
+///
+/// `links` is the hex digest from [`link_commitment`]. A log head has none:
+/// it is not a bag. A bag head has one, so the signature covers the
+/// `sources`, `supersedes` and `successor` files and not only the log root.
+fn head_message(head: &Head, links: Option<&str>) -> Vec<u8> {
     let mut message = Vec::from(HEAD_DOMAIN);
     message.push(0);
     message.extend_from_slice(format!("{} {}", head.size, head.root).as_bytes());
+    if let Some(links) = links {
+        message.push(0);
+        message.extend_from_slice(links.as_bytes());
+    }
     message
 }
 
@@ -176,9 +187,13 @@ impl SignedHead {
     /// The file a handover carries.
     #[must_use]
     pub fn render(&self) -> String {
+        let links = self
+            .links
+            .as_deref()
+            .map(|links| format!(" links={links}"))
+            .unwrap_or_default();
         format!(
-            "size={} root={} {ED25519} {} {}
-",
+            "size={} root={}{links} {ED25519} {} {}\n",
             self.head.size,
             self.head.root,
             log::hex(&self.signer),
@@ -191,22 +206,32 @@ impl SignedHead {
     /// # Errors
     ///
     /// Fails when the line is not a size, a root, this scheme, a 32 byte key
-    /// and a 64 byte signature.
+    /// and a 64 byte signature. `links=<hex>` may sit between the root and
+    /// the scheme; that is the bag's link-sidecar digest.
     pub fn parse(text: &str) -> Result<Self> {
-        let mut fields = text.split_whitespace();
-        let (Some(size), Some(root), Some(scheme), Some(key), Some(sig), None) = (
-            fields.next(),
-            fields.next(),
-            fields.next(),
-            fields.next(),
-            fields.next(),
-            fields.next(),
-        ) else {
-            return Err(Error::Evidence("head: not a signed head line".into()));
+        let fields: Vec<&str> = text.split_whitespace().collect();
+        let (size, root, links, scheme, key, sig) = match fields.as_slice() {
+            [size, root, scheme, key, sig] => (*size, *root, None, *scheme, *key, *sig),
+            [size, root, links, scheme, key, sig] => {
+                (*size, *root, Some(*links), *scheme, *key, *sig)
+            }
+            _ => return Err(Error::Evidence("head: not a signed head line".into())),
         };
         if scheme != ED25519 {
             return Err(Error::Evidence(format!("head: scheme {scheme:?}")));
         }
+        let links = match links {
+            Some(raw) => {
+                let hex = raw.strip_prefix("links=").ok_or_else(|| {
+                    Error::Evidence("head: expected links= between the root and the scheme".into())
+                })?;
+                if !crate::fs::is_sha256_hex(hex) {
+                    return Err(Error::Evidence("head: links is not a sha256 digest".into()));
+                }
+                Some(hex.to_string())
+            }
+            None => None,
+        };
         let size = size
             .strip_prefix("size=")
             .ok_or_else(|| Error::Evidence("head: no size".into()))?;
@@ -230,6 +255,7 @@ impl SignedHead {
                 size: number(size, "size")? as usize,
                 root: root.to_string(),
             },
+            links,
             signer,
             signature,
         })
@@ -248,7 +274,7 @@ impl SignedHead {
             .map_err(|_| Error::Evidence("head: not a verifying key".into()))?;
         ed25519_dalek::Verifier::verify(
             &key,
-            &head_message(&self.head),
+            &head_message(&self.head, self.links.as_deref()),
             &ed25519_dalek::Signature::from_bytes(&self.signature),
         )
         .map_err(|_| Error::Evidence("head: the signature does not cover this head".into()))?;
@@ -271,15 +297,25 @@ impl SignedHead {
 ///
 /// Fails when no signing key is configured.
 pub fn sign_head(head: &Head) -> Result<SignedHead> {
+    sign_head_covering(head, None)
+}
+
+/// Sign a head, optionally covering a bag's [`link_commitment`].
+///
+/// # Errors
+///
+/// Fails when no signing key is configured.
+pub(crate) fn sign_head_covering(head: &Head, links: Option<&str>) -> Result<SignedHead> {
     let key: ed25519_dalek::SigningKey = crate::host::load_signing_key()?.ok_or_else(|| {
         Error::Evidence(
             "no signing key: set DEEDAR_HOST_SIGNING_KEY to a 32 byte seed outside the store"
                 .into(),
         )
     })?;
-    let signature = ed25519_dalek::Signer::sign(&key, &head_message(head));
+    let signature = ed25519_dalek::Signer::sign(&key, &head_message(head, links));
     Ok(SignedHead {
         head: head.clone(),
+        links: links.map(str::to_string),
         signer: key.verifying_key().to_bytes(),
         signature: signature.to_bytes(),
     })
@@ -504,6 +540,97 @@ pub fn head_beside(deeds: &Path) -> PathBuf {
     deeds.join("head")
 }
 
+/// Hex SHA-256 of the link sidecars under a deeds directory.
+///
+/// Deed folders are taken in byte order of their names. Each contributes its
+/// name and the exact bytes of `sources`, `supersedes` and `successor`, in
+/// that order. A missing file contributes a length of zero. The line is
+/// `<name>\n` then, for each kind, `<kind>\n<len>\n<bytes>`.
+///
+/// This is what a bag's head signature covers beyond the log root. The
+/// receipt does not: a file edited after export still sits beside a proof
+/// that checks, until this digest is checked against the signature. An
+/// unsigned head has no signature, so it does not authenticate these files.
+pub(crate) fn link_commitment(root: &Path) -> Result<String> {
+    let mut folders = Vec::new();
+    let entries = std::fs::read_dir(root).map_err(|e| Error::Io(e.to_string()))?;
+    for entry in entries {
+        let path = entry.map_err(|e| Error::Io(e.to_string()))?.path();
+        if path.is_dir() {
+            folders.push(path);
+        }
+    }
+    folders.sort();
+    let mut transcript = Vec::new();
+    for folder in folders {
+        let name = folder
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| {
+                Error::Evidence(format!(
+                    "{}: deed folder name is not utf-8",
+                    folder.display()
+                ))
+            })?;
+        transcript.extend_from_slice(name.as_bytes());
+        transcript.push(b'\n');
+        for kind in ["sources", "supersedes", "successor"] {
+            let path = folder.join(kind);
+            let bytes = match std::fs::read(&path) {
+                Ok(bytes) => bytes,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+                Err(e) => {
+                    return Err(Error::Io(format!("{}: {e}", path.display())));
+                }
+            };
+            transcript.extend_from_slice(kind.as_bytes());
+            transcript.push(b'\n');
+            transcript.extend_from_slice(format!("{}\n", bytes.len()).as_bytes());
+            transcript.extend_from_slice(&bytes);
+        }
+    }
+    Ok(log::hex(&Sha256::digest(&transcript)))
+}
+
+/// Whether `signed` covers the link sidecars actually in `root`.
+///
+/// A signature with no link digest covers a bag that carries none of them.
+/// One that names a digest has to name this directory's.
+pub(crate) fn links_bound(root: &Path, signed: &SignedHead) -> Result<()> {
+    match &signed.links {
+        Some(links) => {
+            let got = link_commitment(root)?;
+            if got != *links {
+                return Err(Error::Evidence(
+                    "the head signature does not cover the link sidecars in this bag".into(),
+                ));
+            }
+            Ok(())
+        }
+        None if link_sidecars_present(root)? => Err(Error::Evidence(
+            "this bag carries source or supersede sidecars that the head signature does not cover"
+                .into(),
+        )),
+        None => Ok(()),
+    }
+}
+
+fn link_sidecars_present(root: &Path) -> Result<bool> {
+    let entries = std::fs::read_dir(root).map_err(|e| Error::Io(e.to_string()))?;
+    for entry in entries {
+        let path = entry.map_err(|e| Error::Io(e.to_string()))?.path();
+        if !path.is_dir() {
+            continue;
+        }
+        for kind in ["sources", "supersedes", "successor"] {
+            if path.join(kind).is_file() {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
 /// Check every deed a handover carried, given the bag or the deeds directory.
 ///
 /// Every receipt has to name the same head, so the receiver has one thing to
@@ -592,6 +719,9 @@ pub fn check_handover(dir: &Path, accept: &BTreeSet<[u8; 32]>) -> Result<Handove
                         signed.head.size,
                         head.as_ref().map_or(0, |held| held.size)
                     ));
+                }
+                if let Err(e) = links_bound(&root, &signed) {
+                    wrong.push(said(&e));
                 }
                 head_signer = Some(signed.signer);
                 head_accepted = accepted;
@@ -799,8 +929,9 @@ mod tests {
         };
         let signed = SignedHead {
             head: head.clone(),
+            links: None,
             signer: key.verifying_key().to_bytes(),
-            signature: ed25519_dalek::Signer::sign(&key, &head_message(&head)).to_bytes(),
+            signature: ed25519_dalek::Signer::sign(&key, &head_message(&head, None)).to_bytes(),
         };
         // Through the file, since the file is what travels.
         let read = SignedHead::parse(&signed.render()).expect("round trips");
@@ -837,7 +968,10 @@ mod tests {
 
         // And it is domain separated from the manifest signature, so one
         // cannot be presented as the other.
-        assert_ne!(head_message(&head), crate::vouch::covered_for_test(b"x"));
+        assert_ne!(
+            head_message(&head, None),
+            crate::vouch::covered_for_test(b"x")
+        );
     }
 
     /// A handover fails whole: on a deed with no receipt, and on a receipt
