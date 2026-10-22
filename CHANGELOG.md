@@ -4,6 +4,17 @@ Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
 
 ## Unreleased
 
+- `deedar import BAG` checks a handover, then holds each deed in this
+  store: its record, product bytes and supersede links, and a log entry
+  with the digest and time from its receipt. Evidence is issued again
+  under this store's `writer.key` at the receipt's time, a copied host
+  signature is kept, and the receipt and its head stay beside the deed
+  as `deeds/ID.proof` and `deeds/ID.head`. Every deed is checked before
+  anything is written, so a frozen, tombstoned or differently logged
+  accession, or a source or successor neither side has, writes nothing.
+  The head has to be signed by a key the layout lists;
+  `--allow-unsigned-head` takes one that is not, except under
+  `attestation = required`. Importing the same bag again writes nothing.
 - `deedar export` writes each product path's bytes into the deed's
   folder as `bytes/<sha256>`, and its `supersedes` and `successor`
   links beside them. The reference listed bytes and no bag carried them,

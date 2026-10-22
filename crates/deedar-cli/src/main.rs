@@ -1,11 +1,11 @@
-//! Operator path: create, get, list, trail, evidence, delete, leave, timestamp, current, migrate.
+//! Operator path: create, get, list, trail, evidence, delete, leave, timestamp, current, import, migrate.
 
 use std::env;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use deed::{Body, Deed, DeedId, FormField, Grant, Kind, MailMessageId, Measure, Source, Step};
-use deedar::{Client, CreateRequest, StoreUrl};
+use deedar::{Client, CreateRequest, StoreUrl, UnsignedHead};
 
 fn main() -> ExitCode {
     match dispatch(env::args().skip(1).collect()) {
@@ -305,6 +305,31 @@ fn cmd_export(client: &mut Client, args: &[String]) -> Result<String, String> {
     ))
 }
 
+/// Check a satchel, then add its deeds to this store with the receipt fields
+/// they travelled with. `--allow-unsigned-head` takes a bag whose head no key
+/// the layout lists signed.
+fn cmd_import(client: &mut Client, args: &[String]) -> Result<String, String> {
+    let mut bag: Option<PathBuf> = None;
+    let mut unsigned = UnsignedHead::Refuse;
+    for arg in args {
+        match arg.as_str() {
+            "--allow-unsigned-head" => unsigned = UnsignedHead::Allow,
+            flag if flag.starts_with("--") => return Err(format!("unknown import flag {flag}")),
+            dir if bag.is_none() => bag = Some(PathBuf::from(dir)),
+            other => {
+                return Err(format!(
+                    "import takes one directory, and also got {other:?}"
+                ))
+            }
+        }
+    }
+    let bag = bag.ok_or("import needs a satchel directory")?;
+    let done = client
+        .import_handover(&bag, unsigned)
+        .map_err(|e| e.to_string())?;
+    Ok(done.render())
+}
+
 /// The append-only log: `head` to keep, `prove` for one deed, `bridge` from a
 /// kept head to this one, `audit` of the log against the shelves.
 fn cmd_log(client: &mut Client, args: &[String]) -> Result<String, String> {
@@ -496,6 +521,7 @@ fn run(args: Vec<String>) -> Result<String, String> {
         }
         Some("log") => cmd_log(&mut client, &rest[1..]),
         Some("export") => cmd_export(&mut client, &rest[1..]),
+        Some("import") => cmd_import(&mut client, &rest[1..]),
         Some("check") => cmd_check(&url, &rest[1..]),
         Some("vouch") => cmd_vouch(&url, &rest[1..]),
         Some("migrate") => {
@@ -512,11 +538,12 @@ fn run(args: Vec<String>) -> Result<String, String> {
 }
 
 fn usage() -> String {
-    "usage: deedar [--url FILE] create|get|list|trail|evidence|delete|leave|timestamp|current|log|export|check|vouch|migrate|host\n\
+    "usage: deedar [--url FILE] create|get|list|trail|evidence|delete|leave|timestamp|current|log|export|import|check|vouch|migrate|host\n\
      deedar --help            this page\n\
      deedar create --help     kinds and flags, including --path\n\
      evidence, current and export take one id, several ids, or - to read them from stdin\n\
      log takes head, list, audit, backfill, prove ID, or bridge SIZE\n\
+     import takes a satchel directory, and --allow-unsigned-head for one whose head no key the layout lists signed\n\
      check takes a satchel directory, --since KEPT_HEAD, --bridge FILE and --keep FILE; vouch takes sign FILE or check FILE\n\
      host says whether the store's layout lists the host signing key, and exits 1 when it does not\n\
      host accept adds the host signing key to the layout as a signer, and leaves every other line\n"

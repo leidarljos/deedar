@@ -50,6 +50,32 @@ The bridge is the consistency path from the head you kept to the new one.
 bag's deeds are proven against, so a log rewritten in between fails. A
 bridge on its own proves nothing here: the sender picks both of its heads.
 
+* Take a handover into a store
+
+#+begin_src console
+$ deedar import bag
+$ deedar import bag --allow-unsigned-head      # a head no listed key signed
+#+end_src
+
+=import= runs the same check as =check=, then holds every deed in the bag
+here: the record, its product bytes, its =supersedes= and =successor=
+links, and a log entry with the digest and time from its receipt. The
+evidence is issued again under this store's =writer.key=, over the same
+bytes and time, and the receipt and its head are kept as =deeds/ID.proof=
+and =deeds/ID.head=. Once the bag is gone, =evidence=, =trail=, =current=
+and =log audit= still answer here.
+
+Nothing is written unless every deed can be held. A deed frozen here with
+other bytes, tombstoned, or logged with another digest or time refuses the
+whole bag, and so does one made from a source or revised by a successor
+that neither the bag nor the store has. Importing the same bag again
+writes nothing.
+
+The bag's head has to be signed by a key this store's =layout= lists. A
+head signed by no key, or by one the layout does not list, proves only
+what the bag says about itself. =--allow-unsigned-head= takes it anyway,
+except in a store that says =attestation = required=.
+
 * Audit a store
 
 #+begin_src console
