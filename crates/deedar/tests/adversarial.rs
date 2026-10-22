@@ -6,6 +6,7 @@ use deed::{DeedId, Error, Source};
 use deedar::{decode_request, encode_request, Request};
 use std::fs;
 use std::os::unix::fs::symlink;
+use std::path::PathBuf;
 
 use common::{file, open, quote, tmp_url, write_blob};
 
@@ -44,6 +45,18 @@ fn directory_as_file_path_is_rejected() {
         .create(file("deed-file-note", root.clone()))
         .expect_err("directory");
     assert!(err.to_string().contains("not a file"), "{err}");
+}
+
+#[test]
+fn invalid_sha256_address_in_a_body_path_is_rejected() {
+    let mut client = open(&tmp_url());
+    let err = client
+        .create(file(
+            "deed-file-note",
+            PathBuf::from("sha256:../../outside"),
+        ))
+        .expect_err("invalid write-once path");
+    assert!(matches!(err, Error::InvalidBody(_)), "{err}");
 }
 
 #[test]
