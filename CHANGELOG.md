@@ -62,6 +62,8 @@ Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
   `check`.
 - A test imports over a supersedes file that holds only the accession
   and requires the digest to be added. That upgrade had no test.
+- The `sha256:../planted` export test requires that no file the export
+  left behind holds the planted bytes, as well as the refusal.
 - Each release archive gets a GitHub build attestation from the release workflow, so `gh attestation verify` and the ljos installer can check that this repository built it. Releases before this one have none, and the installer counts them as not published.
 - `deedar create` run again with the same bytes and flags prints the deed
   it froze and exits 0, and writes nothing. It exited 1 with `deed

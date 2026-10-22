@@ -140,6 +140,24 @@ fn export_rejects_a_non_hex_write_once_path() {
         .expect_err("bad write-once path");
     assert!(matches!(err, Error::Evidence(_)), "{err}");
     assert!(err.to_string().contains("not write-once"), "{err}");
+    // The files written before the refusal stay, so the planted bytes must
+    // not be one of them.
+    let mut dirs = vec![out.path().to_path_buf()];
+    while let Some(dir) = dirs.pop() {
+        for entry in fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                dirs.push(path);
+            } else {
+                assert_ne!(
+                    fs::read(&path).unwrap(),
+                    b"outside the bytes directory",
+                    "export copied the planted file to {}",
+                    path.display()
+                );
+            }
+        }
+    }
 }
 
 #[test]
