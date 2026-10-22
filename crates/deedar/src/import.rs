@@ -125,6 +125,16 @@ impl Plan {
             }
         }
     }
+
+    /// Stage `bytes` at `path`, replacing bytes already on disk.
+    fn replace(&mut self, path: PathBuf, bytes: Vec<u8>) {
+        if let Some(&at) = self.planned.get(&path) {
+            self.files[at].1 = bytes;
+            return;
+        }
+        self.planned.insert(path.clone(), self.files.len());
+        self.files.push((path, bytes));
+    }
 }
 
 impl FsStore {
@@ -267,6 +277,15 @@ impl FsStore {
                 format!("{id}: frozen here to other bytes")
             })?;
             plan.deeds += 1;
+        }
+
+        if let Some(bound) = self.digest_kept_by_a_successor(id)? {
+            if bound != c.receipt.digest {
+                return Err(Error::Evidence(format!(
+                    "{id} is {}, and this store kept it as {bound} on a deed that supersedes it",
+                    c.receipt.digest
+                )));
+            }
         }
 
         match logged.get(id.as_str()) {
@@ -470,16 +489,7 @@ impl FsStore {
                     )));
                 }
             }
-            plan.put(
-                self.supersedes_path(&new.id),
-                format!("{}\n", old.id).into_bytes(),
-                || {
-                    format!(
-                        "{}: this store says it supersedes another deed than {}",
-                        new.id, old.id
-                    )
-                },
-            )?;
+            stage_supersedes(plan, self.supersedes_path(&new.id), old, &new.id)?;
             if !carried.contains_key(old.id.as_str()) && self.deed_path(&old.id).exists() {
                 let held = self.deed_digest_in_store(&old.id)?;
                 if held != old.digest {
@@ -578,6 +588,73 @@ impl FsStore {
     fn serves(&self, id: &DeedId) -> bool {
         self.deed_path(id).exists() && !self.tomb_path(id).exists()
     }
+
+    /// A digest already recorded on some `{other}.supersedes` for `id`.
+    fn digest_kept_by_a_successor(&self, id: &DeedId) -> Result<Option<String>> {
+        let deeds = self.dir().join("deeds");
+        let entries = match fs::read_dir(&deeds) {
+            Ok(entries) => entries,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(Error::Io(e.to_string())),
+        };
+        let mut bound = None;
+        for entry in entries {
+            let path = entry.map_err(|e| Error::Io(e.to_string()))?.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("supersedes") {
+                continue;
+            }
+            let Some(link) = crate::fs::read_supersedes(&path)? else {
+                continue;
+            };
+            if link.id != *id {
+                continue;
+            }
+            let Some(digest) = link.digest else {
+                continue;
+            };
+            if bound.as_ref().is_some_and(|held| held != &digest) {
+                return Err(Error::Evidence(format!(
+                    "{id} is named with two digests by supersedes sidecars in this store"
+                )));
+            }
+            bound = Some(digest);
+        }
+        Ok(bound)
+    }
+}
+
+/// Write `{new}.supersedes` as the id and the digest. An id-only file that
+/// names the same accession is completed; a different id or digest is refused.
+fn stage_supersedes(
+    plan: &mut Plan,
+    path: PathBuf,
+    old: &LinkedDeed,
+    new_id: &DeedId,
+) -> Result<()> {
+    let bytes = format!("{}\n{}\n", old.id, old.digest).into_bytes();
+    let differs = || {
+        format!(
+            "{new_id}: this store says it supersedes another deed than {}",
+            old.id
+        )
+    };
+    let Some(held) = read_if_there(&path)? else {
+        return plan.put(path, bytes, differs);
+    };
+    if held == bytes {
+        return Ok(());
+    }
+    let text = String::from_utf8(held).map_err(|_| Error::Evidence(differs()))?;
+    let mut lines = text.lines().map(str::trim).filter(|line| !line.is_empty());
+    let held_id = lines.next().unwrap_or("");
+    let held_digest = lines.next();
+    let extra = lines.next().is_some();
+    let upgrade = !extra && held_id == old.id.as_str() && held_digest.is_none();
+    if !upgrade {
+        return Err(Error::Evidence(differs()));
+    }
+    plan.replace(path, bytes);
+    Ok(())
 }
 
 /// Read every deed folder once. Each receipt is checked again here, on the

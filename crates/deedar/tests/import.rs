@@ -605,6 +605,51 @@ fn a_one_sided_link_to_a_carried_deed_must_name_its_digest() {
     assert!(err.contains("carries it as"), "{err}");
 }
 
+/// `{new}.supersedes` keeps the digest, so a later v1 with other bytes is
+/// refused and a re-export names the digest even when v1 is not held here.
+#[test]
+fn an_imported_supersedes_keeps_the_bound_digest() {
+    let seats = Seats::new();
+    let sender = seats.url("sender");
+    mint(&sender, quote("deed-quote-v1", "first take"));
+    let digest = deedar::deed_digest(
+        &Client::open(&sender)
+            .unwrap()
+            .get(&id("deed-quote-v1"))
+            .unwrap(),
+    );
+    let mut v2 = quote("deed-quote-v2", "second take");
+    v2.supersedes = Some(id("deed-quote-v1"));
+    mint(&sender, v2);
+    let bag = seats.bag("v2");
+    export(&sender, &bag, &["deed-quote-v2"]);
+
+    let receiver = seats.url("receiver");
+    import(&receiver, &bag, UnsignedHead::Allow);
+    let stored = deedar::store_dir(&receiver)
+        .unwrap()
+        .join("deeds/deed-quote-v2.supersedes");
+    assert_eq!(
+        fs::read_to_string(&stored).unwrap(),
+        format!("deed-quote-v1\n{digest}\n")
+    );
+
+    let again = seats.bag("again");
+    export(&receiver, &again, &["deed-quote-v2"]);
+    assert_eq!(
+        fs::read_to_string(again.join("data/deeds/deed-quote-v2/supersedes")).unwrap(),
+        format!("deed-quote-v1\n{digest}\n")
+    );
+
+    let other = seats.url("other");
+    mint(&other, quote("deed-quote-v1", "a different first take"));
+    let conflict = seats.bag("conflict");
+    export(&other, &conflict, &["deed-quote-v1"]);
+    let err = refused(&receiver, &conflict, UnsignedHead::Allow);
+    assert!(err.contains("kept it as"), "{err}");
+    assert!(err.contains(&digest), "{err}");
+}
+
 /// A sidecar link to a local successor holds only when that successor's bytes
 /// match what the sender named.
 #[test]
