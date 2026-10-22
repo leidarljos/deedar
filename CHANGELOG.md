@@ -26,6 +26,10 @@ Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
   so a file deed arrived without its product, and a revision without the
   chain `current` walks. A successor `current` would not step to, such
   as a tombstoned one, is left out.
+- A path already written as `sha256:...` is now accepted only when the
+  digest suffix is exactly 64 lowercase hex digits. `create` refuses
+  malformed `sha256:` paths, and `export` now checks both the digest
+  syntax and that the copied bytes still hash to that digest.
 - Each release archive gets a GitHub build attestation from the release workflow, so `gh attestation verify` and the ljos installer can check that this repository built it. Releases before this one have none, and the installer counts them as not published.
 - `deedar create` run again with the same bytes and flags prints the deed
   it froze and exits 0, and writes nothing. It exited 1 with `deed

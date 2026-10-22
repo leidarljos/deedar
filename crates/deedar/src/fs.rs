@@ -698,16 +698,19 @@ impl FsStore {
             atomic_write(&path, &raw)?;
             written.push(path);
         }
-        for hex in deed
-            .paths
-            .iter()
-            .filter_map(|path| path.to_str()?.strip_prefix("sha256:"))
-        {
+        for path in &deed.paths {
+            let hex = write_once_hex(path).ok_or_else(|| {
+                Error::Evidence(format!("{id}: path {} is not write-once", path.display()))
+            })?;
             let raw = fs::read(self.dir.join("bytes").join(hex)).map_err(|_| {
                 Error::Evidence(format!(
                     "{id}: path sha256:{hex} has no bytes in this store to hand over"
                 ))
             })?;
+            let digest = hex_encode(&Sha256::digest(&raw));
+            if digest != hex {
+                return Err(Error::Evidence(format!("path sha256:{hex} does not match")));
+            }
             let dir = out.join("bytes");
             fs::create_dir_all(&dir).map_err(|e| Error::Io(e.to_string()))?;
             let path = dir.join(hex);
@@ -972,6 +975,12 @@ impl FsStore {
                 continue;
             }
             if path.to_str().is_some_and(|s| s.starts_with("sha256:")) {
+                if write_once_hex(&path).is_none() {
+                    return Err(Error::InvalidBody(format!(
+                        "path {} is not write-once",
+                        path.display()
+                    )));
+                }
                 continue;
             }
             let addr = self.ingest_path(&path)?;
@@ -1087,9 +1096,7 @@ fn hex_encode(bytes: &[u8]) -> String {
 }
 
 pub fn is_write_once_addr(path: impl AsRef<Path>) -> bool {
-    path.as_ref()
-        .to_str()
-        .is_some_and(|s| s.starts_with("sha256:"))
+    write_once_hex(path.as_ref()).is_some()
 }
 
 /// An advisory exclusive lock on `file`, released when the handle closes.
@@ -1106,6 +1113,16 @@ fn lock_exclusive(file: &fs::File) -> Result<()> {
 /// Whether `dir` is absent or holds no entries.
 fn dir_is_empty(dir: &Path) -> bool {
     fs::read_dir(dir).map_or(true, |mut entries| entries.next().is_none())
+}
+
+pub(crate) fn is_sha256_hex(hex: &str) -> bool {
+    hex.len() == 64 && hex.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+pub(crate) fn write_once_hex(path: &Path) -> Option<&str> {
+    path.to_str()?
+        .strip_prefix("sha256:")
+        .filter(|hex| is_sha256_hex(hex))
 }
 
 fn read_sidecar_id(path: &Path) -> Result<Option<DeedId>> {

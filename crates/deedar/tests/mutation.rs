@@ -96,6 +96,46 @@ fn missing_product_bytes_fail_evidence() {
 }
 
 #[test]
+fn export_rejects_a_non_hex_write_once_path() {
+    let url = tmp_url();
+    let root = deedar::store_dir(&url).unwrap();
+    let blob = write_blob(&root, "note.md", b"a short note\n");
+    let mut client = open(&url);
+    let id = DeedId::parse("deed-file-note").unwrap();
+    client.create(file("deed-file-note", blob)).unwrap();
+    let mut deed = client.get(&id).unwrap();
+    deed.paths[0] = std::path::PathBuf::from("sha256:../../outside");
+    fs::write(
+        deeds_dir(&url).join("deed-file-note.cap"),
+        encode_response(&Response::Deed(deed)).unwrap(),
+    )
+    .unwrap();
+    let out = tempfile::tempdir().unwrap();
+    let err = client
+        .export_into(&id, out.path())
+        .expect_err("bad write-once path");
+    assert!(matches!(err, Error::Evidence(_)), "{err}");
+}
+
+#[test]
+fn export_rejects_bytes_that_do_not_hash_to_their_path() {
+    let url = tmp_url();
+    let root = deedar::store_dir(&url).unwrap();
+    let blob = write_blob(&root, "note.md", b"a short note\n");
+    let mut client = open(&url);
+    let id = DeedId::parse("deed-file-note").unwrap();
+    let (deed, _) = client.create(file("deed-file-note", blob)).unwrap();
+    let hex = hex_of(&deed.paths);
+    fs::write(bytes_dir(&url).join(&hex), b"changed").unwrap();
+    let out = tempfile::tempdir().unwrap();
+    let err = client
+        .export_into(&id, out.path())
+        .expect_err("changed bytes exported");
+    assert!(matches!(err, Error::Evidence(_)), "{err}");
+    assert!(err.to_string().contains("does not match"), "{err}");
+}
+
+#[test]
 fn truncated_deed_file_fails_get() {
     let url = tmp_url();
     let mut client = open(&url);

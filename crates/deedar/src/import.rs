@@ -309,7 +309,7 @@ impl FsStore {
             let hex = path
                 .to_str()
                 .and_then(|text| text.strip_prefix("sha256:"))
-                .filter(|hex| is_sha256_hex(hex))
+                .filter(|hex| crate::fs::is_sha256_hex(hex))
                 .ok_or_else(|| {
                     Error::Evidence(format!("{id}: path {} is not write-once", path.display()))
                 })?;
@@ -786,7 +786,7 @@ fn parse_digest(raw: Option<&str>, path: &Path) -> Result<String> {
         })?;
     let hex = digest
         .strip_prefix("sha256:")
-        .filter(|hex| is_sha256_hex(hex))
+        .filter(|hex| crate::fs::is_sha256_hex(hex))
         .ok_or_else(|| Error::Evidence(format!("{}: invalid sha256 digest", path.display())))?;
     Ok(format!("sha256:{hex}"))
 }
@@ -797,10 +797,6 @@ fn read_if_there(path: &Path) -> Result<Option<Vec<u8>>> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(Error::Io(format!("{}: {e}", path.display()))),
     }
-}
-
-fn is_sha256_hex(hex: &str) -> bool {
-    hex.len() == 64 && hex.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
 }
 
 #[cfg(test)]
