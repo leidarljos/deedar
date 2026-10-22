@@ -46,9 +46,12 @@ Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
 - An imported supersedes sidecar keeps the prior deed's digest. A later
   copy of that prior with other bytes is refused, and exporting the
   revision names the digest even when the prior is not in this store.
-- `--allow-unsigned-head` now waives only a missing head signature. A
-  head signed by a key the store's layout does not list is refused with
-  or without the flag.
+- `--allow-unsigned-head` waives a head this store did not accept,
+  whether the signature is missing or by a key the layout does not
+  list. Deleting `head` turned an unlisted signature into a missing
+  one, and the flag took that while refusing the signed file.
+  `attestation = required` still refuses both, and `deedar check`
+  still refuses a signer it was not given.
 - Each release archive gets a GitHub build attestation from the release workflow, so `gh attestation verify` and the ljos installer can check that this repository built it. Releases before this one have none, and the installer counts them as not published.
 - `deedar create` run again with the same bytes and flags prints the deed
   it froze and exits 0, and writes nothing. It exited 1 with `deed

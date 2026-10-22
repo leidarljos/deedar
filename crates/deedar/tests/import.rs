@@ -820,32 +820,93 @@ fn an_unsigned_head_is_refused_unless_allowed_and_always_under_required() {
     holds(&receiver, "deed-quote-plain");
 }
 
-/// A head signed by a key the receiver's layout leaves out is refused: by
-/// the check when the layout lists others, and as unsigned when it lists
-/// none. Allowed through, the deed's own host signature still has to verify
-/// here, or evidence would fail after the import.
+/// The flag waives a missing signature and an unlisted signer together.
+/// Deleting `head` is how one becomes the other, so a flag that took only
+/// the missing file let through a bag it refused while the signature was
+/// there. `check` still refuses the signer, and `attestation = required`
+/// refuses both shapes.
 #[test]
-fn a_head_signed_by_an_unlisted_key_is_refused() {
+fn allow_unsigned_head_waives_an_unlisted_signer_and_a_missing_one() {
+    let seats = Seats::new();
+    let sender = seats.url("sender");
+    mint(&sender, quote("deed-quote-waived", "no host sidecar"));
+    seats.sign_as(42);
+    let bag = seats.bag("bag");
+    export(&sender, &bag, &["deed-quote-waived"]);
+    seats.sign_nothing();
+
+    let other = seats.sign_as(43);
+    seats.sign_nothing();
+    let signer = ed25519_dalek::SigningKey::from_bytes(&[43; 32])
+        .verifying_key()
+        .to_bytes();
+    let mut accept = std::collections::BTreeSet::new();
+    accept.insert(signer);
+    let err = deedar::check_handover(&bag, &accept).unwrap_err();
+    assert!(
+        err.to_string().contains("not a key this reader accepts"),
+        "{err}"
+    );
+
+    let listed = seats.url("listed");
+    layout(&listed, &format!("1\nsigner = {other}\n"));
+    let err = refused(&listed, &bag, UnsignedHead::Refuse);
+    assert!(err.contains("not a key this reader accepts"), "{err}");
+    import(&listed, &bag, UnsignedHead::Allow);
+    holds(&listed, "deed-quote-waived");
+
+    let bare = seats.url("bare");
+    layout(&bare, "1\n");
+    let err = refused(&bare, &bag, UnsignedHead::Refuse);
+    assert!(err.contains("does not list"), "{err}");
+    import(&bare, &bag, UnsignedHead::Allow);
+    holds(&bare, "deed-quote-waived");
+
+    let required = seats.url("required");
+    layout(
+        &required,
+        &format!("1\nattestation = required\nsigner = {other}\n"),
+    );
+    let err = refused(&required, &bag, UnsignedHead::Allow);
+    assert!(err.contains("not a key this reader accepts"), "{err}");
+    let required_bare = seats.url("required-bare");
+    layout(&required_bare, "1\nattestation = required\n");
+    let err = refused(&required_bare, &bag, UnsignedHead::Allow);
+    assert!(err.contains("attestation = required"), "{err}");
+
+    fs::remove_file(bag.join("data/deeds/head")).unwrap();
+    let deleted = seats.url("deleted");
+    layout(&deleted, &format!("1\nsigner = {other}\n"));
+    let err = refused(&deleted, &bag, UnsignedHead::Refuse);
+    assert!(err.contains("head is unsigned"), "{err}");
+    import(&deleted, &bag, UnsignedHead::Allow);
+    holds(&deleted, "deed-quote-waived");
+    let required_gone = seats.url("required-gone");
+    layout(
+        &required_gone,
+        &format!("1\nattestation = required\nsigner = {other}\n"),
+    );
+    let err = refused(&required_gone, &bag, UnsignedHead::Allow);
+    assert!(err.contains("attestation = required"), "{err}");
+}
+
+/// Waiving the head does not waive the deed's own host signature.
+#[test]
+fn an_unlisted_host_signature_is_still_refused() {
     let seats = Seats::new();
     let sender = seats.url("sender");
     seats.sign_as(42);
-    mint(&sender, quote("deed-quote-signed", "signed by a stranger"));
+    mint(&sender, quote("deed-quote-hosted", "signed by a stranger"));
     let bag = seats.bag("bag");
-    export(&sender, &bag, &["deed-quote-signed"]);
+    export(&sender, &bag, &["deed-quote-hosted"]);
+    seats.sign_nothing();
 
+    let other = seats.sign_as(43);
     seats.sign_nothing();
     let receiver = seats.url("receiver");
-    let stranger = seats.sign_as(43);
-    seats.sign_nothing();
-    layout(&receiver, &format!("1\nsigner = {stranger}\n"));
+    layout(&receiver, &format!("1\nsigner = {other}\n"));
     let err = refused(&receiver, &bag, UnsignedHead::Allow);
-    assert!(err.contains("not a key this reader accepts"), "{err}");
-
-    layout(&receiver, "1\n");
-    let err = refused(&receiver, &bag, UnsignedHead::Refuse);
-    assert!(err.contains("does not list"), "{err}");
-    let err = refused(&receiver, &bag, UnsignedHead::Allow);
-    assert!(err.contains("does not list"), "{err}");
+    assert!(err.contains("host signature"), "{err}");
 }
 
 /// The time an import dates evidence from is the receipt's, and an

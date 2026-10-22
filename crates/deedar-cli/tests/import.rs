@@ -207,18 +207,22 @@ fn a_head_signed_by_a_listed_key_needs_no_flag() {
     assert!(home.join("receiver/deeds/deed-quote-signed.head").is_file());
 }
 
-/// `--allow-unsigned-head` waives a missing signature only, not one by an
-/// unlisted key.
+/// `--allow-unsigned-head` takes a signature by a key the layout does not
+/// list. The deed was created with signing off, so there is no host sidecar
+/// for that key to fail afterwards. `check` still refuses the signer.
 #[test]
-fn allow_unsigned_head_does_not_waive_an_unlisted_signature() {
+fn allow_unsigned_head_takes_an_unlisted_signature() {
     let home = tempfile::tempdir().unwrap();
     let home = home.path();
     let key = home.join("sender.key");
     std::fs::write(&key, [7u8; 32]).unwrap();
+    let other = home.join("other.key");
+    std::fs::write(&other, [9u8; 32]).unwrap();
     let key = key.display().to_string();
+    let other = other.display().to_string();
     let sender = url(home, "sender");
     let receiver = url(home, "receiver");
-    quote(home, &sender, &key, "deed-quote-signed", &[]);
+    quote(home, &sender, "off", "deed-quote-signed", &[]);
     ok(
         home,
         &key,
@@ -233,13 +237,33 @@ fn allow_unsigned_head_does_not_waive_an_unlisted_signature() {
     );
 
     ok(home, "off", &["--url", &receiver, "list"]);
-    std::fs::write(home.join("receiver/layout"), "1\n").unwrap();
-    let err = fails(
+    let host = fails(home, &other, &["--url", &receiver, "host"]);
+    let public = host
+        .split_whitespace()
+        .find(|word| word.starts_with("ed25519:"))
+        .unwrap_or_else(|| panic!("{host}"));
+    std::fs::write(
+        home.join("receiver/layout"),
+        format!("1\nsigner = {public}\n"),
+    )
+    .unwrap();
+
+    let err = fails(home, "off", &["--url", &receiver, "check", "bag"]);
+    assert!(err.contains("not a key this reader accepts"), "{err}");
+    let err = fails(home, "off", &["--url", &receiver, "import", "bag"]);
+    assert!(err.contains("not a key this reader accepts"), "{err}");
+    let said = ok(
         home,
         "off",
         &["--url", &receiver, "import", "bag", "--allow-unsigned-head"],
     );
-    assert!(err.contains("does not list"), "{err}");
+    assert!(said.contains("appended 1 log entries"), "{said}");
+    let ev = ok(
+        home,
+        "off",
+        &["--url", &receiver, "evidence", "deed-quote-signed"],
+    );
+    assert!(ev.contains("id=deed-quote-signed ok"), "{ev}");
 }
 
 /// A layout that demands attestation refuses an unsigned head, flag or not.
