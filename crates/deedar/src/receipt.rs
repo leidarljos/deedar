@@ -10,12 +10,12 @@
 //! catches a log rewritten between two handovers. A check passes or fails;
 //! there is no note.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 
-use deed::{Error, Result};
+use deed::{Deed, Error, Result};
 
 use crate::attest::ED25519;
 use crate::log::{self, Head};
@@ -633,7 +633,8 @@ pub(crate) fn deed_folders(root: &Path) -> Result<Vec<PathBuf>> {
 
 /// The product files under a deed folder's `bytes/`, in name order, and none
 /// when it has no `bytes/`. That has to be a real directory of regular
-/// files: a symlink is refused, not followed.
+/// files: a symlink is refused, not followed. The name is not checked
+/// here; [`product_bytes`] is what binds each file to its hash.
 pub(crate) fn product_files(folder: &Path) -> Result<Vec<PathBuf>> {
     let dir = folder.join("bytes");
     match std::fs::symlink_metadata(&dir) {
@@ -662,6 +663,45 @@ pub(crate) fn product_files(folder: &Path) -> Result<Vec<PathBuf>> {
     }
     files.sort();
     Ok(files)
+}
+
+/// Product bytes under `folder`'s `bytes/`, keyed by the sha256 each file
+/// hashes to.
+///
+/// The file's name is that hash. Contents that hash to something else are
+/// a different product than the bag claims, and a write-once path on
+/// `deed` with no file beside it is a product the bag does not carry.
+/// `check` and `import` both read through here, so one cannot accept bytes
+/// the other refuses. The refusal is the line import already printed.
+pub(crate) fn product_bytes(folder: &Path, deed: &Deed) -> Result<BTreeMap<String, Vec<u8>>> {
+    let id = deed.id.as_str();
+    let mut carried = BTreeMap::new();
+    for path in product_files(folder)? {
+        let file = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let raw = read_regular_opt(&path)?
+            .ok_or_else(|| Error::Evidence(format!("{}: not a regular file", path.display())))?;
+        let got = log::hex(&Sha256::digest(&raw));
+        if got != file {
+            return Err(Error::Evidence(format!(
+                "{id}: bytes/{file} hashes to sha256:{got}"
+            )));
+        }
+        carried.insert(got, raw);
+    }
+    for path in &deed.paths {
+        let hex = crate::fs::write_once_hex(path).ok_or_else(|| {
+            Error::Evidence(format!("{id}: path {} is not write-once", path.display()))
+        })?;
+        if !carried.contains_key(hex) {
+            return Err(Error::Evidence(format!(
+                "{id}: path sha256:{hex} has bytes in neither this handover nor this store"
+            )));
+        }
+    }
+    Ok(carried)
 }
 
 /// Whether `path` is a real directory. Absent is `Ok(false)`. A symlink is
@@ -780,8 +820,9 @@ fn link_sidecars_present(root: &Path) -> Result<bool> {
 /// # Errors
 ///
 /// Fails when a deed carries no receipt, when bytes and digest disagree, when
-/// a path does not reach the head, or when the receipts disagree about which
-/// head they are against.
+/// a product file does not hash to its name or a deed path has no such file,
+/// when a path does not reach the head, or when the receipts disagree about
+/// which head they are against.
 pub fn check_handover(dir: &Path, accept: &BTreeSet<[u8; 32]>) -> Result<Handover> {
     let root = deeds_in(dir)?.ok_or_else(|| {
         Error::Evidence(format!(
@@ -842,13 +883,18 @@ pub fn check_handover(dir: &Path, accept: &BTreeSet<[u8; 32]>) -> Result<Handove
             wrong.push(said(&e));
             continue;
         }
-        let named = crate::wire::deed_from_bytes(&bytes)
-            .and_then(|deed| named_for(&folder, &receipt.id, deed.id.as_str()));
-        if let Err(e) = named {
+        let deed = match crate::wire::deed_from_bytes(&bytes) {
+            Ok(deed) => deed,
+            Err(e) => {
+                wrong.push(format!("{name}: {}", said(&e)));
+                continue;
+            }
+        };
+        if let Err(e) = named_for(&folder, &receipt.id, deed.id.as_str()) {
             wrong.push(format!("{name}: {}", said(&e)));
             continue;
         }
-        if let Err(e) = product_files(&folder) {
+        if let Err(e) = product_bytes(&folder, &deed) {
             wrong.push(said(&e));
             continue;
         }

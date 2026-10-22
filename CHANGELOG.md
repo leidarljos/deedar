@@ -4,6 +4,11 @@ Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
 
 ## Unreleased
 
+- `deedar check` refuses a `bytes/<sha256>` file that does not hash to
+  its name, and a deed path whose digest has no file there. Check only
+  required those files to be regular, so a tampered bag passed `check`
+  and failed `import`. Both now share one function, and the refusal is
+  the line import already printed.
 - `deedar import BAG` checks a handover, then holds each deed in this
   store: its record, product bytes and supersede links, and a log entry
   with the digest and time from its receipt. Evidence is issued again
