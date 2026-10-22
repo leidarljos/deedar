@@ -56,7 +56,7 @@ Take a handover into a store
 .. code:: console
 
    $ deedar import bag
-   $ deedar import bag --allow-unsigned-head      # a head no listed key signed
+   $ deedar import bag --allow-unsigned-head      # an unsigned head
 
 ``import`` runs the same check as ``check``, then holds every deed in the bag
 here: the record, its product bytes, its ``supersedes`` and ``successor``
@@ -73,9 +73,9 @@ that neither the bag nor the store has. Importing the same bag again
 writes nothing.
 
 The bag's head has to be signed by a key this store's ``layout`` lists. A
-head signed by no key, or by one the layout does not list, proves only
-what the bag says about itself. ``--allow-unsigned-head`` takes it anyway,
-except in a store that says ``attestation = required``.
+head signed by one the layout does not list is always refused.
+``--allow-unsigned-head`` waives a missing signature only, except in a
+store that says ``attestation = required``.
 
 Audit a store
 =============

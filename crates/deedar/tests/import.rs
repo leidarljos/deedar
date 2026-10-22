@@ -647,7 +647,7 @@ fn a_head_signed_by_an_unlisted_key_is_refused() {
     let err = refused(&receiver, &bag, UnsignedHead::Refuse);
     assert!(err.contains("does not list"), "{err}");
     let err = refused(&receiver, &bag, UnsignedHead::Allow);
-    assert!(err.contains("host signature"), "{err}");
+    assert!(err.contains("does not list"), "{err}");
 }
 
 /// The time an import dates evidence from is the receipt's, and an

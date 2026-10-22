@@ -33,6 +33,9 @@ Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
 - Re-importing a bag now restores `deeds/ID.head` whenever `deeds/ID.proof`
   already matches and the bag carried a signed head. A partial write that
   left only `.proof` no longer leaves that head missing forever.
+- `--allow-unsigned-head` now waives only a missing head signature. A
+  head signed by a key the store's layout does not list is refused with
+  or without the flag.
 - Each release archive gets a GitHub build attestation from the release workflow, so `gh attestation verify` and the ljos installer can check that this repository built it. Releases before this one have none, and the installer counts them as not published.
 - `deedar create` run again with the same bytes and flags prints the deed
   it froze and exits 0, and writes nothing. It exited 1 with `deed
