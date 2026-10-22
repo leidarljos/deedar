@@ -618,7 +618,7 @@ pub fn check_handover(dir: &Path, accept: &BTreeSet<[u8; 32]>) -> Result<Handove
 
 /// One complaint's text, without the `evidence:` prefix the heading already
 /// supplies.
-fn said(e: &Error) -> String {
+pub(crate) fn said(e: &Error) -> String {
     match e {
         Error::Evidence(text) | Error::Io(text) => text.clone(),
         other => other.to_string(),
@@ -626,7 +626,7 @@ fn said(e: &Error) -> String {
 }
 
 /// Where the deeds are, given either the bag or the directory inside it.
-fn deeds_in(dir: &Path) -> Option<PathBuf> {
+pub(crate) fn deeds_in(dir: &Path) -> Option<PathBuf> {
     let nested = dir.join("data").join("deeds");
     if nested.is_dir() {
         return Some(nested);
