@@ -350,6 +350,58 @@ fn a_forged_link_sidecar_fails_the_head_signature() {
     }
 }
 
+/// The head signs each folder's links under the folder's name. Another
+/// deed's files moved into a revision's folder keep that signature, and
+/// would make the moved deed the successor of the revision's prior.
+#[test]
+fn a_folder_holding_another_deed_is_refused() {
+    let seats = Seats::new();
+    let sender = seats.url("sender");
+    let public = seats.sign_as(41);
+    mint(&sender, quote("deed-quote-v1", "first take"));
+    let first = seats.bag("first");
+    export(&sender, &first, &["deed-quote-v1"]);
+    let mut v2 = quote("deed-quote-v2", "second take");
+    v2.supersedes = Some(id("deed-quote-v1"));
+    mint(&sender, v2);
+    mint(&sender, quote("deed-quote-other", "another deed"));
+    let forged = seats.bag("forged");
+    export(&sender, &forged, &["deed-quote-v2"]);
+    let other = seats.bag("other");
+    export(&sender, &other, &["deed-quote-other"]);
+    seats.sign_nothing();
+    for file in ["deed.bin", "proof.txt", "host", "evidence.bin"] {
+        fs::copy(
+            other.join("data/deeds/deed-quote-other").join(file),
+            forged.join("data/deeds/deed-quote-v2").join(file),
+        )
+        .unwrap();
+    }
+    let err = check_err(&forged);
+    assert!(err.contains("named for the deed it holds"), "{err}");
+    let deeds = other.join("data/deeds");
+    fs::rename(deeds.join("deed-quote-other"), deeds.join("other")).unwrap();
+    let err = check_err(&other);
+    assert!(
+        err.contains("other: the folder name is not an accession"),
+        "{err}"
+    );
+
+    let receiver = seats.url("receiver");
+    layout(&receiver, &format!("1\nsigner = {public}\n"));
+    import(&receiver, &first, UnsignedHead::Refuse);
+    let err = refused(&receiver, &forged, UnsignedHead::Refuse);
+    assert!(err.contains("named for the deed it holds"), "{err}");
+    assert_eq!(
+        Client::open(&receiver)
+            .unwrap()
+            .current(&id("deed-quote-v1"))
+            .unwrap()
+            .id,
+        id("deed-quote-v1")
+    );
+}
+
 /// A kept receipt with no kept head is a partial write. Re-importing the same
 /// bag must put the head back.
 #[test]

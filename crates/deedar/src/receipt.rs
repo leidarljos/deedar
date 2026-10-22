@@ -787,6 +787,12 @@ pub fn check_handover(dir: &Path, accept: &BTreeSet<[u8; 32]>) -> Result<Handove
             wrong.push(said(&e));
             continue;
         }
+        let named = crate::wire::deed_from_bytes(&bytes)
+            .and_then(|deed| named_for(&folder, &receipt.id, deed.id.as_str()));
+        if let Err(e) = named {
+            wrong.push(format!("{name}: {}", said(&e)));
+            continue;
+        }
         match &head {
             None => head = Some(receipt.head()),
             Some(held) if *held != receipt.head() => {
@@ -860,6 +866,35 @@ pub fn check_handover(dir: &Path, accept: &BTreeSet<[u8; 32]>) -> Result<Handove
     }
 }
 
+/// Whether a deed folder is named for the deed it holds. The head signature
+/// binds each folder's link sidecars to the folder's name, so another deed's
+/// `deed.bin` and `proof.txt` moved into the folder would take those links.
+///
+/// # Errors
+///
+/// Fails when the name is not an accession, or `deed.bin` or `proof.txt`
+/// names another one.
+pub(crate) fn named_for(folder: &Path, proof_id: &str, deed_id: &str) -> Result<()> {
+    let name = folder
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    if deed::DeedId::parse(&name).is_err() {
+        return Err(Error::Evidence(
+            "the folder name is not an accession, and a deed folder has to be named for the \
+             deed it holds"
+                .into(),
+        ));
+    }
+    if name != proof_id || name != deed_id {
+        return Err(Error::Evidence(format!(
+            "deed.bin is {deed_id} and proof.txt is {proof_id}, and a deed folder has to be \
+             named for the deed it holds"
+        )));
+    }
+    Ok(())
+}
+
 /// One complaint's text, without the `evidence:` prefix the heading already
 /// supplies.
 pub(crate) fn said(e: &Error) -> String {
@@ -907,15 +942,35 @@ mod tests {
     fn entries(n: usize) -> Vec<log::Entry> {
         (0..n)
             .map(|i| log::Entry {
-                id: format!("deed-thing-{i}"),
+                id: format!("deed-quote-thing{i}"),
                 digest: format!("sha256:{}", log::hex(&Sha256::digest(body(i)))),
                 unix_time: 1_700_000_000 + i as u64,
             })
             .collect()
     }
 
+    /// The canonical bytes of deed `i`, as its `deed.bin` carries them.
     fn body(i: usize) -> Vec<u8> {
-        format!("the bytes of deed {i}").into_bytes()
+        let excerpt = format!("the bytes of deed {i}");
+        let deed = deed::Deed::from_draft(deed::Draft {
+            id: Some(deed::DeedId::parse(&format!("deed-quote-thing{i}")).expect("id")),
+            name: format!("thing {i}"),
+            sources: Vec::new(),
+            produced_by: deed::ProducedBy {
+                agent_id: "reader".into(),
+                activity_id: None,
+            },
+            grants: Vec::new(),
+            body: deed::Body::Quote {
+                edition: "https://example.invalid/a".into(),
+                start: 0,
+                end: excerpt.len() as u64,
+                excerpt,
+                urls: vec!["https://example.invalid/a".into()],
+            },
+        })
+        .expect("deed");
+        crate::wire::deed_bytes(&deed)
     }
 
     fn receipt_for(all: &[log::Entry], at: usize) -> Receipt {

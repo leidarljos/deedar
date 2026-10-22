@@ -42,6 +42,11 @@ Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
 - A `sha256:` path is accepted only when the suffix is 64 lowercase
   hex digits. `create`, `export`, `leave` and `evidence` refuse any
   other suffix, so `sha256:../planted` is neither read nor written.
+- `check` and `import` refuse a deed folder whose name is not the
+  accession in its `deed.bin` and `proof.txt`. The head signs each
+  folder's links under the folder's name, so another deed's files moved
+  into a revision's folder kept the signature, and `current` of the
+  revision's prior stepped to that deed.
 - Each release archive gets a GitHub build attestation from the release workflow, so `gh attestation verify` and the ljos installer can check that this repository built it. Releases before this one have none, and the installer counts them as not published.
 - `deedar create` run again with the same bytes and flags prints the deed
   it froze and exits 0, and writes nothing. It exited 1 with `deed
