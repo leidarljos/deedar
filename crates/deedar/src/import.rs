@@ -782,21 +782,7 @@ fn read_folder(folder: &Path, bytes: &mut BTreeMap<String, Vec<u8>>) -> Result<C
         return Err(Error::Evidence(format!("{id}: host sidecar unreadable")));
     }
 
-    for path in crate::receipt::product_files(folder)? {
-        let file = path
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        let raw = crate::receipt::read_regular_opt(&path)?
-            .ok_or_else(|| Error::Evidence(format!("{}: not a regular file", path.display())))?;
-        let got = crate::log::hex(&Sha256::digest(&raw));
-        if got != file {
-            return Err(Error::Evidence(format!(
-                "{id}: bytes/{file} hashes to sha256:{got}"
-            )));
-        }
-        bytes.insert(got, raw);
-    }
+    bytes.extend(crate::receipt::product_bytes(folder, &deed)?);
 
     Ok(Carried {
         supersedes: read_link(&folder.join("supersedes"))?,
