@@ -975,14 +975,17 @@ fn allow_unsigned_head_waives_an_unlisted_signer_and_a_missing_one() {
     layout(&listed, &format!("1\nsigner = {other}\n"));
     let err = refused(&listed, &bag, UnsignedHead::Refuse);
     assert!(err.contains("not a key this reader accepts"), "{err}");
-    import(&listed, &bag, UnsignedHead::Allow);
+    let said = import(&listed, &bag, UnsignedHead::Allow).render();
+    assert!(!said.contains("no signer list"), "{said}");
+    assert!(said.contains("not a key this reader accepts"), "{said}");
     holds(&listed, "deed-quote-waived");
 
     let bare = seats.url("bare");
     layout(&bare, "1\n");
     let err = refused(&bare, &bag, UnsignedHead::Refuse);
     assert!(err.contains("does not list"), "{err}");
-    import(&bare, &bag, UnsignedHead::Allow);
+    let said = import(&bare, &bag, UnsignedHead::Allow).render();
+    assert!(said.contains("no signer list was given"), "{said}");
     holds(&bare, "deed-quote-waived");
 
     let required = seats.url("required");

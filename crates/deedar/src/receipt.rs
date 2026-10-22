@@ -498,6 +498,9 @@ pub struct Handover {
     /// Whether that signer was on the reader's list, as opposed to merely
     /// being the one the file named.
     pub head_accepted: bool,
+    /// Whether the reader listed the keys it accepts. An import that waives
+    /// an unlisted signer checks again with no list, and keeps this set.
+    pub signers_listed: bool,
 }
 
 impl Handover {
@@ -520,6 +523,11 @@ impl Handover {
                     log::hex(&signer)
                 ));
             }
+            Some(signer) if self.signers_listed => out.push_str(&format!(
+                "head signed by {}, which is not a key this reader accepts, and it was taken as \
+                 unsigned, so every proof above is against a head this bag asserted about itself\n",
+                log::hex(&signer)
+            )),
             Some(signer) => out.push_str(&format!(
                 "head signed by {}, and no signer list was given, so this says the head and the \
                  signature go together and nothing about who made them\n",
@@ -908,6 +916,7 @@ pub fn check_handover(dir: &Path, accept: &BTreeSet<[u8; 32]>) -> Result<Handove
             head,
             head_signer,
             head_accepted,
+            signers_listed: !accept.is_empty(),
         })
     } else {
         Err(Error::Evidence(format!(
@@ -1203,6 +1212,7 @@ mod tests {
             }),
             head_signer: None,
             head_accepted: false,
+            signers_listed: false,
         };
         let said = done.render();
         assert!(said.contains("the head is unsigned"), "{said}");
@@ -1214,6 +1224,14 @@ mod tests {
         };
         let said = named.render();
         assert!(said.contains("nothing about who made them"), "{said}");
+
+        let waived = Handover {
+            signers_listed: true,
+            ..named.clone()
+        };
+        let said = waived.render();
+        assert!(!said.contains("no signer list"), "{said}");
+        assert!(said.contains("not a key this reader accepts"), "{said}");
 
         let accepted = Handover {
             head_accepted: true,
