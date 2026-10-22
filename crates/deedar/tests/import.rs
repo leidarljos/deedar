@@ -287,6 +287,39 @@ fn a_later_bag_imports_beside_a_deed_kept_under_an_earlier_head() {
     );
 }
 
+/// Two bags of one log head sign other links, so their head lines differ.
+/// A deed kept from the first keeps its head when the second carries it.
+#[test]
+fn a_second_bag_of_the_same_head_imports_beside_a_kept_deed() {
+    let seats = Seats::new();
+    let sender = seats.url("sender");
+    let public = seats.sign_as(41);
+    mint(&sender, quote("deed-quote-a", "first"));
+    mint(&sender, quote("deed-quote-b", "second"));
+    let first = seats.bag("first");
+    export(&sender, &first, &["deed-quote-a"]);
+    let both = seats.bag("both");
+    export(&sender, &both, &["deed-quote-a", "deed-quote-b"]);
+    seats.sign_nothing();
+    let both_head = fs::read(both.join("data/deeds/head")).unwrap();
+    assert_ne!(fs::read(first.join("data/deeds/head")).unwrap(), both_head);
+
+    let receiver = seats.url("receiver");
+    layout(&receiver, &format!("1\nsigner = {public}\n"));
+    import(&receiver, &first, UnsignedHead::Refuse);
+    let shelf = deedar::store_dir(&receiver).unwrap().join("deeds");
+    let kept = fs::read(shelf.join("deed-quote-a.head")).unwrap();
+    let done = import(&receiver, &both, UnsignedHead::Refuse);
+    assert_eq!((done.deeds, done.logged), (1, 1));
+    holds(&receiver, "deed-quote-a");
+    holds(&receiver, "deed-quote-b");
+    assert_eq!(fs::read(shelf.join("deed-quote-a.head")).unwrap(), kept);
+    assert_eq!(
+        fs::read(shelf.join("deed-quote-b.head")).unwrap(),
+        both_head
+    );
+}
+
 fn flip_last_byte(path: &Path) {
     let mut raw = fs::read(path).unwrap();
     let at = raw
