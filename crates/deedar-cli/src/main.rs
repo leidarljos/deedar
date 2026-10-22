@@ -306,8 +306,8 @@ fn cmd_export(client: &mut Client, args: &[String]) -> Result<String, String> {
 }
 
 /// Check a satchel, then add its deeds to this store with the receipt fields
-/// they travelled with. `--allow-unsigned-head` takes a bag whose head no key
-/// the layout lists signed.
+/// they travelled with. `--allow-unsigned-head` takes a bag with no signature
+/// over its head; a head signed by an unlisted key is still refused.
 fn cmd_import(client: &mut Client, args: &[String]) -> Result<String, String> {
     let mut bag: Option<PathBuf> = None;
     let mut unsigned = UnsignedHead::Refuse;
@@ -543,7 +543,7 @@ fn usage() -> String {
      deedar create --help     kinds and flags, including --path\n\
      evidence, current and export take one id, several ids, or - to read them from stdin\n\
      log takes head, list, audit, backfill, prove ID, or bridge SIZE\n\
-     import takes a satchel directory, and --allow-unsigned-head for one whose head no key the layout lists signed\n\
+     import takes a satchel directory, and --allow-unsigned-head for one whose head is unsigned\n\
      check takes a satchel directory, --since KEPT_HEAD, --bridge FILE and --keep FILE; vouch takes sign FILE or check FILE\n\
      host says whether the store's layout lists the host signing key, and exits 1 when it does not\n\
      host accept adds the host signing key to the layout as a signer, and leaves every other line\n"

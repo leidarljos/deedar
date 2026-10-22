@@ -24,15 +24,14 @@ use crate::log::Entry;
 use crate::receipt::{said, Handover, Receipt, SignedHead};
 use crate::wire::{self, Response};
 
-/// Whether an import appends under a head that no key this store lists
-/// signed.
+/// Whether an import appends under an unsigned head.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum UnsignedHead {
-    /// Refuse the bag: a head nobody listed signed is one the bag asserted
-    /// about itself.
+    /// Refuse the bag: an unsigned head is one the bag asserted about itself.
     #[default]
     Refuse,
     /// Import it anyway, unless the layout says `attestation = required`.
+    /// A head signed by an unlisted key is still refused.
     Allow,
 }
 
@@ -174,32 +173,35 @@ impl FsStore {
     }
 
     /// The bar for appending: a head signed by a key this store lists, or an
-    /// explicit allowance for one that is not, which `attestation = required`
+    /// explicit allowance for an unsigned head, which `attestation = required`
     /// never grants.
     fn admit_head(&self, checked: &Handover, unsigned: UnsignedHead) -> Result<()> {
         if checked.head_accepted {
             return Ok(());
         }
         let layout = self.dir().join("layout");
-        let head = match checked.head_signer {
-            None => "this handover's head is unsigned".to_string(),
-            Some(signer) => format!(
-                "this handover's head is signed by {}, which {} does not list",
+        if let Some(signer) = checked.head_signer {
+            return Err(Error::Evidence(format!(
+                "this handover's head is signed by {}, which {} does not list; nothing was \
+                 imported",
                 crate::log::hex(&signer),
                 layout.display()
-            ),
-        };
+            )));
+        }
         if self.policy().demand == crate::attest::Demand::Required {
             return Err(Error::Evidence(format!(
-                "{} says attestation = required, and {head}; nothing was imported",
+                "{} says attestation = required, and this handover's head is unsigned; nothing \
+                 was imported",
                 layout.display()
             )));
         }
         if unsigned == UnsignedHead::Refuse {
-            return Err(Error::Evidence(format!(
-                "{head}, so every receipt in it is against a head the bag asserted about \
+            return Err(Error::Evidence(
+                "this handover's head is unsigned, so every receipt in it is against a head \
+                 the bag asserted about \
                  itself; nothing was imported, and --allow-unsigned-head imports it anyway"
-            )));
+                    .into(),
+            ));
         }
         Ok(())
     }

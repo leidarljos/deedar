@@ -207,6 +207,41 @@ fn a_head_signed_by_a_listed_key_needs_no_flag() {
     assert!(home.join("receiver/deeds/deed-quote-signed.head").is_file());
 }
 
+/// `--allow-unsigned-head` waives a missing signature only, not one by an
+/// unlisted key.
+#[test]
+fn allow_unsigned_head_does_not_waive_an_unlisted_signature() {
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    let key = home.join("sender.key");
+    std::fs::write(&key, [7u8; 32]).unwrap();
+    let key = key.display().to_string();
+    let sender = url(home, "sender");
+    let receiver = url(home, "receiver");
+    quote(home, &sender, &key, "deed-quote-signed", &[]);
+    ok(
+        home,
+        &key,
+        &[
+            "--url",
+            &sender,
+            "export",
+            "--into",
+            "bag/data/deeds",
+            "deed-quote-signed",
+        ],
+    );
+
+    ok(home, "off", &["--url", &receiver, "list"]);
+    std::fs::write(home.join("receiver/layout"), "1\n").unwrap();
+    let err = fails(
+        home,
+        "off",
+        &["--url", &receiver, "import", "bag", "--allow-unsigned-head"],
+    );
+    assert!(err.contains("does not list"), "{err}");
+}
+
 /// A layout that demands attestation refuses an unsigned head, flag or not.
 #[test]
 fn attestation_required_refuses_an_unsigned_head_even_with_the_flag() {
