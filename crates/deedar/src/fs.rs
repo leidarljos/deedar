@@ -20,13 +20,13 @@ pub struct Exporter<'a> {
     tree: std::sync::Arc<LogTree>,
 }
 
-/// The log as a tree: entries, leaf hashes, the head, its signature when there
-/// is one, and each accession's index.
+/// The log as a tree: entries, leaf hashes, the head, and each accession's
+/// index. The bag's signed head is written per export, because it also covers
+/// the link sidecars in that directory.
 pub struct LogTree {
     entries: Vec<crate::log::Entry>,
     leaves: Vec<[u8; 32]>,
     head: crate::log::Head,
-    signed: Option<crate::receipt::SignedHead>,
     position: std::collections::HashMap<String, usize>,
 }
 
@@ -79,7 +79,11 @@ impl Exporter<'_> {
         atomic_write(&path, receipt.render().as_bytes())?;
         written.push(path);
 
-        if let Some(signed) = &self.tree.signed {
+        // The signature covers this directory's link sidecars, so it is
+        // rewritten after every deed: the set it names is the set on disk.
+        if crate::host::load_signing_key()?.is_some() {
+            let links = crate::receipt::link_commitment(into)?;
+            let signed = crate::receipt::sign_head_covering(&self.tree.head, Some(&links))?;
             let path = crate::receipt::head_beside(into);
             atomic_write(&path, signed.render().as_bytes())?;
             written.push(path);
@@ -650,10 +654,6 @@ impl FsStore {
             .map(|e| crate::log::leaf_hash(&e.material()))
             .collect();
         let head = crate::log::Head::over(&leaves);
-        let signed = match crate::host::load_signing_key()? {
-            Some(_) => Some(crate::receipt::sign_head(&head)?),
-            None => None,
-        };
         let position: std::collections::HashMap<String, usize> = entries
             .iter()
             .enumerate()
@@ -665,7 +665,6 @@ impl FsStore {
                 entries,
                 leaves,
                 head,
-                signed,
                 position,
             }),
         })

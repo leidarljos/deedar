@@ -287,6 +287,69 @@ fn a_later_bag_imports_beside_a_deed_kept_under_an_earlier_head() {
     );
 }
 
+fn flip_last_byte(path: &Path) {
+    let mut raw = fs::read(path).unwrap();
+    let at = raw
+        .iter()
+        .rposition(|byte| *byte != b'\n')
+        .expect("file has a byte");
+    raw[at] = if raw[at] == b'a' { b'b' } else { b'a' };
+    fs::write(path, raw).unwrap();
+}
+
+/// `sources`, `supersedes` and `successor` sit outside the receipt. A signed
+/// bag that changes one of them must fail `check`: the head signature is
+/// what covers them, and the receipt does not.
+#[test]
+fn a_forged_link_sidecar_fails_the_head_signature() {
+    let seats = Seats::new();
+    let sender = seats.url("sender");
+    seats.sign_as(9);
+    mint(&sender, quote("deed-quote-v1", "first take"));
+    let mut v2 = quote("deed-quote-v2", "second take");
+    v2.supersedes = Some(id("deed-quote-v1"));
+    mint(&sender, v2);
+    let mut made = quote("deed-quote-made", "made from the first");
+    made.sources = vec![Source::deed(id("deed-quote-v1"))];
+    mint(&sender, made);
+    let accept =
+        std::collections::BTreeSet::from([ed25519_dalek::SigningKey::from_bytes(&[9u8; 32])
+            .verifying_key()
+            .to_bytes()]);
+
+    let cases = [
+        (
+            "supersedes",
+            &["deed-quote-v2"][..],
+            "deed-quote-v2/supersedes",
+        ),
+        (
+            "successor",
+            &["deed-quote-v1"][..],
+            "deed-quote-v1/successor",
+        ),
+        (
+            "sources",
+            &["deed-quote-made"][..],
+            "deed-quote-made/sources",
+        ),
+    ];
+    for (name, ids, file) in cases {
+        let bag = seats.bag(name);
+        export(&sender, &bag, ids);
+        deedar::check_handover(&bag, &accept).unwrap_or_else(|e| panic!("{name} before: {e}"));
+        flip_last_byte(&bag.join("data/deeds").join(file));
+        let err = deedar::check_handover(&bag, &accept).expect_err(name);
+        assert!(err.to_string().contains("does not cover"), "{name}: {err}");
+        let err = refused(
+            &seats.url(&format!("recv-{name}")),
+            &bag,
+            UnsignedHead::Allow,
+        );
+        assert!(err.contains("does not cover"), "{name}: {err}");
+    }
+}
+
 /// A kept receipt with no kept head is a partial write. Re-importing the same
 /// bag must put the head back.
 #[test]

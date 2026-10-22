@@ -37,6 +37,10 @@ Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
   no longer fills a missing `deeds/ID.head` from a head that receipt is not
   against. The head is written when it is the head the kept proof names.
   A proof this store does not have yet is written with its head together.
+- A bag's head signature covers each deed's `sources`, `supersedes` and
+  `successor` files. Those sidecars are not what the receipt proved: editing
+  one used to leave `check` green. An unsigned head still does not
+  authenticate them.
 - `--allow-unsigned-head` now waives only a missing head signature. A
   head signed by a key the store's layout does not list is refused with
   or without the flag.

@@ -153,7 +153,7 @@ impl FsStore {
         let root = crate::receipt::deeds_in(dir)
             .ok_or_else(|| Error::Evidence(format!("{}: no deeds here", dir.display())))?;
         let bag = read_bag(&root)?;
-        same_as_checked(&bag, &checked, &self.policy().signers)?;
+        same_as_checked(&bag, &checked, &self.policy().signers, &root)?;
         self.admit_head(&checked, unsigned)?;
 
         let plan = self.plan_import(&bag)?;
@@ -383,7 +383,11 @@ impl FsStore {
     }
 
     /// Both sides of every supersede link the bag names, so `current` here
-    /// steps where it stepped for the sender.
+    /// steps along the chain the bag carried. `sources`, `supersedes` and
+    /// `successor` are covered by the head signature when the bag has one.
+    /// They are not what the receipt proved: an unsigned head does not
+    /// authenticate them, and the flag that lets that head through is
+    /// accepting the files as they stand.
     fn plan_links(
         &self,
         bag: &Bag,
@@ -702,7 +706,12 @@ fn read_folder(folder: &Path, bytes: &mut BTreeMap<String, Vec<u8>>) -> Result<C
 /// The bag as read here against what `check_handover` read a moment before.
 /// Both readings have to be one bag, record for record, or what lands here is
 /// not what was checked.
-fn same_as_checked(bag: &Bag, checked: &Handover, accept: &BTreeSet<[u8; 32]>) -> Result<()> {
+fn same_as_checked(
+    bag: &Bag,
+    checked: &Handover,
+    accept: &BTreeSet<[u8; 32]>,
+    root: &Path,
+) -> Result<()> {
     let changed = |what: String| {
         Error::Evidence(format!(
             "this handover changed while it was being imported: {what}"
@@ -729,6 +738,7 @@ fn same_as_checked(bag: &Bag, checked: &Handover, accept: &BTreeSet<[u8; 32]>) -
             if checked.head.as_ref() != Some(&signed.head) || accepted != checked.head_accepted {
                 return Err(changed("the signed head is not the one checked".into()));
             }
+            crate::receipt::links_bound(root, &signed).map_err(|e| changed(said(&e)))?;
             Some(signed.signer)
         }
         None => None,
@@ -900,12 +910,13 @@ mod tests {
             .expect("the rewritten bag checks out on its own");
         let read = read_bag(dir.path()).expect("reads");
         assert_eq!(read.carried[0].receipt.id, checked.proven[0]);
-        let err = same_as_checked(&read, &checked, &BTreeSet::new()).expect_err("passed");
+        let err =
+            same_as_checked(&read, &checked, &BTreeSet::new(), dir.path()).expect_err("passed");
         assert!(format!("{err}").contains("changed while"), "{err}");
         assert!(format!("{err}").contains("another head"), "{err}");
 
         bag_against(dir.path(), &all[..1], &all[..1]);
         let read = read_bag(dir.path()).expect("reads");
-        same_as_checked(&read, &checked, &BTreeSet::new()).expect("the bag as checked");
+        same_as_checked(&read, &checked, &BTreeSet::new(), dir.path()).expect("the bag as checked");
     }
 }
