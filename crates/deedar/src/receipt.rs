@@ -623,6 +623,39 @@ pub(crate) fn deed_folders(root: &Path) -> Result<Vec<PathBuf>> {
     Ok(folders)
 }
 
+/// The product files under a deed folder's `bytes/`, in name order, and none
+/// when it has no `bytes/`. That has to be a real directory of regular
+/// files: a symlink is refused, not followed.
+pub(crate) fn product_files(folder: &Path) -> Result<Vec<PathBuf>> {
+    let dir = folder.join("bytes");
+    match std::fs::symlink_metadata(&dir) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(Error::Io(format!("{}: {e}", dir.display()))),
+        Ok(meta) if meta.file_type().is_dir() => {}
+        Ok(_) => {
+            return Err(Error::Evidence(format!(
+                "{}: not a directory",
+                dir.display()
+            )));
+        }
+    }
+    let mut files = Vec::new();
+    for entry in std::fs::read_dir(&dir).map_err(|e| Error::Io(e.to_string()))? {
+        let path = entry.map_err(|e| Error::Io(e.to_string()))?.path();
+        let meta = std::fs::symlink_metadata(&path)
+            .map_err(|e| Error::Io(format!("{}: {e}", path.display())))?;
+        if !meta.file_type().is_file() {
+            return Err(Error::Evidence(format!(
+                "{}: not a regular file",
+                path.display()
+            )));
+        }
+        files.push(path);
+    }
+    files.sort();
+    Ok(files)
+}
+
 /// Whether `path` is a real directory. Absent is `Ok(false)`. A symlink is
 /// refused, including when the final component is `data/deeds`.
 fn real_dir(path: &Path) -> Result<bool> {
@@ -805,6 +838,10 @@ pub fn check_handover(dir: &Path, accept: &BTreeSet<[u8; 32]>) -> Result<Handove
             .and_then(|deed| named_for(&folder, &receipt.id, deed.id.as_str()));
         if let Err(e) = named {
             wrong.push(format!("{name}: {}", said(&e)));
+            continue;
+        }
+        if let Err(e) = product_files(&folder) {
+            wrong.push(said(&e));
             continue;
         }
         match &head {

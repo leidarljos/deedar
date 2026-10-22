@@ -781,25 +781,20 @@ fn read_folder(folder: &Path, bytes: &mut BTreeMap<String, Vec<u8>>) -> Result<C
         return Err(Error::Evidence(format!("{id}: host sidecar unreadable")));
     }
 
-    let dir = folder.join("bytes");
-    if real_bytes_dir(&dir)? {
-        for entry in fs::read_dir(&dir).map_err(|e| Error::Io(e.to_string()))? {
-            let path = entry.map_err(|e| Error::Io(e.to_string()))?.path();
-            let file = path
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            let raw = crate::receipt::read_regular_opt(&path)?.ok_or_else(|| {
-                Error::Evidence(format!("{}: not a regular file", path.display()))
-            })?;
-            let got = crate::log::hex(&Sha256::digest(&raw));
-            if got != file {
-                return Err(Error::Evidence(format!(
-                    "{id}: bytes/{file} hashes to sha256:{got}"
-                )));
-            }
-            bytes.insert(got, raw);
+    for path in crate::receipt::product_files(folder)? {
+        let file = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let raw = crate::receipt::read_regular_opt(&path)?
+            .ok_or_else(|| Error::Evidence(format!("{}: not a regular file", path.display())))?;
+        let got = crate::log::hex(&Sha256::digest(&raw));
+        if got != file {
+            return Err(Error::Evidence(format!(
+                "{id}: bytes/{file} hashes to sha256:{got}"
+            )));
         }
+        bytes.insert(got, raw);
     }
 
     Ok(Carried {
@@ -951,19 +946,6 @@ fn proof_names(head_line: &str, proof: &Receipt) -> bool {
 
 fn read_if_there(path: &Path) -> Result<Option<Vec<u8>>> {
     crate::receipt::read_regular_opt(path)
-}
-
-/// Whether `dir` is a real directory of product bytes. Absent is fine.
-fn real_bytes_dir(dir: &Path) -> Result<bool> {
-    match fs::symlink_metadata(dir) {
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(e) => Err(Error::Io(format!("{}: {e}", dir.display()))),
-        Ok(meta) if meta.file_type().is_dir() => Ok(true),
-        Ok(_) => Err(Error::Evidence(format!(
-            "{}: not a directory",
-            dir.display()
-        ))),
-    }
 }
 
 #[cfg(test)]

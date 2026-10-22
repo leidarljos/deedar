@@ -57,6 +57,9 @@ Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
   first. The two bags sign other links, so their head lines differ, and
   import refused the second with `this store kept another head`. A kept
   head that names the kept proof's size and root is left as it is.
+- `check` refuses a symlink at or under a deed's `bytes/`, as import
+  does. It never opened `bytes/`, so a bag that import refused passed
+  `check`.
 - Each release archive gets a GitHub build attestation from the release workflow, so `gh attestation verify` and the ljos installer can check that this repository built it. Releases before this one have none, and the installer counts them as not published.
 - `deedar create` run again with the same bytes and flags prints the deed
   it froze and exits 0, and writes nothing. It exited 1 with `deed
