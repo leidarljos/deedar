@@ -389,8 +389,8 @@ impl DeedarServer {
 #[tool_handler]
 #[prompt_handler(router = Self::prompt_router())]
 impl ServerHandler for DeedarServer {
-    fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::new(
             ServerCapabilities::builder()
                 .enable_tools()
                 .enable_resources()
