@@ -81,6 +81,26 @@ fn flipped_product_bytes_fail_evidence() {
 }
 
 #[test]
+fn evidence_refuses_a_sha256_path_that_is_not_hex() {
+    let url = tmp_url();
+    let root = deedar::store_dir(&url).unwrap();
+    let blob = write_blob(&root, "note.md", b"a short note\n");
+    let mut client = open(&url);
+    let id = DeedId::parse("deed-file-note").unwrap();
+    client.create(file("deed-file-note", blob)).unwrap();
+    let mut deed = client.get(&id).unwrap();
+    deed.paths[0] = std::path::PathBuf::from("sha256:../planted");
+    fs::write(
+        deeds_dir(&url).join("deed-file-note.cap"),
+        encode_response(&Response::Deed(deed)).unwrap(),
+    )
+    .unwrap();
+    fs::write(root.join("planted"), b"outside the bytes directory").unwrap();
+    let err = client.evidence(&id).expect_err("dotdot path");
+    assert!(err.to_string().contains("not write-once"), "{err}");
+}
+
+#[test]
 fn missing_product_bytes_fail_evidence() {
     let url = tmp_url();
     let root = deedar::store_dir(&url).unwrap();
@@ -93,6 +113,69 @@ fn missing_product_bytes_fail_evidence() {
         .evidence(&DeedId::parse("deed-file-note").unwrap())
         .expect_err("missing bytes");
     assert!(matches!(err, Error::Evidence(_)), "{err}");
+}
+
+#[test]
+fn export_rejects_a_non_hex_write_once_path() {
+    let url = tmp_url();
+    let root = deedar::store_dir(&url).unwrap();
+    let blob = write_blob(&root, "note.md", b"a short note\n");
+    let mut client = open(&url);
+    let id = DeedId::parse("deed-file-note").unwrap();
+    client.create(file("deed-file-note", blob)).unwrap();
+    let mut deed = client.get(&id).unwrap();
+    // `store/bytes/../planted` is `store/planted`. The file has to be there:
+    // a missing target makes an old export fail for a benign reason and the
+    // test passes while the traversal still copies whatever is planted.
+    deed.paths[0] = std::path::PathBuf::from("sha256:../planted");
+    fs::write(
+        deeds_dir(&url).join("deed-file-note.cap"),
+        encode_response(&Response::Deed(deed)).unwrap(),
+    )
+    .unwrap();
+    fs::write(root.join("planted"), b"outside the bytes directory").unwrap();
+    let out = tempfile::tempdir().unwrap();
+    let err = client
+        .export_into(&id, out.path())
+        .expect_err("bad write-once path");
+    assert!(matches!(err, Error::Evidence(_)), "{err}");
+    assert!(err.to_string().contains("not write-once"), "{err}");
+    // The files written before the refusal stay, so the planted bytes must
+    // not be one of them.
+    let mut dirs = vec![out.path().to_path_buf()];
+    while let Some(dir) = dirs.pop() {
+        for entry in fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                dirs.push(path);
+            } else {
+                assert_ne!(
+                    fs::read(&path).unwrap(),
+                    b"outside the bytes directory",
+                    "export copied the planted file to {}",
+                    path.display()
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn export_rejects_bytes_that_do_not_hash_to_their_path() {
+    let url = tmp_url();
+    let root = deedar::store_dir(&url).unwrap();
+    let blob = write_blob(&root, "note.md", b"a short note\n");
+    let mut client = open(&url);
+    let id = DeedId::parse("deed-file-note").unwrap();
+    let (deed, _) = client.create(file("deed-file-note", blob)).unwrap();
+    let hex = hex_of(&deed.paths);
+    fs::write(bytes_dir(&url).join(&hex), b"changed").unwrap();
+    let out = tempfile::tempdir().unwrap();
+    let err = client
+        .export_into(&id, out.path())
+        .expect_err("changed bytes exported");
+    assert!(matches!(err, Error::Evidence(_)), "{err}");
+    assert!(err.to_string().contains("does not match"), "{err}");
 }
 
 #[test]

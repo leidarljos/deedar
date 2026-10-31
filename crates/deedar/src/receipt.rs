@@ -10,12 +10,12 @@
 //! catches a log rewritten between two handovers. A check passes or fails;
 //! there is no note.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 
-use deed::{Error, Result};
+use deed::{Deed, Error, Result};
 
 use crate::attest::ED25519;
 use crate::log::{self, Head};
@@ -154,6 +154,9 @@ impl Receipt {
 pub struct SignedHead {
     /// What is being vouched for.
     pub head: Head,
+    /// Hex SHA-256 of the bag's link sidecars, when this signature covers
+    /// them. A log head has none.
+    pub links: Option<String>,
     /// The verifying key, as 32 bytes.
     pub signer: [u8; 32],
     /// The signature over the covered bytes.
@@ -165,10 +168,18 @@ pub struct SignedHead {
 const HEAD_DOMAIN: &[u8] = b"deedar-head-v1";
 
 /// The bytes a head signature actually covers.
-fn head_message(head: &Head) -> Vec<u8> {
+///
+/// `links` is the hex digest from [`link_commitment`]. A log head has none:
+/// it is not a bag. A bag head has one, so the signature covers the
+/// `sources`, `supersedes` and `successor` files and not only the log root.
+fn head_message(head: &Head, links: Option<&str>) -> Vec<u8> {
     let mut message = Vec::from(HEAD_DOMAIN);
     message.push(0);
     message.extend_from_slice(format!("{} {}", head.size, head.root).as_bytes());
+    if let Some(links) = links {
+        message.push(0);
+        message.extend_from_slice(links.as_bytes());
+    }
     message
 }
 
@@ -176,9 +187,13 @@ impl SignedHead {
     /// The file a handover carries.
     #[must_use]
     pub fn render(&self) -> String {
+        let links = self
+            .links
+            .as_deref()
+            .map(|links| format!(" links={links}"))
+            .unwrap_or_default();
         format!(
-            "size={} root={} {ED25519} {} {}
-",
+            "size={} root={}{links} {ED25519} {} {}\n",
             self.head.size,
             self.head.root,
             log::hex(&self.signer),
@@ -191,22 +206,32 @@ impl SignedHead {
     /// # Errors
     ///
     /// Fails when the line is not a size, a root, this scheme, a 32 byte key
-    /// and a 64 byte signature.
+    /// and a 64 byte signature. `links=<hex>` may sit between the root and
+    /// the scheme; that is the bag's link-sidecar digest.
     pub fn parse(text: &str) -> Result<Self> {
-        let mut fields = text.split_whitespace();
-        let (Some(size), Some(root), Some(scheme), Some(key), Some(sig), None) = (
-            fields.next(),
-            fields.next(),
-            fields.next(),
-            fields.next(),
-            fields.next(),
-            fields.next(),
-        ) else {
-            return Err(Error::Evidence("head: not a signed head line".into()));
+        let fields: Vec<&str> = text.split_whitespace().collect();
+        let (size, root, links, scheme, key, sig) = match fields.as_slice() {
+            [size, root, scheme, key, sig] => (*size, *root, None, *scheme, *key, *sig),
+            [size, root, links, scheme, key, sig] => {
+                (*size, *root, Some(*links), *scheme, *key, *sig)
+            }
+            _ => return Err(Error::Evidence("head: not a signed head line".into())),
         };
         if scheme != ED25519 {
             return Err(Error::Evidence(format!("head: scheme {scheme:?}")));
         }
+        let links = match links {
+            Some(raw) => {
+                let hex = raw.strip_prefix("links=").ok_or_else(|| {
+                    Error::Evidence("head: expected links= between the root and the scheme".into())
+                })?;
+                if !crate::fs::is_sha256_hex(hex) {
+                    return Err(Error::Evidence("head: links is not a sha256 digest".into()));
+                }
+                Some(hex.to_string())
+            }
+            None => None,
+        };
         let size = size
             .strip_prefix("size=")
             .ok_or_else(|| Error::Evidence("head: no size".into()))?;
@@ -230,6 +255,7 @@ impl SignedHead {
                 size: number(size, "size")? as usize,
                 root: root.to_string(),
             },
+            links,
             signer,
             signature,
         })
@@ -248,7 +274,7 @@ impl SignedHead {
             .map_err(|_| Error::Evidence("head: not a verifying key".into()))?;
         ed25519_dalek::Verifier::verify(
             &key,
-            &head_message(&self.head),
+            &head_message(&self.head, self.links.as_deref()),
             &ed25519_dalek::Signature::from_bytes(&self.signature),
         )
         .map_err(|_| Error::Evidence("head: the signature does not cover this head".into()))?;
@@ -271,15 +297,25 @@ impl SignedHead {
 ///
 /// Fails when no signing key is configured.
 pub fn sign_head(head: &Head) -> Result<SignedHead> {
+    sign_head_covering(head, None)
+}
+
+/// Sign a head, optionally covering a bag's [`link_commitment`].
+///
+/// # Errors
+///
+/// Fails when no signing key is configured.
+pub(crate) fn sign_head_covering(head: &Head, links: Option<&str>) -> Result<SignedHead> {
     let key: ed25519_dalek::SigningKey = crate::host::load_signing_key()?.ok_or_else(|| {
         Error::Evidence(
             "no signing key: set DEEDAR_HOST_SIGNING_KEY to a 32 byte seed outside the store"
                 .into(),
         )
     })?;
-    let signature = ed25519_dalek::Signer::sign(&key, &head_message(head));
+    let signature = ed25519_dalek::Signer::sign(&key, &head_message(head, links));
     Ok(SignedHead {
         head: head.clone(),
+        links: links.map(str::to_string),
         signer: key.verifying_key().to_bytes(),
         signature: signature.to_bytes(),
     })
@@ -462,6 +498,9 @@ pub struct Handover {
     /// Whether that signer was on the reader's list, as opposed to merely
     /// being the one the file named.
     pub head_accepted: bool,
+    /// Whether the reader listed the keys it accepts. An import that waives
+    /// an unlisted signer checks again with no list, and keeps this set.
+    pub signers_listed: bool,
 }
 
 impl Handover {
@@ -484,6 +523,11 @@ impl Handover {
                     log::hex(&signer)
                 ));
             }
+            Some(signer) if self.signers_listed => out.push_str(&format!(
+                "head signed by {}, which is not a key this reader accepts, and it was taken as \
+                 unsigned, so every proof above is against a head this bag asserted about itself\n",
+                log::hex(&signer)
+            )),
             Some(signer) => out.push_str(&format!(
                 "head signed by {}, and no signer list was given, so this says the head and the \
                  signature go together and nothing about who made them\n",
@@ -504,6 +548,270 @@ pub fn head_beside(deeds: &Path) -> PathBuf {
     deeds.join("head")
 }
 
+/// Read a regular file, or `Ok(None)` when it is absent.
+///
+/// A symlink, fifo, or other non-regular file is refused. The open uses
+/// `O_NOFOLLOW` and `O_NONBLOCK`, so a file replaced by a symlink or a fifo
+/// between the type check and the read is not followed and does not block.
+pub(crate) fn read_regular_opt(path: &Path) -> Result<Option<Vec<u8>>> {
+    match std::fs::symlink_metadata(path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(Error::Io(format!("{}: {e}", path.display()))),
+        Ok(meta) if !meta.file_type().is_file() => {
+            return Err(Error::Evidence(format!(
+                "{}: not a regular file",
+                path.display()
+            )));
+        }
+        Ok(_) => {}
+    }
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut file = match std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(path)
+    {
+        Ok(file) => file,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) if e.raw_os_error() == Some(libc::ELOOP) => {
+            return Err(Error::Evidence(format!(
+                "{}: not a regular file",
+                path.display()
+            )));
+        }
+        Err(e) => return Err(Error::Io(format!("{}: {e}", path.display()))),
+    };
+    let meta = file
+        .metadata()
+        .map_err(|e| Error::Io(format!("{}: {e}", path.display())))?;
+    if !meta.file_type().is_file() {
+        return Err(Error::Evidence(format!(
+            "{}: not a regular file",
+            path.display()
+        )));
+    }
+    let mut bytes = Vec::new();
+    std::io::Read::read_to_end(&mut file, &mut bytes)
+        .map_err(|e| Error::Io(format!("{}: {e}", path.display())))?;
+    Ok(Some(bytes))
+}
+
+/// Deed folders in `root`, in name order. A symlink is refused rather than
+/// followed or skipped, and so is a fifo or anything else that is not a
+/// directory or a regular file.
+pub(crate) fn deed_folders(root: &Path) -> Result<Vec<PathBuf>> {
+    if !real_dir(root)? {
+        return Err(Error::Evidence(format!(
+            "{}: not a directory",
+            root.display()
+        )));
+    }
+    let mut folders = Vec::new();
+    for entry in std::fs::read_dir(root).map_err(|e| Error::Io(e.to_string()))? {
+        let path = entry.map_err(|e| Error::Io(e.to_string()))?.path();
+        let meta = std::fs::symlink_metadata(&path)
+            .map_err(|e| Error::Io(format!("{}: {e}", path.display())))?;
+        let kind = meta.file_type();
+        if kind.is_symlink() {
+            return Err(Error::Evidence(format!(
+                "{}: symlink in the deeds directory",
+                path.display()
+            )));
+        }
+        if kind.is_dir() {
+            folders.push(path);
+        } else if !kind.is_file() {
+            return Err(Error::Evidence(format!(
+                "{}: not a regular file",
+                path.display()
+            )));
+        }
+    }
+    folders.sort();
+    Ok(folders)
+}
+
+/// The product files under a deed folder's `bytes/`, in name order, and none
+/// when it has no `bytes/`. That has to be a real directory of regular
+/// files: a symlink is refused, not followed. The name is not checked
+/// here; [`product_bytes`] is what binds each file to its hash.
+pub(crate) fn product_files(folder: &Path) -> Result<Vec<PathBuf>> {
+    let dir = folder.join("bytes");
+    match std::fs::symlink_metadata(&dir) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(Error::Io(format!("{}: {e}", dir.display()))),
+        Ok(meta) if meta.file_type().is_dir() => {}
+        Ok(_) => {
+            return Err(Error::Evidence(format!(
+                "{}: not a directory",
+                dir.display()
+            )));
+        }
+    }
+    let mut files = Vec::new();
+    for entry in std::fs::read_dir(&dir).map_err(|e| Error::Io(e.to_string()))? {
+        let path = entry.map_err(|e| Error::Io(e.to_string()))?.path();
+        let meta = std::fs::symlink_metadata(&path)
+            .map_err(|e| Error::Io(format!("{}: {e}", path.display())))?;
+        if !meta.file_type().is_file() {
+            return Err(Error::Evidence(format!(
+                "{}: not a regular file",
+                path.display()
+            )));
+        }
+        files.push(path);
+    }
+    files.sort();
+    Ok(files)
+}
+
+/// Product bytes under `folder`'s `bytes/`, keyed by the sha256 each file
+/// hashes to.
+///
+/// The file's name is that hash. Contents that hash to something else are
+/// a different product than the bag claims, and a write-once path on
+/// `deed` with no file beside it is a product the bag does not carry.
+/// `check` and `import` both read through here, so one cannot accept bytes
+/// the other refuses. The refusal is the line import already printed.
+pub(crate) fn product_bytes(folder: &Path, deed: &Deed) -> Result<BTreeMap<String, Vec<u8>>> {
+    let id = deed.id.as_str();
+    let mut carried = BTreeMap::new();
+    for path in product_files(folder)? {
+        let file = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let raw = read_regular_opt(&path)?
+            .ok_or_else(|| Error::Evidence(format!("{}: not a regular file", path.display())))?;
+        let got = log::hex(&Sha256::digest(&raw));
+        if got != file {
+            return Err(Error::Evidence(format!(
+                "{id}: bytes/{file} hashes to sha256:{got}"
+            )));
+        }
+        carried.insert(got, raw);
+    }
+    for path in &deed.paths {
+        let hex = crate::fs::write_once_hex(path).ok_or_else(|| {
+            Error::Evidence(format!("{id}: path {} is not write-once", path.display()))
+        })?;
+        if !carried.contains_key(hex) {
+            return Err(Error::Evidence(format!(
+                "{id}: path sha256:{hex} has bytes in neither this handover nor this store"
+            )));
+        }
+    }
+    Ok(carried)
+}
+
+/// Whether `path` is a real directory. Absent is `Ok(false)`. A symlink is
+/// refused, including when the final component is `data/deeds`.
+fn real_dir(path: &Path) -> Result<bool> {
+    match std::fs::symlink_metadata(path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(Error::Io(format!("{}: {e}", path.display()))),
+        Ok(meta) if meta.file_type().is_symlink() => Err(Error::Evidence(format!(
+            "{}: symlink in the deeds directory",
+            path.display()
+        ))),
+        Ok(meta) if meta.file_type().is_dir() => Ok(true),
+        Ok(_) => Err(Error::Evidence(format!(
+            "{}: not a directory",
+            path.display()
+        ))),
+    }
+}
+
+/// Domain separation for the links transcript. The transcript before it had
+/// no tag, ended a folder name at a newline, and gave a missing sidecar the
+/// length of an empty one, so two bags could share it. A head over that
+/// transcript is refused.
+const LINKS_DOMAIN: &[u8] = b"deedar-links-v2";
+
+/// Hex SHA-256 of the link sidecars under a deeds directory.
+///
+/// The transcript is `deedar-links-v2` and a zero byte, then each deed folder
+/// in byte order of the names: `<len>\n<name>`, then for `sources`,
+/// `supersedes` and `successor` in that order `<kind>\n` followed by `-\n`
+/// when the file is absent or `<len>\n<bytes>` when it is present. Every
+/// field is framed, so other folders or other files make another transcript.
+/// A symlink or other non-regular file is refused, not read.
+///
+/// This is what a bag's head signature covers beyond the log root. The
+/// receipt does not: a file edited after export still sits beside a proof
+/// that checks, until this digest is checked against the signature. An
+/// unsigned head has no signature, so it does not authenticate these files.
+pub(crate) fn link_commitment(root: &Path) -> Result<String> {
+    let mut transcript = Vec::from(LINKS_DOMAIN);
+    transcript.push(0);
+    for folder in deed_folders(root)? {
+        let name = folder
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| {
+                Error::Evidence(format!(
+                    "{}: deed folder name is not utf-8",
+                    folder.display()
+                ))
+            })?;
+        transcript.extend_from_slice(format!("{}\n", name.len()).as_bytes());
+        transcript.extend_from_slice(name.as_bytes());
+        for kind in ["sources", "supersedes", "successor"] {
+            transcript.extend_from_slice(kind.as_bytes());
+            transcript.push(b'\n');
+            match read_regular_opt(&folder.join(kind))? {
+                None => transcript.extend_from_slice(b"-\n"),
+                Some(bytes) => {
+                    transcript.extend_from_slice(format!("{}\n", bytes.len()).as_bytes());
+                    transcript.extend_from_slice(&bytes);
+                }
+            }
+        }
+    }
+    Ok(log::hex(&Sha256::digest(&transcript)))
+}
+
+/// Whether `signed` covers the link sidecars actually in `root`.
+///
+/// A signature with no link digest covers a bag that carries none of them.
+/// One that names a digest has to name this directory's.
+pub(crate) fn links_bound(root: &Path, signed: &SignedHead) -> Result<()> {
+    match &signed.links {
+        Some(links) => {
+            let got = link_commitment(root)?;
+            if got != *links {
+                return Err(Error::Evidence(
+                    "the head signature does not cover the link sidecars in this bag as \
+                     deedar-links-v2 frames them; a head signed over the earlier transcript is \
+                     refused too, and exporting the bag again writes this one"
+                        .into(),
+                ));
+            }
+            Ok(())
+        }
+        None if link_sidecars_present(root)? => Err(Error::Evidence(
+            "this bag carries source or supersede sidecars that the head signature does not cover"
+                .into(),
+        )),
+        None => Ok(()),
+    }
+}
+
+fn link_sidecars_present(root: &Path) -> Result<bool> {
+    for folder in deed_folders(root)? {
+        for kind in ["sources", "supersedes", "successor"] {
+            match std::fs::symlink_metadata(folder.join(kind)) {
+                Ok(_) => return Ok(true),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => {
+                    return Err(Error::Io(format!("{}: {e}", folder.join(kind).display())));
+                }
+            }
+        }
+    }
+    Ok(false)
+}
+
 /// Check every deed a handover carried, given the bag or the deeds directory.
 ///
 /// Every receipt has to name the same head, so the receiver has one thing to
@@ -512,23 +820,18 @@ pub fn head_beside(deeds: &Path) -> PathBuf {
 /// # Errors
 ///
 /// Fails when a deed carries no receipt, when bytes and digest disagree, when
-/// a path does not reach the head, or when the receipts disagree about which
-/// head they are against.
+/// a product file does not hash to its name or a deed path has no such file,
+/// when a path does not reach the head, or when the receipts disagree about
+/// which head they are against.
 pub fn check_handover(dir: &Path, accept: &BTreeSet<[u8; 32]>) -> Result<Handover> {
-    let root = deeds_in(dir).ok_or_else(|| {
+    let root = deeds_in(dir)?.ok_or_else(|| {
         Error::Evidence(format!(
             "{}: no deeds here and none under data/deeds",
             dir.display()
         ))
     })?;
 
-    let mut folders: Vec<PathBuf> = std::fs::read_dir(&root)
-        .map_err(|e| Error::Io(e.to_string()))?
-        .filter_map(std::result::Result::ok)
-        .map(|entry| entry.path())
-        .filter(|path| path.is_dir())
-        .collect();
-    folders.sort();
+    let folders = deed_folders(&root)?;
 
     let mut proven = Vec::new();
     let mut head: Option<Head> = None;
@@ -538,12 +841,25 @@ pub fn check_handover(dir: &Path, accept: &BTreeSet<[u8; 32]>) -> Result<Handove
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
-        let Ok(text) = std::fs::read_to_string(folder.join("proof.txt")) else {
-            wrong.push(format!(
-                "{name}: no proof.txt, so nothing says this deed was logged before it was handed \
-                 over"
-            ));
-            continue;
+        let text = match read_regular_opt(&folder.join("proof.txt")) {
+            Ok(Some(bytes)) => match String::from_utf8(bytes) {
+                Ok(text) => text,
+                Err(_) => {
+                    wrong.push(format!("{name}: proof.txt is not text"));
+                    continue;
+                }
+            },
+            Ok(None) => {
+                wrong.push(format!(
+                    "{name}: no proof.txt, so nothing says this deed was logged before it was \
+                     handed over"
+                ));
+                continue;
+            }
+            Err(e) => {
+                wrong.push(said(&e));
+                continue;
+            }
         };
         let receipt = match Receipt::parse(&text) {
             Ok(receipt) => receipt,
@@ -552,11 +868,33 @@ pub fn check_handover(dir: &Path, accept: &BTreeSet<[u8; 32]>) -> Result<Handove
                 continue;
             }
         };
-        let Ok(bytes) = std::fs::read(folder.join("deed.bin")) else {
-            wrong.push(format!("{name}: a receipt with no deed.bin beside it"));
-            continue;
+        let bytes = match read_regular_opt(&folder.join("deed.bin")) {
+            Ok(Some(bytes)) => bytes,
+            Ok(None) => {
+                wrong.push(format!("{name}: a receipt with no deed.bin beside it"));
+                continue;
+            }
+            Err(e) => {
+                wrong.push(said(&e));
+                continue;
+            }
         };
         if let Err(e) = receipt.check(&bytes) {
+            wrong.push(said(&e));
+            continue;
+        }
+        let deed = match crate::wire::deed_from_bytes(&bytes) {
+            Ok(deed) => deed,
+            Err(e) => {
+                wrong.push(format!("{name}: {}", said(&e)));
+                continue;
+            }
+        };
+        if let Err(e) = named_for(&folder, &receipt.id, deed.id.as_str()) {
+            wrong.push(format!("{name}: {}", said(&e)));
+            continue;
+        }
+        if let Err(e) = product_bytes(&folder, &deed) {
             wrong.push(said(&e));
             continue;
         }
@@ -579,7 +917,21 @@ pub fn check_handover(dir: &Path, accept: &BTreeSet<[u8; 32]>) -> Result<Handove
     // against.
     let mut head_signer = None;
     let mut head_accepted = false;
-    if let Ok(text) = std::fs::read_to_string(head_beside(&root)) {
+    let head_text = match read_regular_opt(&head_beside(&root)) {
+        Ok(Some(bytes)) => match String::from_utf8(bytes) {
+            Ok(text) => Some(text),
+            Err(_) => {
+                wrong.push("head: not text".into());
+                None
+            }
+        },
+        Ok(None) => None,
+        Err(e) => {
+            wrong.push(said(&e));
+            None
+        }
+    };
+    if let Some(text) = head_text {
         match SignedHead::parse(&text).and_then(|signed| {
             let accepted = signed.check(accept)?;
             Ok((signed, accepted))
@@ -592,6 +944,9 @@ pub fn check_handover(dir: &Path, accept: &BTreeSet<[u8; 32]>) -> Result<Handove
                         signed.head.size,
                         head.as_ref().map_or(0, |held| held.size)
                     ));
+                }
+                if let Err(e) = links_bound(&root, &signed) {
+                    wrong.push(said(&e));
                 }
                 head_signer = Some(signed.signer);
                 head_accepted = accepted;
@@ -607,6 +962,7 @@ pub fn check_handover(dir: &Path, accept: &BTreeSet<[u8; 32]>) -> Result<Handove
             head,
             head_signer,
             head_accepted,
+            signers_listed: !accept.is_empty(),
         })
     } else {
         Err(Error::Evidence(format!(
@@ -616,9 +972,38 @@ pub fn check_handover(dir: &Path, accept: &BTreeSet<[u8; 32]>) -> Result<Handove
     }
 }
 
+/// Whether a deed folder is named for the deed it holds. The head signature
+/// binds each folder's link sidecars to the folder's name, so another deed's
+/// `deed.bin` and `proof.txt` moved into the folder would take those links.
+///
+/// # Errors
+///
+/// Fails when the name is not an accession, or `deed.bin` or `proof.txt`
+/// names another one.
+pub(crate) fn named_for(folder: &Path, proof_id: &str, deed_id: &str) -> Result<()> {
+    let name = folder
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    if deed::DeedId::parse(&name).is_err() {
+        return Err(Error::Evidence(
+            "the folder name is not an accession, and a deed folder has to be named for the \
+             deed it holds"
+                .into(),
+        ));
+    }
+    if name != proof_id || name != deed_id {
+        return Err(Error::Evidence(format!(
+            "deed.bin is {deed_id} and proof.txt is {proof_id}, and a deed folder has to be \
+             named for the deed it holds"
+        )));
+    }
+    Ok(())
+}
+
 /// One complaint's text, without the `evidence:` prefix the heading already
 /// supplies.
-fn said(e: &Error) -> String {
+pub(crate) fn said(e: &Error) -> String {
     match e {
         Error::Evidence(text) | Error::Io(text) => text.clone(),
         other => other.to_string(),
@@ -626,12 +1011,18 @@ fn said(e: &Error) -> String {
 }
 
 /// Where the deeds are, given either the bag or the directory inside it.
-fn deeds_in(dir: &Path) -> Option<PathBuf> {
+///
+/// A symlink at `data/deeds`, or a symlink passed as the deeds directory, is
+/// refused. Falling through to the parent would hide it.
+pub(crate) fn deeds_in(dir: &Path) -> Result<Option<PathBuf>> {
     let nested = dir.join("data").join("deeds");
-    if nested.is_dir() {
-        return Some(nested);
+    if real_dir(&nested)? {
+        return Ok(Some(nested));
     }
-    dir.is_dir().then(|| dir.to_path_buf())
+    if real_dir(dir)? {
+        return Ok(Some(dir.to_path_buf()));
+    }
+    Ok(None)
 }
 
 fn head(value: &str) -> Result<Head> {
@@ -657,15 +1048,35 @@ mod tests {
     fn entries(n: usize) -> Vec<log::Entry> {
         (0..n)
             .map(|i| log::Entry {
-                id: format!("deed-thing-{i}"),
+                id: format!("deed-quote-thing{i}"),
                 digest: format!("sha256:{}", log::hex(&Sha256::digest(body(i)))),
                 unix_time: 1_700_000_000 + i as u64,
             })
             .collect()
     }
 
+    /// The canonical bytes of deed `i`, as its `deed.bin` carries them.
     fn body(i: usize) -> Vec<u8> {
-        format!("the bytes of deed {i}").into_bytes()
+        let excerpt = format!("the bytes of deed {i}");
+        let deed = deed::Deed::from_draft(deed::Draft {
+            id: Some(deed::DeedId::parse(&format!("deed-quote-thing{i}")).expect("id")),
+            name: format!("thing {i}"),
+            sources: Vec::new(),
+            produced_by: deed::ProducedBy {
+                agent_id: "reader".into(),
+                activity_id: None,
+            },
+            grants: Vec::new(),
+            body: deed::Body::Quote {
+                edition: "https://example.invalid/a".into(),
+                start: 0,
+                end: excerpt.len() as u64,
+                excerpt,
+                urls: vec!["https://example.invalid/a".into()],
+            },
+        })
+        .expect("deed");
+        crate::wire::deed_bytes(&deed)
     }
 
     fn receipt_for(all: &[log::Entry], at: usize) -> Receipt {
@@ -757,6 +1168,84 @@ mod tests {
         assert!(format!("{err}").contains("dropped or rewritten"), "{err}");
     }
 
+    /// The bytes a producer hashes and signs for `links=`.
+    #[test]
+    fn the_link_commitment_is_the_transcript_a_producer_signs() {
+        let root = tempfile::tempdir().unwrap();
+        let folder = root.path().join("deed-quote-a");
+        std::fs::create_dir(&folder).unwrap();
+        let supersedes = b"deed-quote-v1\nsha256:abababababababababababababababababababababababababababababababab\n";
+        std::fs::write(folder.join("supersedes"), supersedes).unwrap();
+
+        let mut transcript = b"deedar-links-v2\0".to_vec();
+        transcript.extend_from_slice(b"12\ndeed-quote-a");
+        transcript.extend_from_slice(b"sources\n-\n");
+        transcript.extend_from_slice(b"supersedes\n");
+        transcript.extend_from_slice(format!("{}\n", supersedes.len()).as_bytes());
+        transcript.extend_from_slice(supersedes);
+        transcript.extend_from_slice(b"successor\n-\n");
+        let want = log::hex(&Sha256::digest(&transcript));
+        assert_eq!(link_commitment(root.path()).unwrap(), want);
+
+        let head = Head {
+            size: 2,
+            root: "cd".repeat(32),
+        };
+        let mut message = b"deedar-head-v1".to_vec();
+        message.push(0);
+        message.extend_from_slice(format!("2 {}", "cd".repeat(32)).as_bytes());
+        message.push(0);
+        message.extend_from_slice(want.as_bytes());
+        assert_eq!(head_message(&head, Some(&want)), message);
+
+        message.truncate(message.len() - 1 - want.len());
+        assert_eq!(head_message(&head, None), message);
+    }
+
+    /// One folder name cannot stand for two folders, and a missing sidecar
+    /// is not an empty one. A head over the transcript before
+    /// `deedar-links-v2`, which allowed both, is refused.
+    #[test]
+    fn the_link_transcript_tells_bags_apart() {
+        let links = |folders: &[&str], files: &[&str]| {
+            let root = tempfile::tempdir().unwrap();
+            for name in folders {
+                std::fs::create_dir(root.path().join(name)).unwrap();
+            }
+            for file in files {
+                std::fs::write(root.path().join(file), b"").unwrap();
+            }
+            (link_commitment(root.path()).unwrap(), root)
+        };
+        let (two, _) = links(&["deed-quote-a", "deed-quote-b"], &[]);
+        let crafted = "deed-quote-a\nsources\n0\nsupersedes\n0\nsuccessor\n0\ndeed-quote-b";
+        let (one, _) = links(&[crafted], &[]);
+        assert_ne!(one, two, "one folder name stood for two folders");
+        let (missing, bare) = links(&["deed-quote-a"], &[]);
+        let (empty, _) = links(&["deed-quote-a"], &["deed-quote-a/supersedes"]);
+        assert_ne!(missing, empty, "an empty sidecar passed for a missing one");
+
+        let earlier = b"deed-quote-a\nsources\n0\nsupersedes\n0\nsuccessor\n0\n";
+        let earlier = log::hex(&Sha256::digest(earlier));
+        let key = ed25519_dalek::SigningKey::from_bytes(&[5u8; 32]);
+        let head = Head {
+            size: 1,
+            root: "ab".repeat(32),
+        };
+        let signature = ed25519_dalek::Signer::sign(&key, &head_message(&head, Some(&earlier)));
+        let signed = SignedHead {
+            head,
+            links: Some(earlier),
+            signer: key.verifying_key().to_bytes(),
+            signature: signature.to_bytes(),
+        };
+        signed
+            .check(&BTreeSet::new())
+            .expect("the signature verifies");
+        let err = links_bound(bare.path(), &signed).expect_err("the earlier transcript passed");
+        assert!(format!("{err}").contains("deedar-links-v2"), "{err}");
+    }
+
     /// The report distinguishes an unsigned head, a named signer, and an
     /// accepted one.
     #[test]
@@ -769,6 +1258,7 @@ mod tests {
             }),
             head_signer: None,
             head_accepted: false,
+            signers_listed: false,
         };
         let said = done.render();
         assert!(said.contains("the head is unsigned"), "{said}");
@@ -780,6 +1270,14 @@ mod tests {
         };
         let said = named.render();
         assert!(said.contains("nothing about who made them"), "{said}");
+
+        let waived = Handover {
+            signers_listed: true,
+            ..named.clone()
+        };
+        let said = waived.render();
+        assert!(!said.contains("no signer list"), "{said}");
+        assert!(said.contains("not a key this reader accepts"), "{said}");
 
         let accepted = Handover {
             head_accepted: true,
@@ -799,8 +1297,9 @@ mod tests {
         };
         let signed = SignedHead {
             head: head.clone(),
+            links: None,
             signer: key.verifying_key().to_bytes(),
-            signature: ed25519_dalek::Signer::sign(&key, &head_message(&head)).to_bytes(),
+            signature: ed25519_dalek::Signer::sign(&key, &head_message(&head, None)).to_bytes(),
         };
         // Through the file, since the file is what travels.
         let read = SignedHead::parse(&signed.render()).expect("round trips");
@@ -837,7 +1336,10 @@ mod tests {
 
         // And it is domain separated from the manifest signature, so one
         // cannot be presented as the other.
-        assert_ne!(head_message(&head), crate::vouch::covered_for_test(b"x"));
+        assert_ne!(
+            head_message(&head, None),
+            crate::vouch::covered_for_test(b"x")
+        );
     }
 
     /// A handover fails whole: on a deed with no receipt, and on a receipt

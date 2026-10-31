@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -19,13 +20,13 @@ pub struct Exporter<'a> {
     tree: std::sync::Arc<LogTree>,
 }
 
-/// The log as a tree: entries, leaf hashes, the head, its signature when there
-/// is one, and each accession's index.
+/// The log as a tree: entries, leaf hashes, the head, and each accession's
+/// index. The bag's signed head is written per export, because it also covers
+/// the link sidecars in that directory.
 pub struct LogTree {
     entries: Vec<crate::log::Entry>,
     leaves: Vec<[u8; 32]>,
     head: crate::log::Head,
-    signed: Option<crate::receipt::SignedHead>,
     position: std::collections::HashMap<String, usize>,
 }
 
@@ -61,13 +62,14 @@ impl Exporter<'_> {
         })
     }
 
-    /// Write one deed into a satchel: bytes, evidence, sidecar, receipt, and
-    /// the signed head when there is one.
+    /// Write one deed into a satchel: its canonical bytes, evidence, sidecar,
+    /// product bytes under `bytes/`, supersede links, the receipt, and the
+    /// signed head when there is one.
     ///
     /// # Errors
     ///
-    /// Fails when the deed is absent, the log has no entry for it, or `into`
-    /// cannot be written.
+    /// Fails when the deed is absent, the log has no entry for it, a product
+    /// path has no bytes here, or `into` cannot be written.
     pub fn export(&self, id: &DeedId, into: &Path) -> Result<Vec<PathBuf>> {
         let deed = self.store.get(id)?;
         let (out, mut written) = self.store.export_files(id, into, &deed)?;
@@ -77,7 +79,11 @@ impl Exporter<'_> {
         atomic_write(&path, receipt.render().as_bytes())?;
         written.push(path);
 
-        if let Some(signed) = &self.tree.signed {
+        // The signature covers this directory's link sidecars, so it is
+        // rewritten after every deed: the set it names is the set on disk.
+        if crate::host::load_signing_key()?.is_some() {
+            let links = crate::receipt::link_commitment(into)?;
+            let signed = crate::receipt::sign_head_covering(&self.tree.head, Some(&links))?;
             let path = crate::receipt::head_beside(into);
             atomic_write(&path, signed.render().as_bytes())?;
             written.push(path);
@@ -193,6 +199,11 @@ impl FsStore {
 
     pub fn dir(&self) -> &Path {
         &self.dir
+    }
+
+    /// What this store's layout accepts.
+    pub(crate) fn policy(&self) -> &crate::attest::Policy {
+        &self.policy
     }
 
     /// The public half of the host signing key, as `ed25519:<hex>`, when the
@@ -382,7 +393,7 @@ impl FsStore {
     }
 
     /// Add one deed to the append-only log.
-    fn append_log(&self, deed: &Deed, unix_time: u64) -> Result<()> {
+    pub(crate) fn append_log(&self, deed: &Deed, unix_time: u64) -> Result<()> {
         let entry = crate::log::Entry {
             id: deed.id.to_string(),
             digest: crate::digest::deed_digest(deed),
@@ -643,10 +654,6 @@ impl FsStore {
             .map(|e| crate::log::leaf_hash(&e.material()))
             .collect();
         let head = crate::log::Head::over(&leaves);
-        let signed = match crate::host::load_signing_key()? {
-            Some(_) => Some(crate::receipt::sign_head(&head)?),
-            None => None,
-        };
         let position: std::collections::HashMap<String, usize> = entries
             .iter()
             .enumerate()
@@ -658,7 +665,6 @@ impl FsStore {
                 entries,
                 leaves,
                 head,
-                signed,
                 position,
             }),
         })
@@ -689,6 +695,70 @@ impl FsStore {
         if let Ok(raw) = fs::read(crate::host::sidecar(&self.dir, id)) {
             let path = out.join("host");
             atomic_write(&path, &raw)?;
+            written.push(path);
+        }
+        for path in &deed.paths {
+            let hex = write_once_hex(path).ok_or_else(|| {
+                Error::Evidence(format!("{id}: path {} is not write-once", path.display()))
+            })?;
+            let raw = fs::read(self.dir.join("bytes").join(hex)).map_err(|_| {
+                Error::Evidence(format!(
+                    "{id}: path sha256:{hex} has no bytes in this store to hand over"
+                ))
+            })?;
+            let digest = hex_encode(&Sha256::digest(&raw));
+            if digest != hex {
+                return Err(Error::Evidence(format!("path sha256:{hex} does not match")));
+            }
+            let dir = out.join("bytes");
+            fs::create_dir_all(&dir).map_err(|e| Error::Io(e.to_string()))?;
+            let path = dir.join(hex);
+            atomic_write(&path, &raw)?;
+            written.push(path);
+        }
+        if let Some(link) = read_supersedes(&self.supersedes_path(id))? {
+            let digest = match &link.digest {
+                Some(bound) => {
+                    if self.deed_path(&link.id).exists() {
+                        let held = self.deed_digest_in_store(&link.id)?;
+                        if held != *bound {
+                            return Err(Error::Evidence(format!(
+                                "{id}: supersedes {} as {bound}, and this store holds it as {held}",
+                                link.id
+                            )));
+                        }
+                    }
+                    bound.clone()
+                }
+                None => self.deed_digest_in_store(&link.id)?,
+            };
+            let path = out.join("supersedes");
+            atomic_write(&path, format!("{}\n{digest}\n", link.id).as_bytes())?;
+            written.push(path);
+        }
+        // Only a successor `current` would step to: one tombstoned here
+        // cannot be exported, and a receiver would refuse a bag that names it.
+        if let Some(next) = self.next_tip(id)? {
+            let digest = self.deed_digest_in_store(&next)?;
+            let path = out.join("successor");
+            atomic_write(&path, format!("{next}\n{digest}\n").as_bytes())?;
+            written.push(path);
+        }
+        let trail = self.trail(id)?;
+        let mut source_digests = BTreeMap::new();
+        for source in trail.into_iter().skip(1) {
+            source_digests.insert(source.id.to_string(), crate::digest::deed_digest(&source));
+        }
+        if !source_digests.is_empty() {
+            let mut sidecar = String::new();
+            for (source, digest) in source_digests {
+                sidecar.push_str(&source);
+                sidecar.push('\t');
+                sidecar.push_str(&digest);
+                sidecar.push('\n');
+            }
+            let path = out.join("sources");
+            atomic_write(&path, sidecar.as_bytes())?;
             written.push(path);
         }
         Ok((out, written))
@@ -791,7 +861,7 @@ impl FsStore {
         tip.ok_or_else(|| Error::Evidence("trail missing tip".into()))
     }
 
-    fn evidence_local(&self, deed: &Deed) -> Result<Evidence> {
+    pub(crate) fn evidence_local(&self, deed: &Deed) -> Result<Evidence> {
         let ev = self.load_evidence(&deed.id)?;
         self.check_paths(deed)?;
         self.check_signature(deed, &ev)?;
@@ -815,9 +885,22 @@ impl FsStore {
         }
     }
 
+    pub(crate) fn deed_digest_in_store(&self, id: &DeedId) -> Result<String> {
+        let bytes = fs::read(self.deed_path(id)).map_err(|_| Error::NotFound(id.to_string()))?;
+        match wire::decode_response(&bytes)? {
+            Response::Deed(d) => {
+                if d.id != *id {
+                    return Err(Error::Decode(format!("accession {id} holds {}", d.id)));
+                }
+                Ok(crate::digest::deed_digest(&d))
+            }
+            _ => Err(Error::Decode("expected deed frame".into())),
+        }
+    }
+
     fn check_paths(&self, deed: &Deed) -> Result<()> {
         for path in &deed.paths {
-            let Some(hex) = path.to_str().and_then(|s| s.strip_prefix("sha256:")) else {
+            let Some(hex) = write_once_hex(path) else {
                 return Err(Error::Evidence(format!(
                     "path {} is not write-once",
                     path.display()
@@ -847,17 +930,30 @@ impl FsStore {
     /// it: a verifier that can mint cannot attest.
     fn check_host(&self, deed: &Deed, ev: &Evidence) -> Result<()> {
         let path = crate::host::sidecar(&self.dir, &deed.id);
-        let present = path.exists();
-        if !present {
+        let sidecar = if path.exists() {
+            Some(fs::read(&path).map_err(|e| Error::Io(e.to_string()))?)
+        } else {
+            None
+        };
+        self.check_host_sidecar(deed, ev, sidecar.as_deref())
+    }
+
+    /// [`Self::check_host`] over sidecar bytes in hand rather than on disk.
+    pub(crate) fn check_host_sidecar(
+        &self,
+        deed: &Deed,
+        ev: &Evidence,
+        sidecar: Option<&[u8]>,
+    ) -> Result<()> {
+        let Some(bytes) = sidecar else {
             return if self.policy.permits_unattested() && self.host_key.is_none() {
                 Ok(())
             } else {
                 Err(Error::Evidence("host sidecar".into()))
             };
-        }
-        let bytes = fs::read(&path).map_err(|e| Error::Io(e.to_string()))?;
+        };
         let deed_bytes = wire::deed_bytes(deed);
-        match crate::host::read_sidecar(&bytes) {
+        match crate::host::read_sidecar(bytes) {
             Some(crate::host::Sidecar::Signature(signature)) => crate::host::verify_ed25519(
                 &self.policy.signers,
                 &deed_bytes,
@@ -892,6 +988,12 @@ impl FsStore {
                 continue;
             }
             if path.to_str().is_some_and(|s| s.starts_with("sha256:")) {
+                if write_once_hex(&path).is_none() {
+                    return Err(Error::InvalidBody(format!(
+                        "path {} is not write-once",
+                        path.display()
+                    )));
+                }
                 continue;
             }
             let addr = self.ingest_path(&path)?;
@@ -919,6 +1021,11 @@ impl FsStore {
             .duration_since(UNIX_EPOCH)
             .map_err(|e| Error::Io(e.to_string()))?
             .as_secs();
+        self.evidence_at(deed, unix_time)
+    }
+
+    /// Evidence for `deed` under this store's `writer.key`, at `unix_time`.
+    pub(crate) fn evidence_at(&self, deed: &Deed, unix_time: u64) -> Result<Evidence> {
         let mut mac =
             HmacSha256::new_from_slice(&self.key).map_err(|e| Error::Io(e.to_string()))?;
         mac.update(&wire::deed_bytes(deed));
@@ -937,7 +1044,7 @@ impl FsStore {
         self.dir.join("deeds").join(format!("{id}.cap"))
     }
 
-    fn evidence_path(&self, id: &DeedId) -> PathBuf {
+    pub(crate) fn evidence_path(&self, id: &DeedId) -> PathBuf {
         self.dir.join("deeds").join(format!("{id}.evidence"))
     }
 
@@ -1002,9 +1109,7 @@ fn hex_encode(bytes: &[u8]) -> String {
 }
 
 pub fn is_write_once_addr(path: impl AsRef<Path>) -> bool {
-    path.as_ref()
-        .to_str()
-        .is_some_and(|s| s.starts_with("sha256:"))
+    write_once_hex(path.as_ref()).is_some()
 }
 
 /// An advisory exclusive lock on `file`, released when the handle closes.
@@ -1021,4 +1126,57 @@ fn lock_exclusive(file: &fs::File) -> Result<()> {
 /// Whether `dir` is absent or holds no entries.
 fn dir_is_empty(dir: &Path) -> bool {
     fs::read_dir(dir).map_or(true, |mut entries| entries.next().is_none())
+}
+
+pub(crate) fn is_sha256_hex(hex: &str) -> bool {
+    hex.len() == 64 && hex.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+pub(crate) fn write_once_hex(path: &Path) -> Option<&str> {
+    path.to_str()?
+        .strip_prefix("sha256:")
+        .filter(|hex| is_sha256_hex(hex))
+}
+
+pub(crate) struct SupersedesLink {
+    pub id: DeedId,
+    /// Bound digest, when the sidecar carries one. A create writes the id
+    /// alone; an import keeps the digest the bag named.
+    pub digest: Option<String>,
+}
+
+/// Read `{id}.supersedes`. The first line is the accession. A second line, when
+/// present, is the `sha256:` digest that accession was bound to.
+pub(crate) fn read_supersedes(path: &Path) -> Result<Option<SupersedesLink>> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    let raw = fs::read_to_string(path).map_err(|e| Error::Io(e.to_string()))?;
+    let mut lines = raw.lines().map(str::trim).filter(|line| !line.is_empty());
+    let Some(id) = lines.next() else {
+        return Ok(None);
+    };
+    let digest = match lines.next() {
+        Some(raw) => {
+            let hex = raw.strip_prefix("sha256:").filter(|hex| is_sha256_hex(hex));
+            let Some(hex) = hex else {
+                return Err(Error::Evidence(format!(
+                    "{}: digest is not sha256",
+                    path.display()
+                )));
+            };
+            Some(format!("sha256:{hex}"))
+        }
+        None => None,
+    };
+    if lines.next().is_some() {
+        return Err(Error::Evidence(format!(
+            "{}: expected an id and an optional digest",
+            path.display()
+        )));
+    }
+    Ok(Some(SupersedesLink {
+        id: DeedId::parse(id)?,
+        digest,
+    }))
 }

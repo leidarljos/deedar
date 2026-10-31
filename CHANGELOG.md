@@ -4,6 +4,75 @@ Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
 
 ## 0.5.0 (2026-10-26)
 
+- `deedar check` refuses a `bytes/<sha256>` file that does not hash to
+  its name, and a deed path whose digest has no file there. Check only
+  required those files to be regular, so a tampered bag passed `check`
+  and failed `import`. Both now share one function, and the refusal is
+  the line import already printed.
+- `deedar import BAG` checks a handover, then holds each deed in this
+  store: its record, product bytes and supersede links, and a log entry
+  with the digest and time from its receipt. Evidence is issued again
+  under this store's `writer.key` at the receipt's time, a copied host
+  signature is kept, and the receipt and its head stay beside the deed
+  as `deeds/ID.proof` and `deeds/ID.head`. Every deed is checked before
+  anything is written, so a frozen, tombstoned or differently logged
+  accession, or a source or successor neither side has, writes nothing.
+  The head has to be signed by a key the layout lists.
+  `--allow-unsigned-head` takes a head that is not, whether the
+  signature is missing or by some other key. Deleting `head` is that
+  same case. `attestation = required` refuses both, and `deedar check`
+  still refuses a signer it was not given. Importing the same bag
+  again writes nothing. A receipt already kept stays against the head
+  it names: a later bag is not refused for carrying a grown head, and
+  a missing head is filled only from that same head. A proof this
+  store does not have yet is written with its head together. A link
+  that names a deed the bag also carries has to name that deed's
+  receipt digest. The imported supersedes file keeps the digest, so a
+  later copy of that prior with other bytes is refused. A symlink,
+  fifo, or other non-regular file in the bag is refused.
+- Supersede links in a bag name the linked deed's digest as well as
+  its accession. Import checks a local deed with that id before
+  writing the sidecar. A tombstoned local deed does not gain a
+  successor sidecar, and a source digest carried with a deed is
+  checked before a local source is accepted. Exporting a revision
+  names the stored digest when the prior deed is absent.
+- `deedar export` writes each product path's bytes into the deed's
+  folder as `bytes/<sha256>`, and its `sources`, `supersedes` and
+  `successor` beside them. The reference listed bytes and no bag
+  carried them, so a file deed arrived without its product, and a
+  revision without the chain `current` walks. The signed head covers
+  those three sidecars as well as the log root. An unsigned head does
+  not. A successor `current` would not step to, such as a tombstoned
+  one, is left out.
+- A `sha256:` path is accepted only when the suffix is 64 lowercase
+  hex digits. `create`, `export`, `leave` and `evidence` refuse any
+  other suffix, so `sha256:../planted` is neither read nor written.
+- `check` and `import` refuse a deed folder whose name is not the
+  accession in its `deed.bin` and `proof.txt`. The head signs each
+  folder's links under the folder's name, so another deed's files moved
+  into a revision's folder kept the signature, and `current` of the
+  revision's prior stepped to that deed.
+- The `links=` digest a bag's head signs is over the `deedar-links-v2`
+  transcript, which gives each folder name its length and marks an
+  absent sidecar apart from an empty one. One crafted folder name could
+  stand for two folders, and `check` took an empty sidecar that import
+  refused. A head over the earlier transcript is refused. No release
+  wrote one.
+- A second bag of the same log head imports beside a deed kept from the
+  first. The two bags sign other links, so their head lines differ, and
+  import refused the second with `this store kept another head`. A kept
+  head that names the kept proof's size and root is left as it is.
+- `check` refuses a symlink at or under a deed's `bytes/`, as import
+  does. It never opened `bytes/`, so a bag that import refused passed
+  `check`.
+- A test imports over a supersedes file that holds only the accession
+  and requires the digest to be added. That upgrade had no test.
+- The `sha256:../planted` export test requires that no file the export
+  left behind holds the planted bytes, as well as the refusal.
+- When `--allow-unsigned-head` takes a head signed by a key the layout
+  does not list, the import report says that key is not one this store
+  accepts and that the head was taken as unsigned. It said no signer
+  list was given. `Handover` gains `signers_listed`.
 - Each release archive gets a GitHub build attestation from the release workflow, so `gh attestation verify` and the ljos installer can check that this repository built it. Releases before this one have none, and the installer counts them as not published.
 - `deedar create` run again with the same bytes and flags prints the deed
   it froze and exits 0, and writes nothing. It exited 1 with `deed

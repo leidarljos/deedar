@@ -18,6 +18,7 @@ Verb                                                                            
 ``leave ID``                                                                        a left-behind marker for a deed that moved store
 ``timestamp ID``                                                                    a timestamp token over the deed
 ``export --into DIR ID... \vert -``                                                 deed, bytes, evidence, receipt (and signed head) into a satchel
+``import DIR [--allow-unsigned-head]``                                              check a satchel, then hold its deeds here with the receipt fields they travelled with and evidence under this store's key; writes nothing unless every deed can be held. ``--allow-unsigned-head`` waives missing or unlisted signature, and a store that says ``attestation = required`` refuses it anyway
 ``check DIR [--since KEPT] [--bridge FILE] [--keep FILE]``                          every receipt against the head in the bag; with ``--since``, that the bag's bridge (``bridge.txt``) grows the head you kept into this one; ``--keep`` records this head. ``--keep`` is available from the next release, not in 0.4.0
 ``log head \vert list \vert audit \vert backfill \vert prove ID \vert bridge SIZE`` the append-only log
 ``vouch sign FILE \vert check FILE``                                                a detached Ed25519 signature beside a file
@@ -62,7 +63,85 @@ The store
 
 A directory with ``bytes/`` (content-addressed), ``deeds/`` (canonical
 records), ``log`` (one entry a line: content address, time), ``layout``
-(version, attestation policy, accepted signers), and ``writer.key``.
+(version, attestation policy, accepted signers), and ``writer.key``. A deed
+taken in with ``import`` keeps its receipt and the head it is against beside
+it, as ``deeds/ID.proof`` and ``deeds/ID.head``, so its inclusion proof
+outlives the bag.
+
+A handover
+==========
+
+``export --into DIR`` writes ``DIR/<id>/`` for each deed and one ``head``
+beside those folders. Wrapped as a satchel, that directory is
+``data/deeds``. A producer writing the bag by hand uses the same files.
+Each folder is named for the accession in its ``deed.bin`` and
+``proof.txt``, and a folder with any other name is refused.
+Every path is a regular file or a real directory. A symlink or a fifo is
+refused, and a symlinked deed folder is not entered.
+
+``deed.bin`` is the canonical deed bytes. ``proof.txt`` names that digest
+and the inclusion path::
+
+   id=<accession>
+   digest=sha256:<64 lowercase hex>
+   time=<unix seconds>
+   index=<leaf index>
+   size=<log length>
+   root=<64 lowercase hex>
+   path=<64 lowercase hex>
+
+one ``path`` line per step from the leaf to the root. The digest is
+SHA-256 of ``deed.bin``. The log entry is ``<id><tab><digest><tab><time>``,
+and the leaf is SHA-256 of a ``0x00`` byte followed by that entry.
+
+``bytes/<hex>`` is the product file for a deed path ``sha256:<hex>``.
+``<hex>`` is 64 lowercase hex digits and is the SHA-256 of that file.
+
+``supersedes`` and ``successor`` are two lines, the accession and then the
+digest::
+
+   <accession>
+   sha256:<64 lowercase hex>
+
+``sources`` is one tab-separated line per deed the bag names::
+
+   <accession><tab>sha256:<64 lowercase hex>
+
+``evidence.bin`` and ``host`` are copied when the store has them. ``check``
+does not read ``evidence.bin``.
+
+``head``, when the bag is signed, is one line::
+
+   size=<n> root=<64 hex> links=<64 hex> ed25519 <key hex> <signature hex>
+
+``links`` is lowercase hex with no ``sha256:`` prefix. It is the SHA-256 of
+this transcript. Write ``deedar-links-v2`` and a ``0x00`` byte, then take
+the deed directories in byte order of their names. For each, write the
+decimal byte length of the name, a newline, and the name. Then for
+``sources``, ``supersedes`` and ``successor`` in that order write the kind
+and a newline, then ``-`` and a newline when the file is absent, or the
+decimal byte length, a newline, and the raw file bytes when it is present.
+An empty file has length 0, which is not the same as an absent one.
+The Ed25519 signature covers, with ``||`` concatenation:
+
+``deedar-head-v1 || 0x00 || "<size> <root>" || 0x00 || <links hex>``
+
+``<size>`` and the root are the decimal length and the hex root, separated
+by one space. A head line with no ``links`` field still verifies, and only
+when none of those three files is present. An export always writes
+``links``, including when no folder has a sidecar, so adding one later
+breaks the signature. An unsigned bag omits ``head``. The sidecars are
+then not authenticated. ``deedar log head`` prints the size and the root
+only. It is not this line.
+
+The transcript before ``deedar-links-v2`` had no tag, ended a name at a
+newline, and gave an absent file length 0, so one directory name could
+stand for two folders and an empty file for a missing one. A head over
+that transcript is refused, not verified. No release wrote it, and
+exporting the bag again writes the current one.
+
+Import stores ``<id>.supersedes`` as the same two lines. A file that
+already holds just the accession is completed with the digest.
 
 The log
 =======
