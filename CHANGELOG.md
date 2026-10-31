@@ -2,8 +2,10 @@
 
 Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
 
-## 0.6.0 (2026-10-31)
+## 0.6.1 (2026-10-31)
 
+- The 0.6.0 tag did not build: the workspace pinned its own crates at
+  0.5.0 while the crates said 0.6.0. 0.6.1 is that release.
 - `deedar check` refuses a `bytes/<sha256>` file that does not hash to
   its name, and a deed path whose digest has no file there. Check only
   required those files to be regular, so a tampered bag passed `check`
