@@ -2,7 +2,7 @@
 
 Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
 
-## 0.5.0 (2026-10-26)
+## 0.6.0 (2026-10-31)
 
 - `deedar check` refuses a `bytes/<sha256>` file that does not hash to
   its name, and a deed path whose digest has no file there. Check only
@@ -73,6 +73,9 @@ Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
   does not list, the import report says that key is not one this store
   accepts and that the head was taken as unsigned. It said no signer
   list was given. `Handover` gains `signers_listed`.
+
+## 0.5.0 (2026-10-26)
+
 - Each release archive gets a GitHub build attestation from the release workflow, so `gh attestation verify` and the ljos installer can check that this repository built it. Releases before this one have none, and the installer counts them as not published.
 - `deedar create` run again with the same bytes and flags prints the deed
   it froze and exits 0, and writes nothing. It exited 1 with `deed
