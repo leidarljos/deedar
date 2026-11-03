@@ -173,20 +173,7 @@ impl FsStore {
             }
         }
         crate::migrate::ensure_layout(dir)?;
-        let key_path = dir.join("writer.key");
-        let key = if key_path.exists() {
-            let bytes = fs::read(&key_path).map_err(|e| Error::Io(e.to_string()))?;
-            if bytes.len() != 32 {
-                return Err(Error::Io("writer.key must be 32 bytes".into()));
-            }
-            let mut k = [0u8; 32];
-            k.copy_from_slice(&bytes);
-            k
-        } else {
-            let k = seed_key()?;
-            write_private(&key_path, &k)?;
-            k
-        };
+        let key = load_writer_key(&dir.join("writer.key"))?;
         Ok(Self {
             dir: dir.to_path_buf(),
             key,
@@ -195,6 +182,11 @@ impl FsStore {
             policy: crate::attest::Policy::read(dir)?,
             tree: std::sync::Mutex::new(None),
         })
+    }
+
+    #[cfg(test)]
+    fn writer_key_for_test(&self) -> [u8; 32] {
+        self.key
     }
 
     pub fn dir(&self) -> &Path {
@@ -1068,6 +1060,78 @@ pub(crate) fn atomic_write(dest: &Path, bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
+/// The store's writer key. An existing 32-byte file is kept. A missing file
+/// is published by linking a finished temporary file onto `writer.key`, so
+/// the name never appears with fewer than 32 bytes. A second open that loses
+/// that link reads the key the first open published. A file of any other
+/// length is refused and left as it is.
+fn load_writer_key(path: &Path) -> Result<[u8; 32]> {
+    if let Some(key) = read_writer_key(path)? {
+        return Ok(key);
+    }
+    let key = seed_key()?;
+    if link_new_key(path, &key)? {
+        return Ok(key);
+    }
+    match read_writer_key(path)? {
+        Some(key) => Ok(key),
+        None => Err(Error::Io("writer.key disappeared during open".into())),
+    }
+}
+
+/// `Some` when `path` holds a 32-byte key, `None` when it is absent.
+///
+/// Any other length is the refusal a truncated or replaced key already gets.
+fn read_writer_key(path: &Path) -> Result<Option<[u8; 32]>> {
+    match fs::read(path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(Error::Io(e.to_string())),
+        Ok(bytes) if bytes.len() == 32 => {
+            let mut key = [0u8; 32];
+            key.copy_from_slice(&bytes);
+            Ok(Some(key))
+        }
+        Ok(_) => Err(Error::Io("writer.key must be 32 bytes".into())),
+    }
+}
+
+/// Link `bytes` onto `path` under a new inode.
+///
+/// `Ok(true)` means this call published the key. `Ok(false)` means `path`
+/// already had a directory entry, so the caller reads that file instead of
+/// keeping `bytes`. The temporary file is in the same directory, which keeps
+/// the link on one filesystem.
+fn link_new_key(path: &Path, bytes: &[u8]) -> Result<bool> {
+    let tmp = writer_key_tmp(path);
+    write_private(&tmp, bytes)?;
+    match fs::hard_link(&tmp, path) {
+        Ok(()) => {
+            let _ = fs::remove_file(&tmp);
+            Ok(true)
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            let _ = fs::remove_file(&tmp);
+            Ok(false)
+        }
+        Err(e) => {
+            let _ = fs::remove_file(&tmp);
+            Err(Error::Io(format!("{}: {e}", path.display())))
+        }
+    }
+}
+
+fn writer_key_tmp(path: &Path) -> PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    let mut name = path
+        .file_name()
+        .map(|file| file.to_os_string())
+        .unwrap_or_else(|| std::ffi::OsString::from("writer.key"));
+    name.push(format!(".{}.{n}.tmp", std::process::id()));
+    path.with_file_name(name)
+}
+
 /// A fresh writer key from the kernel's random source.
 ///
 /// The key keys every evidence hash in the store, so it has to be one nobody
@@ -1093,9 +1157,16 @@ fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
         .mode(0o600)
         .open(path)
         .map_err(|e| Error::Io(format!("{}: {e}", path.display())))?;
-    file.write_all(bytes)
-        .and_then(|()| file.sync_all())
-        .map_err(|e| Error::Io(format!("{}: {e}", path.display())))
+    // The name exists as soon as open returns. A test can pause here, before
+    // any byte is stored, and open the same store from another thread.
+    #[cfg(test)]
+    tests::hold_key_write_for_test();
+    if let Err(e) = file.write_all(bytes).and_then(|()| file.sync_all()) {
+        drop(file);
+        let _ = fs::remove_file(path);
+        return Err(Error::Io(format!("{}: {e}", path.display())));
+    }
+    Ok(())
 }
 
 fn hex_encode(bytes: &[u8]) -> String {
@@ -1179,4 +1250,80 @@ pub(crate) fn read_supersedes(path: &Path) -> Result<Option<SupersedesLink>> {
         id: DeedId::parse(id)?,
         digest,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::RefCell;
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::Duration;
+
+    /// Pause the first key write on this thread, between creating the file and
+    /// storing its bytes.
+    struct KeyWritePause {
+        reached: mpsc::Sender<()>,
+        release: mpsc::Receiver<()>,
+    }
+
+    thread_local! {
+        static KEY_WRITE_PAUSE: RefCell<Option<KeyWritePause>> = const { RefCell::new(None) };
+    }
+
+    pub(super) fn hold_key_write_for_test() {
+        let Some(pause) = KEY_WRITE_PAUSE.with(|slot| slot.borrow_mut().take()) else {
+            return;
+        };
+        let _ = pause.reached.send(());
+        let _ = pause.release.recv();
+    }
+
+    /// Sends on drop so the paused writer cannot stay blocked if this test fails.
+    struct Release(mpsc::Sender<()>);
+
+    impl Drop for Release {
+        fn drop(&mut self) {
+            let _ = self.0.send(());
+        }
+    }
+
+    /// A second open must not refuse the store because it observed `writer.key`
+    /// before the first open had stored the key.
+    #[test]
+    fn a_second_open_does_not_see_a_half_written_writer_key() {
+        // SAFETY: the opens below read this variable, and this test sets it
+        // for the whole process before either open starts.
+        unsafe {
+            std::env::set_var("DEEDAR_HOST_SIGNING_KEY", "off");
+        }
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().to_path_buf();
+        let (reached_tx, reached_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let worker = thread::spawn(move || {
+            KEY_WRITE_PAUSE.with(|slot| {
+                *slot.borrow_mut() = Some(KeyWritePause {
+                    reached: reached_tx,
+                    release: release_rx,
+                });
+            });
+            super::FsStore::open(&path).map(|store| store.writer_key_for_test())
+        });
+        let release = Release(release_tx);
+        // The paused open stops inside its key write, before that write stores
+        // any bytes. Five seconds is long enough for the thread to reach that
+        // pause, and a miss fails the test instead of hanging it.
+        reached_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("key write started");
+        let second = super::FsStore::open(dir.path()).map(|store| store.writer_key_for_test());
+        let second = second.expect("second open");
+        let on_disk = std::fs::read(dir.path().join("writer.key")).expect("writer.key");
+        assert_eq!(on_disk.len(), 32);
+        assert_eq!(second.as_slice(), on_disk.as_slice());
+        drop(release);
+        let first = worker.join().expect("writer thread");
+        let first = first.expect("first open");
+        assert_eq!(first.as_slice(), on_disk.as_slice());
+    }
 }
