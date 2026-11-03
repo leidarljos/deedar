@@ -33,4 +33,10 @@ serde_json = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-std", "signal"] }
 
 [dev-dependencies]
+# `tests/` is its own crate, so it does not see the binary's dependencies.
+deed.workspace = true
+deedar.workspace = true
+rmcp = { version = "3.2", features = ["client", "transport-child-process"] }
+serde_json = "1"
 tempfile.workspace = true
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "process"] }

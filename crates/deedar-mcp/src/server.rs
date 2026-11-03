@@ -167,7 +167,7 @@ impl DeedarServer {
     }
 
     #[tool(
-        description = "Every deed the store serves, oldest first.",
+        description = "Every deed the store serves, in accession order.",
         annotations(title = "List deeds", read_only_hint = true, open_world_hint = false)
     )]
     async fn deedar_list(&self) -> Result<Json<Vec<DeedRow>>, McpError> {
