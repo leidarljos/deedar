@@ -88,22 +88,27 @@ fn ids_from(args: &[String], verb: &str) -> Result<Vec<String>, String> {
 /// any is stale or missing, so a hook can gate on it.
 fn current_many(url: &str, args: &[String]) -> Result<Report, String> {
     let ids = ids_from(args, "current")?;
-    let mut client = Client::open(url).map_err(|e| e.to_string())?;
+    let mut client = open_client(url)?;
     let mut text = String::new();
     let mut stale = 0usize;
     for raw in &ids {
-        match client
-            .resolve(raw)
-            .and_then(|id| client.current(&id).map(|d| (id, d)))
-        {
-            Ok((id, tip)) => {
-                if tip.id.to_string() == id.to_string() {
-                    text.push_str(&format!("{id} current\n"));
-                } else {
-                    stale += 1;
-                    text.push_str(&format!("{id} SUPERSEDED by {}\n", tip.id));
+        match resolve_id(&mut client, url, raw) {
+            Ok(id) => match client.current(&id) {
+                Ok(tip) => {
+                    if tip.id.to_string() == id.to_string() {
+                        text.push_str(&format!("{id} current\n"));
+                    } else {
+                        stale += 1;
+                        text.push_str(&format!("{id} SUPERSEDED by {}\n", tip.id));
+                    }
                 }
-            }
+                // The accession was there. A later miss is about the chain,
+                // not about the name the seat typed.
+                Err(e) => {
+                    stale += 1;
+                    text.push_str(&format!("{raw} FAILED: {e}\n"));
+                }
+            },
             Err(e) => {
                 stale += 1;
                 text.push_str(&format!("{raw} FAILED: {e}\n"));
@@ -119,18 +124,20 @@ fn current_many(url: &str, args: &[String]) -> Result<Report, String> {
 
 fn evidence_many(url: &str, args: &[String]) -> Result<Report, String> {
     let ids = ids_from(args, "evidence")?;
-    let mut client = Client::open(url).map_err(|e| e.to_string())?;
+    let mut client = open_client(url)?;
     let mut text = String::new();
     let mut verified = 0usize;
     for raw in &ids {
-        match client
-            .resolve(raw)
-            .and_then(|id| client.evidence(&id).map(|ev| ev.deed_id))
-        {
-            Ok(id) => {
-                verified += 1;
-                text.push_str(&format!("{id} ok\n"));
-            }
+        match resolve_id(&mut client, url, raw) {
+            Ok(id) => match client.evidence(&id) {
+                Ok(ev) => {
+                    verified += 1;
+                    text.push_str(&format!("{} ok\n", ev.deed_id));
+                }
+                // The accession was there. A later miss is a source or a
+                // byte check, and renaming it would hide which one.
+                Err(e) => text.push_str(&format!("{raw} FAILED: {e}\n")),
+            },
             // The id as the caller wrote it, not as the store would spell it:
             // an id that does not resolve has no other spelling, and the
             // caller has to find this one in whatever cited it.
@@ -259,7 +266,7 @@ fn bridge_in(dir: &Path) -> Option<PathBuf> {
 
 /// Write deeds into a satchel with the inclusion proof they were logged here
 /// first. One accession, several, or `-` for stdin.
-fn cmd_export(client: &mut Client, args: &[String]) -> Result<String, String> {
+fn cmd_export(client: &mut Client, url: &str, args: &[String]) -> Result<String, String> {
     let mut into: Option<PathBuf> = None;
     let mut rest: Vec<String> = Vec::new();
     let mut at = 0;
@@ -279,15 +286,15 @@ fn cmd_export(client: &mut Client, args: &[String]) -> Result<String, String> {
     let ids = ids_from(&rest, "export")?;
     // Names resolve first; the exporter then borrows the store and reads the
     // log once for the whole list.
-    let resolved: Vec<(String, deed::Result<DeedId>)> = ids
-        .iter()
-        .map(|raw| (raw.clone(), client.resolve(raw)))
-        .collect();
+    let mut resolved = Vec::with_capacity(ids.len());
+    for raw in &ids {
+        resolved.push((raw.clone(), resolve_id(client, url, raw)));
+    }
     let exporter = client.exporter().map_err(|e| e.to_string())?;
     let mut wrote = 0usize;
     let mut refused = Vec::new();
     for (raw, id) in resolved {
-        match id.and_then(|id| exporter.export(&id, &into)) {
+        match id.and_then(|id| exporter.export(&id, &into).map_err(|e| e.to_string())) {
             Ok(files) => wrote += files.len(),
             Err(e) => refused.push(format!("{raw}\t{e}")),
         }
@@ -333,7 +340,7 @@ fn cmd_import(client: &mut Client, args: &[String]) -> Result<String, String> {
 
 /// The append-only log: `head` to keep, `prove` for one deed, `bridge` from a
 /// kept head to this one, `audit` of the log against the shelves.
-fn cmd_log(client: &mut Client, args: &[String]) -> Result<String, String> {
+fn cmd_log(client: &mut Client, url: &str, args: &[String]) -> Result<String, String> {
     match args.first().map(String::as_str) {
         Some("head") | None => {
             // Signed when this store holds a key, because the head is the one
@@ -357,9 +364,8 @@ fn cmd_log(client: &mut Client, args: &[String]) -> Result<String, String> {
             Ok(out)
         }
         Some("prove") => {
-            let id = client
-                .resolve(args.get(1).ok_or("log prove needs an id")?)
-                .map_err(|e| e.to_string())?;
+            let raw = args.get(1).ok_or("log prove needs an id")?;
+            let id = resolve_id(client, url, raw)?;
             // The same record an export writes beside a deed, so what is shown
             // here and what travels are one format and one checker.
             Ok(client.receipt(&id).map_err(|e| e.to_string())?.render())
@@ -413,7 +419,7 @@ fn cmd_log(client: &mut Client, args: &[String]) -> Result<String, String> {
 
 fn run(args: Vec<String>) -> Result<String, String> {
     let (url, rest) = take_url(&args)?;
-    let mut client = Client::open(&url).map_err(|e| e.to_string())?;
+    let mut client = open_client(&url)?;
     match rest.first().map(String::as_str) {
         Some("host") if rest.get(1).map(String::as_str) == Some("accept") => {
             let layout = client.dir().join("layout");
@@ -461,9 +467,8 @@ fn run(args: Vec<String>) -> Result<String, String> {
             made
         }
         Some("get") => {
-            let id = client
-                .resolve(rest.get(1).ok_or("get needs an id")?)
-                .map_err(|e| e.to_string())?;
+            let raw = rest.get(1).ok_or("get needs an id")?;
+            let id = resolve_id(&mut client, &url, raw)?;
             let d = client.get(&id).map_err(|e| e.to_string())?;
             Ok(format_one(&d))
         }
@@ -472,16 +477,14 @@ fn run(args: Vec<String>) -> Result<String, String> {
             Ok(format_list(&rows))
         }
         Some("trail") => {
-            let id = client
-                .resolve(rest.get(1).ok_or("trail needs an id")?)
-                .map_err(|e| e.to_string())?;
+            let raw = rest.get(1).ok_or("trail needs an id")?;
+            let id = resolve_id(&mut client, &url, raw)?;
             let rows = client.trail(&id).map_err(|e| e.to_string())?;
             Ok(format_list(&rows))
         }
         Some("evidence") => {
-            let id = client
-                .resolve(rest.get(1).ok_or("evidence needs an id")?)
-                .map_err(|e| e.to_string())?;
+            let raw = rest.get(1).ok_or("evidence needs an id")?;
+            let id = resolve_id(&mut client, &url, raw)?;
             let ev = client.evidence(&id).map_err(|e| e.to_string())?;
             Ok(format!(
                 "id={} ok\nproducedBy={} {}\ntime={}\n",
@@ -492,36 +495,32 @@ fn run(args: Vec<String>) -> Result<String, String> {
             ))
         }
         Some("delete") => {
-            let id = client
-                .resolve(rest.get(1).ok_or("delete needs an id")?)
-                .map_err(|e| e.to_string())?;
+            let raw = rest.get(1).ok_or("delete needs an id")?;
+            let id = resolve_id(&mut client, &url, raw)?;
             client.delete(&id).map_err(|e| e.to_string())?;
             Ok(format!("deleted {id}\n"))
         }
         Some("leave") => {
-            let id = client
-                .resolve(rest.get(1).ok_or("leave needs an id")?)
-                .map_err(|e| e.to_string())?;
+            let raw = rest.get(1).ok_or("leave needs an id")?;
+            let id = resolve_id(&mut client, &url, raw)?;
             let dest = PathBuf::from(rest.get(2).ok_or("leave needs a dest dir")?);
             let out = client.leave(&id, &dest).map_err(|e| e.to_string())?;
             Ok(format!("{}\n", out.display()))
         }
         Some("timestamp") => {
-            let id = client
-                .resolve(rest.get(1).ok_or("timestamp needs an id")?)
-                .map_err(|e| e.to_string())?;
+            let raw = rest.get(1).ok_or("timestamp needs an id")?;
+            let id = resolve_id(&mut client, &url, raw)?;
             let path = client.timestamp(&id).map_err(|e| e.to_string())?;
             Ok(format!("timestamp {}\n", path.display()))
         }
         Some("current") => {
-            let id = client
-                .resolve(rest.get(1).ok_or("current needs an id")?)
-                .map_err(|e| e.to_string())?;
+            let raw = rest.get(1).ok_or("current needs an id")?;
+            let id = resolve_id(&mut client, &url, raw)?;
             let d = client.current(&id).map_err(|e| e.to_string())?;
             Ok(format_one(&d))
         }
-        Some("log") => cmd_log(&mut client, &rest[1..]),
-        Some("export") => cmd_export(&mut client, &rest[1..]),
+        Some("log") => cmd_log(&mut client, &url, &rest[1..]),
+        Some("export") => cmd_export(&mut client, &url, &rest[1..]),
         Some("import") => cmd_import(&mut client, &rest[1..]),
         Some("check") => cmd_check(&url, &rest[1..]),
         Some("vouch") => cmd_vouch(&url, &rest[1..]),
@@ -588,7 +587,8 @@ fn default_store() -> Option<PathBuf> {
 }
 
 /// The store to act on: `--url`, then `DEEDAR_URL`, then the seat's own if it
-/// exists; an absent store refuses and names the path.
+/// exists. An absent seat store names that path and the command that sets
+/// `DEEDAR_URL`.
 fn take_url(args: &[String]) -> Result<(String, Vec<String>), String> {
     let mut url = env::var("DEEDAR_URL").unwrap_or_default();
     let mut rest = Vec::new();
@@ -607,15 +607,167 @@ fn take_url(args: &[String]) -> Result<(String, Vec<String>), String> {
         match seat {
             Some(dir) if dir.is_dir() => url = format!("file://{}", dir.display()),
             Some(dir) => {
+                let path = dir.display();
                 return Err(format!(
-                    "set DEEDAR_URL or pass --url; no store at {}",
-                    dir.display()
-                ))
+                    "DEEDAR_URL is unset and there is no store at {path}; \
+                     `export DEEDAR_URL=file://{path}` or `deedar --url file://{path}`"
+                ));
             }
-            None => return Err("set DEEDAR_URL or pass --url".into()),
+            None => {
+                return Err(
+                    "DEEDAR_URL is unset; `export DEEDAR_URL=file://PATH` or `deedar --url file://PATH`"
+                        .into(),
+                )
+            }
         }
     }
     Ok((url, rest))
+}
+
+/// Open `url`, or say how to point at a store when this path is not one.
+fn open_client(url: &str) -> Result<Client, String> {
+    if let Ok(dir) = deedar::store_dir(url) {
+        if blocked_by_a_file(&dir) {
+            return Err(not_a_store(&dir));
+        }
+    }
+    Client::open(url).map_err(|e| explain_open(url, &e))
+}
+
+/// `create_dir_all` fails when some existing component is a file, and the
+/// error then only says "Not a directory". Walk up so the refusal can name
+/// the store path the seat passed, including when that path is the file.
+fn blocked_by_a_file(path: &Path) -> bool {
+    let mut cur = path.to_path_buf();
+    loop {
+        if cur.exists() && !cur.is_dir() {
+            return true;
+        }
+        if !cur.pop() {
+            return false;
+        }
+    }
+}
+
+fn not_a_store(dir: &Path) -> String {
+    format!(
+        "{} is not a store; `export DEEDAR_URL=file://PATH` or `deedar --url file://PATH`",
+        dir.display()
+    )
+}
+
+fn explain_open(url: &str, err: &deed::Error) -> String {
+    match err {
+        deed::Error::InvalidUrl(raw) => format!(
+            "{raw} is not a store path; `export DEEDAR_URL=file://PATH` or `deedar --url file://PATH`"
+        ),
+        deed::Error::Io(msg) if msg.contains("Not a directory") => deedar::store_dir(url)
+            .map(|dir| not_a_store(&dir))
+            .unwrap_or_else(|_| {
+                format!(
+                    "{url} is not a store; `export DEEDAR_URL=file://PATH` or `deedar --url file://PATH`"
+                )
+            }),
+        other => other.to_string(),
+    }
+}
+
+/// Accessions an ambiguous-prefix line prints.
+///
+/// The line names every match up to this many, in byte order, and always
+/// says how many matched. Eight is enough to tell a shared revision prefix
+/// from a shared kind without the line becoming the whole store; anything
+/// past it stays a count, and `deedar list` is the next command. The same
+/// bound is used for every store.
+const PREFIX_CANDIDATES_SHOWN: usize = 8;
+
+/// A parsed accession resolves before the store is consulted, so a missing
+/// name and a prefix of a real one look the same until `get`. A prefix of
+/// several is listed here, up to [`PREFIX_CANDIDATES_SHOWN`], in the same
+/// byte order as `list`.
+fn resolve_id(client: &mut Client, url: &str, raw: &str) -> Result<DeedId, String> {
+    match client.resolve(raw) {
+        Ok(id) => match client.get(&id) {
+            Ok(_) | Err(deed::Error::Tombstoned(_)) => Ok(id),
+            Err(e) => Err(id_error(client, url, raw, &e)),
+        },
+        Err(e) => Err(id_error(client, url, raw, &e)),
+    }
+}
+
+fn id_error(client: &mut Client, url: &str, raw: &str, err: &deed::Error) -> String {
+    match err {
+        deed::Error::NotFound(_) | deed::Error::InvalidId(_) => {
+            explain_accession(client, url, raw).unwrap_or_else(|failed| failed)
+        }
+        other => other.to_string(),
+    }
+}
+
+fn explain_accession(client: &mut Client, url: &str, raw: &str) -> Result<String, String> {
+    let (ids, proper_prefix) = prefix_matches(client, raw)?;
+    let line = match ids.as_slice() {
+        [] => format!("unknown accession {raw}; `deedar --url {url} list`"),
+        [only] if proper_prefix => {
+            format!("prefix {raw} matches {only}; `deedar --url {url} get {only}`")
+        }
+        [only] => format!("unknown accession {raw}; `deedar --url {url} get {only}`"),
+        many => {
+            let shown = many.len().min(PREFIX_CANDIDATES_SHOWN);
+            let listed = many[..shown].join(", ");
+            let kind = if proper_prefix {
+                "ambiguous prefix"
+            } else {
+                "ambiguous"
+            };
+            let n = many.len();
+            format!(
+                "{kind} {raw} matches {n} deeds, at most {PREFIX_CANDIDATES_SHOWN} in byte order: \
+                 {listed}; `deedar --url {url} list`"
+            )
+        }
+    };
+    Ok(line)
+}
+
+/// Accessions whose id, deed digest, or product path starts with `raw`.
+///
+/// `proper_prefix` is set when one of those is longer than `raw`, which is
+/// a prefix the seat can extend. An exact product path shared by two deeds
+/// is not a prefix; it still names both accessions.
+fn prefix_matches(client: &mut Client, raw: &str) -> Result<(Vec<String>, bool), String> {
+    let mut ids = Vec::new();
+    let mut proper_prefix = false;
+    for deed in client.list().map_err(|e| e.to_string())? {
+        let id = deed.id.to_string();
+        let digest = deedar::deed_digest(&deed);
+        let mut hit = starts_with(&id, raw) || starts_with(&digest, raw);
+        let mut extends = extends_prefix(&id, raw) || extends_prefix(&digest, raw);
+        for path in &deed.paths {
+            let Some(text) = path.to_str() else {
+                continue;
+            };
+            hit |= starts_with(text, raw);
+            extends |= extends_prefix(text, raw);
+        }
+        if hit {
+            proper_prefix |= extends;
+            ids.push(id);
+        }
+    }
+    // Accessions are ASCII, so this char order is byte order, and it is the
+    // order `list` prints. Sorting here keeps the line on that rule if `list`
+    // ever changes order.
+    ids.sort();
+    Ok((ids, proper_prefix))
+}
+
+fn starts_with(text: &str, raw: &str) -> bool {
+    text.starts_with(raw)
+}
+
+fn extends_prefix(text: &str, raw: &str) -> bool {
+    text.starts_with(raw) && text != raw
 }
 
 /// What to tell a seat whose host signs with a key its store does not accept.
@@ -1068,8 +1220,10 @@ mod url_tests {
         let dir = tempfile::tempdir().unwrap();
         with_home(dir.path(), None, || {
             let err = take_url(&["list".to_string()]).unwrap_err();
+            assert!(err.contains("DEEDAR_URL is unset"), "{err}");
             assert!(err.contains("no store at"), "{err}");
             assert!(err.contains(".local/share/deedar/store"), "{err}");
+            assert!(err.contains("export DEEDAR_URL=file://"), "{err}");
         });
     }
 }
