@@ -2,32 +2,105 @@
 #+options: toc:nil num:nil
 
 Each section is one task. =DEEDAR_URL= names the store; =--url= overrides
-it for one command.
+it for one command. Each transcript was taken in its own empty store with
+the clock stopped, so a root or a signature here is the one those commands
+produce. A run at another time prints a different one.
 
 * Cite deeds from a list
 
 =evidence=, =current= and =export= take one accession, several, or =-= to
 read them from standard input. A tracker or a pack hands its citations over
-on a pipe:
+on a pipe, and the =printf= below stands in for that tracker. =current=
+exits non-zero when any citation is stale or missing, and =evidence= exits
+non-zero when any deed does not check, so a shell hook can stop on them.
 
+# [[[cog
+# import sys
+# from pathlib import Path
+# start = Path(cog.inFile).resolve().parent
+# root = next(p for p in [start, *start.parents] if (p / "docs" / "scripts" / "samples.py").is_file())
+# sys.path[:0] = [str(root / "docs" / "scripts")]
+# import samples
+# cog.out(samples.transcript("ht-pipe"))
+# ]]]
 #+begin_src console
-$ packset accessions seat | deedar current -
-$ vissue recall proj-1a2b --deeds-only | deedar evidence -
+$ export DEEDAR_URL=file:///tmp/deeds
+$ export DEEDAR_HOST_SIGNING_KEY=off
+$ echo 'fn main() {}' > /tmp/note.rs
+$ deedar create file --name "the parser patch" --path /tmp/note.rs --agent you
+id=deed-file-the-parser-patch kind=file name=the parser patch
+paths=sha256:536e506bb90914c243a12b397b9a998f85ae2cbd9ba02dfd03a9e155ca5ca0f4
+sources=
+producedBy=you -
+grants=
+face=document
+file=sha256:536e506bb90914c243a12b397b9a998f85ae2cbd9ba02dfd03a9e155ca5ca0f4
+accession=deed-file-the-parser-patch
+$ echo 'fn main() { println!("parsed"); }' > /tmp/note.rs
+$ deedar create file --name "the parser patch v2" --path /tmp/note.rs --agent you --supersedes deed-file-the-parser-patch
+id=deed-file-the-parser-patch-v2 kind=file name=the parser patch v2
+paths=sha256:49e7b69a7a6720e9928f98f9d095871453e1a3024276f713aeab2cfc0ef2ba07
+sources=
+producedBy=you -
+grants=
+face=document
+file=sha256:49e7b69a7a6720e9928f98f9d095871453e1a3024276f713aeab2cfc0ef2ba07
+accession=deed-file-the-parser-patch-v2
+$ printf '%s\n' deed-file-the-parser-patch deed-file-the-parser-patch-v2 | deedar current -
+deed-file-the-parser-patch SUPERSEDED by deed-file-the-parser-patch-v2
+deed-file-the-parser-patch-v2 current
+1 of 2 current
+$ printf '%s\n' deed-file-the-parser-patch deed-file-the-parser-patch-v2 | deedar evidence -
+deed-file-the-parser-patch ok
+deed-file-the-parser-patch-v2 ok
+2 of 2 verified
 #+end_src
-
-Both exit non-zero when any accession fails, so a shell hook can stop on them.
+# [[[end]]]
 
 * Sign what you hand over
 
-#+begin_src console
-$ mkdir -p ~/.config/deedar
-$ head -c 32 /dev/urandom > ~/.config/deedar/host.key && chmod 600 ~/.config/deedar/host.key
-$ deedar log head
-size=34 root=... ed25519 b2942e7e... <signature>
-$ deedar vouch sign bag/manifest-sha256.txt
-#+end_src
+The seed below is 32 zero bytes, so the signature on this page is the one
+those bytes produce. A key you will keep is 32 bytes from =/dev/urandom=.
 
-That path is the default: with =DEEDAR_HOST_SIGNING_KEY= unset the key at
+# [[[cog
+# import sys
+# from pathlib import Path
+# start = Path(cog.inFile).resolve().parent
+# root = next(p for p in [start, *start.parents] if (p / "docs" / "scripts" / "samples.py").is_file())
+# sys.path[:0] = [str(root / "docs" / "scripts")]
+# import samples
+# cog.out(samples.transcript("ht-sign"))
+# ]]]
+#+begin_src console
+$ export DEEDAR_URL=file:///tmp/deeds
+$ export DEEDAR_HOST_SIGNING_KEY=/tmp/host.key
+$ head -c 32 /dev/zero > /tmp/host.key
+$ chmod 600 /tmp/host.key
+$ echo 'fn main() {}' > /tmp/note.rs
+$ deedar create file --name "the parser patch" --path /tmp/note.rs --agent you
+id=deed-file-the-parser-patch kind=file name=the parser patch
+paths=sha256:536e506bb90914c243a12b397b9a998f85ae2cbd9ba02dfd03a9e155ca5ca0f4
+sources=
+producedBy=you -
+grants=
+face=document
+file=sha256:536e506bb90914c243a12b397b9a998f85ae2cbd9ba02dfd03a9e155ca5ca0f4
+accession=deed-file-the-parser-patch
+$ deedar host
+host key: ed25519:3b6a27bcceb6a42d62a3a8d02a6f0d73653215771de243a63ac048a18b59da29, a signer /tmp/deeds/layout lists
+$ deedar log head
+size=1 root=b1799b9f22404b3626b3c43e80f26232922113b997a1e3377bc803ff799f4ee8 ed25519 3b6a27bcceb6a42d62a3a8d02a6f0d73653215771de243a63ac048a18b59da29 ba6b3117579ce1f02ad154b4cd0d41b84360cb7abf81bb118450edc3f0fff39ad7e18c0504f3987a4478a51669d3628aba53bc7775d3e6016ab475ff3e12f90e
+$ deedar export --into /tmp/bag/data/deeds deed-file-the-parser-patch
+exported 1 deeds, 6 files
+$ printf '%s\n' 'sample manifest' > /tmp/bag/manifest-sha256.txt
+$ deedar vouch sign /tmp/bag/manifest-sha256.txt
+/tmp/bag/manifest-sha256.txt.sig
+$ deedar vouch check /tmp/bag/manifest-sha256.txt
+signed by 3b6a27bcceb6a42d62a3a8d02a6f0d73653215771de243a63ac048a18b59da29 (accepted)
+#+end_src
+# [[[end]]]
+
+With =DEEDAR_HOST_SIGNING_KEY= unset, the key at
 =~/.config/deedar/host.key= signs when it exists. Set the variable to sign
 with a key kept elsewhere, or to =off= to sign nothing.
 
@@ -37,13 +110,53 @@ and =deedar vouch check bag/manifest-sha256.txt= then says =(accepted)=.
 
 * Keep a head between handovers
 
+# [[[cog
+# import sys
+# from pathlib import Path
+# start = Path(cog.inFile).resolve().parent
+# root = next(p for p in [start, *start.parents] if (p / "docs" / "scripts" / "samples.py").is_file())
+# sys.path[:0] = [str(root / "docs" / "scripts")]
+# import samples
+# cog.out(samples.transcript("ht-keep"))
+# ]]]
 #+begin_src console
-$ deedar check bag --keep sender.head          # on the receiver
-$ deedar log bridge 34 > bag2/bridge.txt       # on the sender, at the next export
-$ deedar check bag2 --since sender.head        # on the receiver
+$ export DEEDAR_URL=file:///tmp/deeds
+$ export DEEDAR_HOST_SIGNING_KEY=off
+$ echo 'fn main() {}' > /tmp/note.rs
+$ deedar create file --name "the parser patch" --path /tmp/note.rs --agent you
+id=deed-file-the-parser-patch kind=file name=the parser patch
+paths=sha256:536e506bb90914c243a12b397b9a998f85ae2cbd9ba02dfd03a9e155ca5ca0f4
+sources=
+producedBy=you -
+grants=
+face=document
+file=sha256:536e506bb90914c243a12b397b9a998f85ae2cbd9ba02dfd03a9e155ca5ca0f4
+accession=deed-file-the-parser-patch
+$ deedar export --into /tmp/bag/data/deeds deed-file-the-parser-patch
+exported 1 deeds, 4 files
+$ deedar check /tmp/bag --keep /tmp/sender.head
+1 deeds proven against a log of 1 entries, root b1799b9f22404b3626b3c43e80f26232922113b997a1e3377bc803ff799f4ee8
+the head is unsigned, so every proof above is against a head this bag asserted about itself
+kept this head in /tmp/sender.head; pass it to --since next time
+$ echo second > /tmp/note2.rs
+$ deedar create file --name "the notes" --path /tmp/note2.rs --agent you
+id=deed-file-the-notes kind=file name=the notes
+paths=sha256:480c2336b410f1ad5f8bf1b28944490255804b65350c527787e74ebdd511e3a4
+sources=
+producedBy=you -
+grants=
+face=document
+file=sha256:480c2336b410f1ad5f8bf1b28944490255804b65350c527787e74ebdd511e3a4
+accession=deed-file-the-notes
+$ deedar export --into /tmp/bag2/data/deeds deed-file-the-notes
+exported 1 deeds, 4 files
+$ deedar log bridge 1 > /tmp/bag2/bridge.txt
+$ deedar check /tmp/bag2 --since /tmp/sender.head
+the log grew from the 1 entries you kept to 2 without dropping or rewriting one
+1 deeds proven against a log of 2 entries, root 794e67fe9ec9c80cfd3df9dd6bf5eb62e74c669c06a63693dde7a2b9bd97acc5
+the head is unsigned, so every proof above is against a head this bag asserted about itself
 #+end_src
-
-=--keep= is available from the next release, not in 0.4.0.
+# [[[end]]]
 
 The bridge is the consistency path from the head you kept to the new one.
 =check= requires it to start at the kept head and end at the head the
@@ -52,10 +165,43 @@ bridge on its own proves nothing here: the sender picks both of its heads.
 
 * Take a handover into a store
 
+# [[[cog
+# import sys
+# from pathlib import Path
+# start = Path(cog.inFile).resolve().parent
+# root = next(p for p in [start, *start.parents] if (p / "docs" / "scripts" / "samples.py").is_file())
+# sys.path[:0] = [str(root / "docs" / "scripts")]
+# import samples
+# cog.out(samples.transcript("ht-import"))
+# ]]]
 #+begin_src console
-$ deedar import bag
-$ deedar import bag --allow-unsigned-head      # an unsigned head
+$ export DEEDAR_URL=file:///tmp/deeds
+$ export DEEDAR_HOST_SIGNING_KEY=off
+$ echo 'fn main() {}' > /tmp/note.rs
+$ deedar create file --name "the parser patch" --path /tmp/note.rs --agent you
+id=deed-file-the-parser-patch kind=file name=the parser patch
+paths=sha256:536e506bb90914c243a12b397b9a998f85ae2cbd9ba02dfd03a9e155ca5ca0f4
+sources=
+producedBy=you -
+grants=
+face=document
+file=sha256:536e506bb90914c243a12b397b9a998f85ae2cbd9ba02dfd03a9e155ca5ca0f4
+accession=deed-file-the-parser-patch
+$ deedar export --into /tmp/bag/data/deeds deed-file-the-parser-patch
+exported 1 deeds, 4 files
+$ export DEEDAR_URL=file:///tmp/recv
+$ deedar import /tmp/bag
+deedar: evidence: this handover's head is unsigned, so every receipt in it is against a head the bag asserted about itself; nothing was imported, and --allow-unsigned-head imports it anyway
+$ deedar import /tmp/bag --allow-unsigned-head
+1 deeds proven against a log of 1 entries, root b1799b9f22404b3626b3c43e80f26232922113b997a1e3377bc803ff799f4ee8
+the head is unsigned, so every proof above is against a head this bag asserted about itself
+imported 1 deeds, appended 1 log entries
+$ deedar import /tmp/bag --allow-unsigned-head
+1 deeds proven against a log of 1 entries, root b1799b9f22404b3626b3c43e80f26232922113b997a1e3377bc803ff799f4ee8
+the head is unsigned, so every proof above is against a head this bag asserted about itself
+imported 0 deeds, appended 0 log entries
 #+end_src
+# [[[end]]]
 
 =import= runs the same check as =check=, then holds every deed in the bag
 here: the record, its product bytes, its =supersedes= and =successor=
@@ -79,9 +225,32 @@ refuses a signer the layout does not list.
 
 * Audit a store
 
+# [[[cog
+# import sys
+# from pathlib import Path
+# start = Path(cog.inFile).resolve().parent
+# root = next(p for p in [start, *start.parents] if (p / "docs" / "scripts" / "samples.py").is_file())
+# sys.path[:0] = [str(root / "docs" / "scripts")]
+# import samples
+# cog.out(samples.transcript("ht-audit"))
+# ]]]
 #+begin_src console
+$ export DEEDAR_URL=file:///tmp/deeds
+$ export DEEDAR_HOST_SIGNING_KEY=off
+$ echo 'fn main() {}' > /tmp/note.rs
+$ deedar create file --name "the parser patch" --path /tmp/note.rs --agent you
+id=deed-file-the-parser-patch kind=file name=the parser patch
+paths=sha256:536e506bb90914c243a12b397b9a998f85ae2cbd9ba02dfd03a9e155ca5ca0f4
+sources=
+producedBy=you -
+grants=
+face=document
+file=sha256:536e506bb90914c243a12b397b9a998f85ae2cbd9ba02dfd03a9e155ca5ca0f4
+accession=deed-file-the-parser-patch
 $ deedar log audit
+ok 1 logged and served
 #+end_src
+# [[[end]]]
 
 Walks the log and asks the store for each deed. A deed that was logged and
 is gone, or changed under its accession, is tampering. Deeds on the shelves
@@ -89,24 +258,59 @@ that were never logged mean the store predates the log and wants a backfill.
 
 * Backfill a log
 
+# [[[cog
+# import sys
+# from pathlib import Path
+# start = Path(cog.inFile).resolve().parent
+# root = next(p for p in [start, *start.parents] if (p / "docs" / "scripts" / "samples.py").is_file())
+# sys.path[:0] = [str(root / "docs" / "scripts")]
+# import samples
+# cog.out(samples.transcript("ht-backfill"))
+# ]]]
 #+begin_src console
+$ export DEEDAR_URL=file:///tmp/deeds
+$ export DEEDAR_HOST_SIGNING_KEY=off
+$ echo 'fn main() {}' > /tmp/note.rs
+$ deedar create file --name "the parser patch" --path /tmp/note.rs --agent you
+id=deed-file-the-parser-patch kind=file name=the parser patch
+paths=sha256:536e506bb90914c243a12b397b9a998f85ae2cbd9ba02dfd03a9e155ca5ca0f4
+sources=
+producedBy=you -
+grants=
+face=document
+file=sha256:536e506bb90914c243a12b397b9a998f85ae2cbd9ba02dfd03a9e155ca5ca0f4
+accession=deed-file-the-parser-patch
 $ deedar log backfill
+logged 0 deeds already on the shelves
 #+end_src
+# [[[end]]]
 
 Appends every deed the store serves that the log does not name, in accession
-order. The entries carry the evidence's time when there is one, else now;
-the log says these were logged today.
+order. When the log already names every deed, as here, it logs none. The
+entries carry the evidence's time when there is one, else now; the log says
+these were logged today.
 
 * Demand attestation
 
 A store can refuse to hand over a deed whose host sidecar is not signed by a
-key it accepts. In the store's =layout=:
+key it accepts. In the store's =layout=, with the public key of the sample
+seed from the signing section:
 
+# [[[cog
+# import sys
+# from pathlib import Path
+# start = Path(cog.inFile).resolve().parent
+# root = next(p for p in [start, *start.parents] if (p / "docs" / "scripts" / "samples.py").is_file())
+# sys.path[:0] = [str(root / "docs" / "scripts")]
+# import samples
+# cog.out(samples.transcript("ht-attest"))
+# ]]]
 #+begin_src text
 1
 attestation = required
-signer = ed25519:b2942e7e...
+signer = ed25519:3b6a27bcceb6a42d62a3a8d02a6f0d73653215771de243a63ac048a18b59da29
 #+end_src
+# [[[end]]]
 
 Without the line, attestation is optional and a keyed-hash sidecar still
 opens. A keyed hash proves the bytes are the bytes; it cannot prove who was
@@ -119,9 +323,35 @@ to a store that says required; add the line by hand.
 
 * Retract a deed
 
+# [[[cog
+# import sys
+# from pathlib import Path
+# start = Path(cog.inFile).resolve().parent
+# root = next(p for p in [start, *start.parents] if (p / "docs" / "scripts" / "samples.py").is_file())
+# sys.path[:0] = [str(root / "docs" / "scripts")]
+# import samples
+# cog.out(samples.transcript("ht-delete"))
+# ]]]
 #+begin_src console
+$ export DEEDAR_URL=file:///tmp/deeds
+$ export DEEDAR_HOST_SIGNING_KEY=off
+$ echo 'fn main() {}' > /tmp/note.rs
+$ deedar create file --name "the parser patch" --path /tmp/note.rs --agent you
+id=deed-file-the-parser-patch kind=file name=the parser patch
+paths=sha256:536e506bb90914c243a12b397b9a998f85ae2cbd9ba02dfd03a9e155ca5ca0f4
+sources=
+producedBy=you -
+grants=
+face=document
+file=sha256:536e506bb90914c243a12b397b9a998f85ae2cbd9ba02dfd03a9e155ca5ca0f4
+accession=deed-file-the-parser-patch
 $ deedar delete deed-file-the-parser-patch
+deleted deed-file-the-parser-patch
+$ deedar log audit
+deedar: missing deed-file-the-parser-patch	deed tombstoned: deed-file-the-parser-patch
+
 #+end_src
+# [[[end]]]
 
 The deed is tombstoned, the log entry stays, and =log audit= reports the
 gap. Nothing is erased, so a citation of a deleted deed still reads as
@@ -129,9 +359,19 @@ deleted rather than as never having existed.
 
 * Serve the store to an agent
 
+# [[[cog
+# import sys
+# from pathlib import Path
+# start = Path(cog.inFile).resolve().parent
+# root = next(p for p in [start, *start.parents] if (p / "docs" / "scripts" / "samples.py").is_file())
+# sys.path[:0] = [str(root / "docs" / "scripts")]
+# import samples
+# cog.out(samples.transcript("ht-mcp"))
+# ]]]
 #+begin_src console
 $ deedar-mcp
 #+end_src
+# [[[end]]]
 
 Every tool reads: =deedar_get=, =deedar_trail=, =deedar_evidence=,
 =deedar_current=, =deedar_check=, =deedar_log_head=, =deedar_log_bridge=,

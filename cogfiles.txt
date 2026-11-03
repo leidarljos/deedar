@@ -3,3 +3,8 @@
 # cogapp, not cocogitto: both install a command named cog. Run from the repo root.
 Cargo.toml -I scripts
 docs/source/conf.py -I scripts
+# Pages whose samples are regenerated from the binary.
+# From the repo root: cog --check @cogfiles.txt
+README.md
+docs/orgmode/getting-started.org
+docs/orgmode/howto.org
