@@ -122,28 +122,54 @@ impl Receipt {
     /// # Errors
     ///
     /// Fails when the bytes do not hash to the digest, or the path does not
-    /// carry the leaf to the root.
+    /// carry the leaf to the root. The failure is one line: the field, what
+    /// was expected, and what was found.
     pub fn check(&self, deed_bytes: &[u8]) -> Result<()> {
+        self.check_digest(deed_bytes)?;
+        self.check_path(false)
+    }
+
+    fn check_digest(&self, deed_bytes: &[u8]) -> Result<()> {
         let got = format!("sha256:{}", log::hex(&Sha256::digest(deed_bytes)));
-        if got != self.digest {
-            return Err(Error::Evidence(format!(
-                "{}: the bytes handed over hash to {got} and the log entry says {}",
-                self.id, self.digest
-            )));
+        if got == self.digest {
+            return Ok(());
         }
+        Err(Error::Evidence(format!(
+            "{}: deed hash: expected {} (proof.txt), found {got} (what the bytes handed over \
+             hash to)",
+            self.id, self.digest
+        )))
+    }
+
+    /// `pinned` says whether size and root were already held against a head
+    /// this receipt does not supply. The leaf hashes over the time and the
+    /// path climbs from the index, so a walk that misses the root cannot say
+    /// which of them moved, and the line names each one nothing else checked.
+    fn check_path(&self, pinned: bool) -> Result<()> {
         let entry = log::Entry {
             id: self.id.clone(),
             digest: self.digest.clone(),
             unix_time: self.unix_time,
         };
         let leaf = log::leaf_hash(&entry.material());
-        if !log::verify_inclusion(&leaf, self.index, self.size, &self.path, &self.root) {
-            return Err(Error::Evidence(format!(
-                "{}: the path does not carry this entry to the head it names ({} entries, {})",
-                self.id, self.size, self.root
-            )));
+        if log::verify_inclusion(&leaf, self.index, self.size, &self.path, &self.root) {
+            return Ok(());
         }
-        Ok(())
+        let field = if pinned {
+            "timestamp, index or path"
+        } else {
+            "timestamp, index, path or log head"
+        };
+        Err(Error::Evidence(format!(
+            "{}: {field}: expected time={} index={} and {} path steps to reach size={} root={}, \
+             found another root",
+            self.id,
+            self.unix_time,
+            self.index,
+            self.path.len(),
+            self.size,
+            self.root
+        )))
     }
 }
 
@@ -270,24 +296,57 @@ impl SignedHead {
     /// Fails when the signature does not cover the head, or names a key the
     /// reader does not accept.
     pub fn check(&self, accept: &BTreeSet<[u8; 32]>) -> Result<bool> {
-        let key = ed25519_dalek::VerifyingKey::from_bytes(&self.signer)
-            .map_err(|_| Error::Evidence("head: not a verifying key".into()))?;
-        ed25519_dalek::Verifier::verify(
-            &key,
-            &head_message(&self.head, self.links.as_deref()),
-            &ed25519_dalek::Signature::from_bytes(&self.signature),
-        )
-        .map_err(|_| Error::Evidence("head: the signature does not cover this head".into()))?;
+        if !self.covers(&self.head, self.links.as_deref()) {
+            return Err(Error::Evidence(self.uncovered()));
+        }
         if accept.is_empty() {
             return Ok(false);
         }
         if !accept.contains(&self.signer) {
+            let listed: Vec<String> = accept.iter().map(|key| log::hex(key)).collect();
             return Err(Error::Evidence(format!(
-                "head: signed by {}, which is not a key this reader accepts",
+                "head signer: expected one of {}, found {}, which is not a key this reader accepts",
+                listed.join(", "),
                 log::hex(&self.signer)
             )));
         }
         Ok(true)
+    }
+
+    /// Whether the signature verifies over `head` and `links` under the key
+    /// this line names.
+    fn covers(&self, head: &Head, links: Option<&str>) -> bool {
+        ed25519_dalek::VerifyingKey::from_bytes(&self.signer).is_ok_and(|key| {
+            ed25519_dalek::Verifier::verify(
+                &key,
+                &head_message(head, links),
+                &ed25519_dalek::Signature::from_bytes(&self.signature),
+            )
+            .is_ok()
+        })
+    }
+
+    /// The line for a signature that does not cover this head as written.
+    fn uncovered(&self) -> String {
+        if ed25519_dalek::VerifyingKey::from_bytes(&self.signer).is_err() {
+            return format!(
+                "head signer: expected an Ed25519 verifying key, found {}",
+                log::hex(&self.signer)
+            );
+        }
+        let links = self
+            .links
+            .as_deref()
+            .map(|links| format!(" links={links}"))
+            .unwrap_or_default();
+        format!(
+            "head signature: expected one by {} over size={} root={}{links}, found {}, which \
+             does not verify",
+            log::hex(&self.signer),
+            self.head.size,
+            self.head.root,
+            log::hex(&self.signature)
+        )
     }
 }
 
@@ -780,17 +839,19 @@ pub(crate) fn links_bound(root: &Path, signed: &SignedHead) -> Result<()> {
         Some(links) => {
             let got = link_commitment(root)?;
             if got != *links {
-                return Err(Error::Evidence(
-                    "the head signature does not cover the link sidecars in this bag as \
-                     deedar-links-v2 frames them; a head signed over the earlier transcript is \
-                     refused too, and exporting the bag again writes this one"
-                        .into(),
-                ));
+                return Err(Error::Evidence(format!(
+                    "head links: expected {links} (head), found {got} (the sidecars in this bag); \
+                     the head signature does not cover them as deedar-links-v2 frames them, a \
+                     head signed over the earlier transcript is refused too, and exporting the \
+                     bag again writes this one"
+                )));
             }
             Ok(())
         }
         None if link_sidecars_present(root)? => Err(Error::Evidence(
-            "this bag carries source or supersede sidecars that the head signature does not cover"
+            "head links: expected links= over the source or supersede sidecars this bag carries, \
+             found a head line with none, as releases before 0.6.0 wrote it, so the head \
+             signature does not cover them; exporting the bag again writes links="
                 .into(),
         )),
         None => Ok(()),
@@ -815,14 +876,18 @@ fn link_sidecars_present(root: &Path) -> Result<bool> {
 /// Check every deed a handover carried, given the bag or the deeds directory.
 ///
 /// Every receipt has to name the same head, so the receiver has one thing to
-/// record and nothing rides in under a head nobody kept.
+/// record and nothing rides in under a head nobody kept. That head is the
+/// signed one when its signature covers it, and otherwise the head of the
+/// first receipt that checks out.
 ///
 /// # Errors
 ///
 /// Fails when a deed carries no receipt, when bytes and digest disagree, when
 /// a product file does not hash to its name or a deed path has no such file,
-/// when a path does not reach the head, or when the receipts disagree about
-/// which head they are against.
+/// when a path does not reach the head, when the receipts disagree about
+/// which head they are against, or when the signed head does not cover them.
+/// Each failure is one line: the field, what was expected, and what was
+/// found.
 pub fn check_handover(dir: &Path, accept: &BTreeSet<[u8; 32]>) -> Result<Handover> {
     let root = deeds_in(dir)?.ok_or_else(|| {
         Error::Evidence(format!(
@@ -832,6 +897,32 @@ pub fn check_handover(dir: &Path, accept: &BTreeSet<[u8; 32]>) -> Result<Handove
     })?;
 
     let folders = deed_folders(&root)?;
+
+    let mut head_wrong = Vec::new();
+    let signed = match read_regular_opt(&head_beside(&root)) {
+        Ok(Some(bytes)) => match String::from_utf8(bytes) {
+            Ok(text) => match SignedHead::parse(&text) {
+                Ok(signed) => Some(signed),
+                Err(e) => {
+                    head_wrong.push(said(&e));
+                    None
+                }
+            },
+            Err(_) => {
+                head_wrong.push("head: not text".into());
+                None
+            }
+        },
+        Ok(None) => None,
+        Err(e) => {
+            head_wrong.push(said(&e));
+            None
+        }
+    };
+    let signed_head = signed
+        .as_ref()
+        .filter(|signed| signed.covers(&signed.head, signed.links.as_deref()))
+        .map(|signed| signed.head.clone());
 
     let mut proven = Vec::new();
     let mut head: Option<Head> = None;
@@ -879,7 +970,7 @@ pub fn check_handover(dir: &Path, accept: &BTreeSet<[u8; 32]>) -> Result<Handove
                 continue;
             }
         };
-        if let Err(e) = receipt.check(&bytes) {
+        if let Err(e) = receipt.check_digest(&bytes) {
             wrong.push(said(&e));
             continue;
         }
@@ -898,62 +989,40 @@ pub fn check_handover(dir: &Path, accept: &BTreeSet<[u8; 32]>) -> Result<Handove
             wrong.push(said(&e));
             continue;
         }
-        match &head {
-            None => head = Some(receipt.head()),
-            Some(held) if *held != receipt.head() => {
-                wrong.push(format!(
-                    "{name}: against a log of {} entries where the rest of this satchel is against \
-                     {}",
-                    receipt.size, held.size
-                ));
-                continue;
-            }
-            Some(_) => {}
+        let held = signed_head.as_ref().or(head.as_ref());
+        if let Some(line) = held.and_then(|held| off_head(&receipt, held, signed_head.is_some())) {
+            wrong.push(format!("{name}: {line}"));
+            continue;
+        }
+        if let Err(e) = receipt.check_path(held.is_some()) {
+            wrong.push(said(&e));
+            continue;
+        }
+        if head.is_none() {
+            head = Some(receipt.head());
         }
         proven.push(receipt.id);
     }
 
-    // The signed head, when one travelled, has to be the head the receipts are
-    // against.
     let mut head_signer = None;
     let mut head_accepted = false;
-    let head_text = match read_regular_opt(&head_beside(&root)) {
-        Ok(Some(bytes)) => match String::from_utf8(bytes) {
-            Ok(text) => Some(text),
-            Err(_) => {
-                wrong.push("head: not text".into());
-                None
-            }
-        },
-        Ok(None) => None,
-        Err(e) => {
-            wrong.push(said(&e));
-            None
-        }
-    };
-    if let Some(text) = head_text {
-        match SignedHead::parse(&text).and_then(|signed| {
-            let accepted = signed.check(accept)?;
-            Ok((signed, accepted))
-        }) {
-            Ok((signed, accepted)) => {
-                if head.as_ref().is_some_and(|held| *held != signed.head) {
-                    wrong.push(format!(
-                        "the signed head covers a log of {} entries and the deeds prove membership \
-                         in one of {}",
-                        signed.head.size,
-                        head.as_ref().map_or(0, |held| held.size)
-                    ));
+    if let Some(signed) = signed {
+        if signed_head.is_some() {
+            match signed.check(accept) {
+                Ok(accepted) => {
+                    head_signer = Some(signed.signer);
+                    head_accepted = accepted;
                 }
-                if let Err(e) = links_bound(&root, &signed) {
-                    wrong.push(said(&e));
-                }
-                head_signer = Some(signed.signer);
-                head_accepted = accepted;
+                Err(e) => head_wrong.push(said(&e)),
             }
-            Err(e) => wrong.push(said(&e)),
+            if let Err(e) = links_bound(&root, &signed) {
+                head_wrong.push(said(&e));
+            }
+        } else {
+            head_wrong.extend(head_moved(&signed, head.as_ref(), &root));
         }
     }
+    wrong.extend(head_wrong);
 
     if wrong.is_empty() {
         proven.sort();
@@ -970,6 +1039,66 @@ pub fn check_handover(dir: &Path, accept: &BTreeSet<[u8; 32]>) -> Result<Handove
             wrong.join("\n")
         )))
     }
+}
+
+/// The line for a receipt against another head than `held`. A size that
+/// differs says enough; the root is named when the sizes agree.
+fn off_head(receipt: &Receipt, held: &Head, signed: bool) -> Option<String> {
+    let from = if signed {
+        "head"
+    } else {
+        "where the rest of this satchel is"
+    };
+    if receipt.size != held.size {
+        return Some(format!(
+            "log size: expected {} ({from}), found {} (proof.txt)",
+            held.size, receipt.size
+        ));
+    }
+    (receipt.root != held.root).then(|| {
+        format!(
+            "log root: expected {} ({from}), found {} (proof.txt)",
+            held.root, receipt.root
+        )
+    })
+}
+
+/// What moved in a head line whose signature does not cover it as written.
+/// When the signature covers the head the receipts are against and this
+/// bag's link digest, it is the head line's fields that moved and each one
+/// is named; otherwise the signature, or the key beside it, did.
+fn head_moved(signed: &SignedHead, held: Option<&Head>, root: &Path) -> Vec<String> {
+    let links = match signed.links {
+        Some(_) => match link_commitment(root) {
+            Ok(links) => Some(links),
+            Err(_) => return vec![signed.uncovered()],
+        },
+        None => None,
+    };
+    let Some(held) = held.filter(|held| signed.covers(held, links.as_deref())) else {
+        return vec![signed.uncovered()];
+    };
+    let mut moved = Vec::new();
+    if held.size != signed.head.size {
+        moved.push(format!(
+            "head log size: expected {} (proof.txt), found {} (head)",
+            held.size, signed.head.size
+        ));
+    }
+    if held.root != signed.head.root {
+        moved.push(format!(
+            "head log root: expected {} (proof.txt), found {} (head)",
+            held.root, signed.head.root
+        ));
+    }
+    if let (Some(got), Some(line)) = (&links, &signed.links) {
+        if got != line {
+            moved.push(format!(
+                "head links: expected {got} (the sidecars in this bag), found {line} (head)"
+            ));
+        }
+    }
+    moved
 }
 
 /// Whether a deed folder is named for the deed it holds. The head signature
@@ -994,8 +1123,8 @@ pub(crate) fn named_for(folder: &Path, proof_id: &str, deed_id: &str) -> Result<
     }
     if name != proof_id || name != deed_id {
         return Err(Error::Evidence(format!(
-            "deed.bin is {deed_id} and proof.txt is {proof_id}, and a deed folder has to be \
-             named for the deed it holds"
+            "accession: expected {name} (the folder), found {deed_id} (deed.bin) and {proof_id} \
+             (proof.txt), and a deed folder has to be named for the deed it holds"
         )));
     }
     Ok(())
@@ -1121,7 +1250,10 @@ mod tests {
         let err = borrowed
             .check(&body(3))
             .expect_err("somebody else's path passed");
-        assert!(format!("{err}").contains("does not carry"), "{err}");
+        assert!(
+            format!("{err}").contains("timestamp, index, path or log head: expected"),
+            "{err}"
+        );
     }
 
     /// A receipt missing a field is refused, not defaulted.
@@ -1332,7 +1464,7 @@ mod tests {
         let err = moved
             .check(&BTreeSet::new())
             .expect_err("a moved head passed");
-        assert!(format!("{err}").contains("does not cover"), "{err}");
+        assert!(said(&err).starts_with("head signature: expected"), "{err}");
 
         // And it is domain separated from the manifest signature, so one
         // cannot be presented as the other.
@@ -1399,5 +1531,206 @@ mod tests {
             format!("{err}").contains("where the rest of this satchel"),
             "{err}"
         );
+    }
+
+    /// A receipt in the form every release so far writes. The digest, path
+    /// and root are worked out from the leaf and node rules in the reference,
+    /// not by this crate, so a change to the format or the hashing fails here.
+    #[test]
+    fn a_receipt_in_the_released_form_still_verifies() {
+        let text = "id=deed-quote-old\n\
+            digest=sha256:d91d2d84a4d49fc705f9c3850ebff85b434d41c0918613d5cc86a642bdefb68a\n\
+            time=1757635201\n\
+            index=1\n\
+            size=2\n\
+            root=c7775b995251a0c5bb074df091d94639f41c6add77c0846f8ce802c061c310b2\n\
+            path=96d0966849e8def89721dd3cadd20fe9c620ee2fe70c219c601c7beed5108cff\n";
+        Receipt::parse(text)
+            .expect("parses")
+            .check(b"the bytes of an old deed")
+            .expect("verifies");
+    }
+
+    /// The seed the test bag's head is signed with; any 32 bytes would do.
+    const KEY: [u8; 32] = [5u8; 32];
+
+    /// Three deeds and a head signed over them, as an export writes them.
+    fn signed_bag() -> (tempfile::TempDir, Vec<log::Entry>, SignedHead) {
+        let all = entries(3);
+        let dir = tempfile::tempdir().expect("tempdir");
+        for at in 0..all.len() {
+            let out = dir.path().join(&all[at].id);
+            std::fs::create_dir_all(&out).expect("dirs");
+            std::fs::write(out.join("deed.bin"), body(at)).expect("bytes");
+            put_receipt(&dir, &receipt_for(&all, at));
+        }
+        let head = receipt_for(&all, 0).head();
+        let links = link_commitment(dir.path()).expect("links");
+        let key = ed25519_dalek::SigningKey::from_bytes(&KEY);
+        let signed = SignedHead {
+            signature: ed25519_dalek::Signer::sign(&key, &head_message(&head, Some(&links)))
+                .to_bytes(),
+            head,
+            links: Some(links),
+            signer: key.verifying_key().to_bytes(),
+        };
+        put_head(&dir, &signed);
+        (dir, all, signed)
+    }
+
+    fn put_receipt(dir: &tempfile::TempDir, receipt: &Receipt) {
+        let path = dir.path().join(&receipt.id).join("proof.txt");
+        std::fs::write(path, receipt.render()).expect("receipt");
+    }
+
+    fn put_head(dir: &tempfile::TempDir, signed: &SignedHead) {
+        std::fs::write(head_beside(dir.path()), signed.render()).expect("head");
+    }
+
+    /// What a check of the bag reports, which has to be exactly one line.
+    fn one_line(dir: &tempfile::TempDir, accept: &BTreeSet<[u8; 32]>) -> String {
+        let err = check_handover(dir.path(), accept).expect_err("an altered bag passed");
+        let text = said(&err);
+        let lines: Vec<&str> = text.lines().skip(1).collect();
+        assert_eq!(lines.len(), 1, "{text}");
+        lines[0].to_string()
+    }
+
+    #[test]
+    fn an_untouched_signed_bag_verifies() {
+        let (dir, _, signed) = signed_bag();
+        let done = check_handover(dir.path(), &BTreeSet::from([signed.signer])).expect("verifies");
+        assert_eq!(done.proven.len(), 3);
+        assert!(done.head_accepted);
+    }
+
+    #[test]
+    fn an_altered_deed_hash_is_named() {
+        let (dir, all, _) = signed_bag();
+        let real = receipt_for(&all, 1);
+        let moved = Receipt {
+            digest: format!("sha256:{}", "0".repeat(64)),
+            ..real.clone()
+        };
+        put_receipt(&dir, &moved);
+        let line = one_line(&dir, &BTreeSet::new());
+        let want = format!(
+            "{}: deed hash: expected {} (proof.txt), ",
+            real.id, moved.digest
+        );
+        assert!(line.starts_with(&want), "{line}");
+        assert!(line.contains(&format!("found {}", real.digest)), "{line}");
+    }
+
+    #[test]
+    fn an_altered_timestamp_is_named() {
+        let (dir, all, _) = signed_bag();
+        let real = receipt_for(&all, 1);
+        let moved = Receipt {
+            unix_time: real.unix_time + 1,
+            ..real.clone()
+        };
+        put_receipt(&dir, &moved);
+        let line = one_line(&dir, &BTreeSet::new());
+        let want = format!(
+            "{}: timestamp, index or path: expected time={} index=1 ",
+            real.id, moved.unix_time
+        );
+        assert!(line.starts_with(&want), "{line}");
+    }
+
+    #[test]
+    fn an_altered_log_root_in_a_receipt_is_named() {
+        let (dir, all, _) = signed_bag();
+        let real = receipt_for(&all, 1);
+        let moved = Receipt {
+            root: "0".repeat(64),
+            ..real.clone()
+        };
+        put_receipt(&dir, &moved);
+        let line = one_line(&dir, &BTreeSet::new());
+        let want = format!(
+            "{}: log root: expected {} (head), found {} (proof.txt)",
+            real.id, real.root, moved.root
+        );
+        assert_eq!(line, want);
+    }
+
+    #[test]
+    fn an_altered_log_root_in_the_head_is_named() {
+        let (dir, _, signed) = signed_bag();
+        let moved = SignedHead {
+            head: Head {
+                root: "0".repeat(64),
+                ..signed.head.clone()
+            },
+            ..signed.clone()
+        };
+        put_head(&dir, &moved);
+        let line = one_line(&dir, &BTreeSet::new());
+        let want = format!(
+            "head log root: expected {} (proof.txt), found {} (head)",
+            signed.head.root, moved.head.root
+        );
+        assert_eq!(line, want);
+    }
+
+    #[test]
+    fn an_altered_signature_is_named() {
+        let (dir, _, signed) = signed_bag();
+        let mut moved = signed.clone();
+        moved.signature[0] ^= 1;
+        put_head(&dir, &moved);
+        let line = one_line(&dir, &BTreeSet::new());
+        let want = format!(
+            "head signature: expected one by {} ",
+            log::hex(&signed.signer)
+        );
+        assert!(line.starts_with(&want), "{line}");
+        let found = format!(
+            "found {}, which does not verify",
+            log::hex(&moved.signature)
+        );
+        assert!(line.ends_with(&found), "{line}");
+    }
+
+    #[test]
+    fn an_unaccepted_signer_is_named() {
+        let (dir, _, signed) = signed_bag();
+        let stranger = ed25519_dalek::SigningKey::from_bytes(&[6u8; 32])
+            .verifying_key()
+            .to_bytes();
+        let line = one_line(&dir, &BTreeSet::from([stranger]));
+        let want = format!(
+            "head signer: expected one of {}, found {}, which is not a key this reader accepts",
+            log::hex(&stranger),
+            log::hex(&signed.signer)
+        );
+        assert_eq!(line, want);
+    }
+
+    /// A head line as releases before 0.6.0 wrote it, with no `links=`, still
+    /// verifies over a bag that carries no link sidecars. Over one that does,
+    /// the line says which form the head is in.
+    #[test]
+    fn a_head_line_from_before_links_still_verifies() {
+        let (dir, all, signed) = signed_bag();
+        let key = ed25519_dalek::SigningKey::from_bytes(&KEY);
+        let old = SignedHead {
+            links: None,
+            signature: ed25519_dalek::Signer::sign(&key, &head_message(&signed.head, None))
+                .to_bytes(),
+            ..signed
+        };
+        assert!(!old.render().contains("links="));
+        put_head(&dir, &old);
+        let done = check_handover(dir.path(), &BTreeSet::from([old.signer])).expect("verifies");
+        assert!(done.head_accepted);
+
+        let supersedes = format!("{}\n{}\n", all[0].id, all[0].digest);
+        std::fs::write(dir.path().join(&all[1].id).join("supersedes"), supersedes).unwrap();
+        let line = one_line(&dir, &BTreeSet::new());
+        assert!(line.starts_with("head links: expected links= "), "{line}");
+        assert!(line.contains("as releases before 0.6.0 wrote it"), "{line}");
     }
 }
