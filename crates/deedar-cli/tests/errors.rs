@@ -8,11 +8,17 @@ use std::path::Path;
 use std::process::{Command, Output};
 
 fn deedar(home: &Path, args: &[&str]) -> Output {
+    deedar_xdg(home, &home.join(".local/share"), args)
+}
+
+/// `XDG_DATA_HOME` is its own directory, so a test can tell the seat store
+/// from the home-directory fallback.
+fn deedar_xdg(home: &Path, xdg: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_deedar"))
         .args(args)
         .env("HOME", home)
         .env("XDG_CONFIG_HOME", home.join(".config"))
-        .env("XDG_DATA_HOME", home.join(".local/share"))
+        .env("XDG_DATA_HOME", xdg)
         .env("DEEDAR_HOST_SIGNING_KEY", "off")
         .env_remove("DEEDAR_HOST_KEY")
         .env_remove("DEEDAR_URL")
@@ -201,6 +207,178 @@ fn an_unset_deedar_url_names_the_seat_path_and_exits_1() {
              `export DEEDAR_URL=file://{path}` or `deedar --url file://{path}`\n"
         ),
     );
+    assert!(!seat.exists(), "list must not make the seat store");
+}
+
+/// The first create on a fresh machine stores the deed and names the seat path.
+///
+/// `$XDG_DATA_HOME/deedar/store` is one fixed directory, so making it cannot
+/// split citations the way a store in the working directory would. A second
+/// create finds the directory and stays quiet.
+#[test]
+fn the_first_create_makes_the_seat_store() {
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    let xdg = home.join("xdg");
+    let seat = xdg.join("deedar/store");
+    let create = [
+        "create",
+        "quote",
+        "--excerpt",
+        "x",
+        "--src-url",
+        "https://e.invalid",
+        "--agent",
+        "me",
+    ];
+    let out = deedar_xdg(home, &xdg, &create);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8(out.stdout).expect("stdout is utf8");
+    let accession = stdout
+        .lines()
+        .find_map(|line| line.strip_prefix("accession="))
+        .expect("accession line");
+    assert_eq!(
+        String::from_utf8_lossy(&out.stderr),
+        format!("deedar: created the store at {}\n", seat.display())
+    );
+    assert!(seat.is_dir());
+    assert!(
+        !home.join(".local/share/deedar").exists(),
+        "a second store was made under HOME"
+    );
+
+    let listed = deedar_xdg(home, &xdg, &["list"]);
+    assert!(
+        listed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&listed.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&listed.stdout).contains(&format!("id={accession}")),
+        "{}",
+        String::from_utf8_lossy(&listed.stdout)
+    );
+
+    let again = deedar_xdg(home, &xdg, &create);
+    assert!(
+        again.status.success(),
+        "{}",
+        String::from_utf8_lossy(&again.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&again.stderr), "");
+    assert!(
+        String::from_utf8_lossy(&again.stdout).contains(&format!("accession={accession}")),
+        "{}",
+        String::from_utf8_lossy(&again.stdout)
+    );
+}
+
+/// The first import makes the same seat store, and says so once.
+#[test]
+fn the_first_import_makes_the_seat_store() {
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    let url = store_url(home);
+    quote(home, &url, "deed-quote-carried");
+    ok(
+        home,
+        &[
+            "--url",
+            &url,
+            "export",
+            "--into",
+            "bag/data/deeds",
+            "deed-quote-carried",
+        ],
+    );
+
+    let xdg = home.join("xdg");
+    let seat = xdg.join("deedar/store");
+    let out = deedar_xdg(home, &xdg, &["import", "bag", "--allow-unsigned-head"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&out.stderr),
+        format!("deedar: created the store at {}\n", seat.display())
+    );
+    let listed = deedar_xdg(home, &xdg, &["list"]);
+    assert!(
+        listed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&listed.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&listed.stdout).contains("id=deed-quote-carried"),
+        "{}",
+        String::from_utf8_lossy(&listed.stdout)
+    );
+
+    let again = deedar_xdg(home, &xdg, &["import", "bag", "--allow-unsigned-head"]);
+    assert!(
+        again.status.success(),
+        "{}",
+        String::from_utf8_lossy(&again.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&again.stderr), "");
+}
+
+/// A store the seat named is created with no seat-store line.
+#[test]
+fn a_named_new_store_does_not_say_the_seat_store_was_created() {
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    let xdg = home.join("xdg");
+    let create = [
+        "create",
+        "quote",
+        "--excerpt",
+        "x",
+        "--src-url",
+        "https://e.invalid",
+        "--agent",
+        "me",
+    ];
+    let url = store_url(home);
+    let mut args = vec!["--url", &url];
+    args.extend_from_slice(&create);
+    let out = deedar_xdg(home, &xdg, &args);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&out.stderr), "");
+    assert!(!xdg.join("deedar/store").exists());
+
+    let other = home.join("other");
+    let named = format!("file://{}", other.display());
+    let out = Command::new(env!("CARGO_BIN_EXE_deedar"))
+        .args(create)
+        .env("HOME", home)
+        .env("XDG_CONFIG_HOME", home.join(".config"))
+        .env("XDG_DATA_HOME", &xdg)
+        .env("DEEDAR_URL", &named)
+        .env("DEEDAR_HOST_SIGNING_KEY", "off")
+        .env_remove("DEEDAR_HOST_KEY")
+        .current_dir(home)
+        .output()
+        .expect("deedar runs");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&out.stderr), "");
+    assert!(other.is_dir());
+    assert!(!xdg.join("deedar/store").exists());
 }
 
 #[test]

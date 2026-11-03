@@ -3,7 +3,9 @@ Command line
 
 ``deedar [--url FILE] VERB ...``. The store is ``--url``, else ``DEEDAR_URL``,
 else the seat's own store under the user's data directory
-(``$XDG_DATA_HOME/deedar/store``) when it already exists.
+(``$XDG_DATA_HOME/deedar/store``). ``create`` and ``import`` make that store
+when it is not there yet, and print ``deedar: created the store at PATH``
+on stderr. A read names the missing path and stops.
 
 =================================================================================== ====================================================================================================================================================================================================================================
 Verb                                                                                Does

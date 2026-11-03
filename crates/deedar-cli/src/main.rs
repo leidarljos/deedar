@@ -450,6 +450,8 @@ fn cmd_log(client: &mut Client, url: &str, args: &[String]) -> Result<String, St
 
 fn run(args: Vec<String>) -> Result<String, String> {
     let (url, rest) = take_url(&args)?;
+    // Before open: open is what creates the directory.
+    let created_seat = creating_the_seat_store(&args, &rest);
     let mut client = open_client(&url)?;
     match rest.first().map(String::as_str) {
         Some("host") if rest.get(1).map(String::as_str) == Some("accept") => {
@@ -489,6 +491,9 @@ fn run(args: Vec<String>) -> Result<String, String> {
             }
         }
         Some("create") => {
+            if created_seat {
+                say_store_created(client.dir());
+            }
             let made = cmd_create(&mut client, &rest[1..]);
             if made.is_ok() {
                 if let Some(public) = client.unaccepted_signer() {
@@ -557,7 +562,12 @@ fn run(args: Vec<String>) -> Result<String, String> {
         }
         Some("log") => cmd_log(&mut client, &url, &rest[1..]),
         Some("export") => cmd_export(&mut client, &url, &rest[1..]),
-        Some("import") => cmd_import(&mut client, &rest[1..]),
+        Some("import") => {
+            if created_seat {
+                say_store_created(client.dir());
+            }
+            cmd_import(&mut client, &rest[1..])
+        }
         Some("check") => cmd_check(&url, &rest[1..]),
         Some("vouch") => cmd_vouch(&url, &rest[1..]),
         Some("migrate") => {
@@ -611,9 +621,11 @@ fn create_help() -> String {
         .into()
 }
 
-/// The store to act on: `--url`, then `DEEDAR_URL`, then the seat's own if it
-/// exists. An absent seat store names that path and the command that sets
-/// `DEEDAR_URL`.
+/// The store to act on: `--url`, then `DEEDAR_URL`, then the seat's own.
+///
+/// `create` and `import` use the seat path when that directory is not there
+/// yet, and opening it makes the directory. Any other verb names the missing
+/// path and stops, because there is nothing to read.
 fn take_url(args: &[String]) -> Result<(String, Vec<String>), String> {
     let mut url = env::var("DEEDAR_URL").unwrap_or_default();
     let mut rest = Vec::new();
@@ -630,7 +642,9 @@ fn take_url(args: &[String]) -> Result<(String, Vec<String>), String> {
     if url.is_empty() {
         let seat = deedar::default_store();
         match seat {
-            Some(dir) if dir.is_dir() => url = format!("file://{}", dir.display()),
+            Some(dir) if dir.is_dir() || may_make_missing_seat(&dir, &rest) => {
+                url = format!("file://{}", dir.display());
+            }
             Some(dir) => {
                 let path = dir.display();
                 return Err(format!(
@@ -647,6 +661,45 @@ fn take_url(args: &[String]) -> Result<(String, Vec<String>), String> {
         }
     }
     Ok((url, rest))
+}
+
+/// `create` and `import` may make a seat directory that is not there yet.
+///
+/// A file already at that path is refused with the same line a read uses.
+/// It is not a directory this write should try to create.
+fn may_make_missing_seat(dir: &Path, rest: &[String]) -> bool {
+    !dir.exists() && makes_the_seat_store(rest)
+}
+
+/// The writes that open the seat store on first use.
+///
+/// The seat store is one fixed path, not the working directory, so making
+/// it cannot split citations across two stores. A read has nothing to open.
+fn makes_the_seat_store(rest: &[String]) -> bool {
+    matches!(rest.first().map(String::as_str), Some("create" | "import"))
+}
+
+/// Whether this write will make the seat store, so the command can say so.
+///
+/// False when the seat named a store, or the directory is already there.
+/// A later write finds the directory and stays quiet. Checked before open,
+/// which is what creates the directory.
+fn creating_the_seat_store(args: &[String], rest: &[String]) -> bool {
+    if args.iter().any(|arg| arg == "--url") {
+        return false;
+    }
+    if env::var("DEEDAR_URL")
+        .ok()
+        .is_some_and(|url| !url.is_empty())
+    {
+        return false;
+    }
+    deedar::default_store().is_some_and(|dir| may_make_missing_seat(&dir, rest))
+}
+
+/// One stderr line naming the seat store a first write just made.
+fn say_store_created(path: &Path) {
+    eprintln!("deedar: created the store at {}", path.display());
 }
 
 /// Open `url`, or say how to point at a store when this path is not one.
@@ -1239,9 +1292,8 @@ mod url_tests {
 
     #[test]
     fn no_store_refuses_and_names_the_path_it_wanted() {
-        // Creating one wherever a command happened to run is how a seat ends
-        // up with two stores, and a citation resolving against one and not the
-        // other is worse than a command that refused.
+        // A read has nothing at the seat path, so it names that path and
+        // stops. create and import are the verbs that make the directory.
         let dir = tempfile::tempdir().unwrap();
         with_home(dir.path(), None, || {
             let err = take_url(&["list".to_string()]).unwrap_err();
@@ -1249,6 +1301,44 @@ mod url_tests {
             assert!(err.contains("no store at"), "{err}");
             assert!(err.contains(".local/share/deedar/store"), "{err}");
             assert!(err.contains("export DEEDAR_URL=file://"), "{err}");
+        });
+    }
+
+    #[test]
+    fn create_and_import_resolve_a_missing_seat_store() {
+        // The seat store is one fixed path, not the working directory, so
+        // the first write can make it. Naming the path does not create it;
+        // opening the store does.
+        let dir = tempfile::tempdir().unwrap();
+        let store = dir.path().join(".local/share/deedar/store");
+        with_home(dir.path(), None, || {
+            for verb in ["create", "import"] {
+                let (url, rest) = take_url(&[verb.to_string()]).unwrap();
+                assert_eq!(url, format!("file://{}", store.display()), "{verb}");
+                assert_eq!(rest, vec![verb.to_string()]);
+            }
+        });
+        assert!(!store.exists());
+
+        let xdg = dir.path().join("data");
+        let xdg_store = xdg.join("deedar/store");
+        with_home(dir.path(), Some(&xdg), || {
+            let (url, _) = take_url(&["create".to_string()]).unwrap();
+            assert_eq!(url, format!("file://{}", xdg_store.display()));
+        });
+        assert!(!xdg_store.exists());
+    }
+
+    #[test]
+    fn a_file_at_the_seat_path_is_not_a_store_to_create() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = dir.path().join(".local/share/deedar/store");
+        std::fs::create_dir_all(store.parent().unwrap()).unwrap();
+        std::fs::write(&store, b"not a directory\n").unwrap();
+        with_home(dir.path(), None, || {
+            let err = take_url(&["create".to_string()]).unwrap_err();
+            assert!(err.contains("no store at"), "{err}");
+            assert!(err.contains(&store.display().to_string()), "{err}");
         });
     }
 }
