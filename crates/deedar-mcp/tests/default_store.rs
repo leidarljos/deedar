@@ -18,10 +18,33 @@ use tokio::process::ChildStderr;
 
 const ACCESSION: &str = "deed-quote-seat";
 
+/// Run `test` in a child process whose host signing key is already off.
+///
+/// Creating the scratch store reads `DEEDAR_HOST_SIGNING_KEY`. Setting that
+/// from a tokio test races the other tests in this process, so the child is
+/// started with the variable set and this process never writes the environment.
+fn rerun_with_signing_off(test: &str) -> bool {
+    if std::env::var_os("DEEDAR_MCP_SIGNING_OFF").is_some() {
+        return false;
+    }
+    let output = std::process::Command::new(std::env::current_exe().expect("test exe"))
+        .env("DEEDAR_MCP_SIGNING_OFF", "1")
+        .env("DEEDAR_HOST_SIGNING_KEY", "off")
+        .env_remove("DEEDAR_HOST_KEY")
+        .args(["--exact", test, "--test-threads=1"])
+        .output()
+        .expect("re-run the test with signing off");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success() && stdout.contains("1 passed"),
+        "{stdout}\n{stderr}"
+    );
+    true
+}
+
 /// A scratch home whose data directory holds a store with one deed.
 fn seat_home() -> tempfile::TempDir {
-    std::env::set_var("DEEDAR_HOST_SIGNING_KEY", "off");
-    std::env::remove_var("DEEDAR_HOST_KEY");
     let home = tempfile::tempdir().expect("scratch");
     let store = home.path().join("xdg/deedar/store");
     let mut client = Client::open(&format!("file://{}", store.display())).expect("open");
@@ -78,6 +101,9 @@ async fn listed(home: &Path, deedar_url: Option<&str>) -> Vec<String> {
 
 #[tokio::test]
 async fn the_seat_store_under_xdg_data_home_is_the_one_listed() {
+    if rerun_with_signing_off("the_seat_store_under_xdg_data_home_is_the_one_listed") {
+        return;
+    }
     let home = seat_home();
     assert_eq!(listed(home.path(), None).await, vec![ACCESSION.to_string()]);
     assert!(
@@ -88,6 +114,9 @@ async fn the_seat_store_under_xdg_data_home_is_the_one_listed() {
 
 #[tokio::test]
 async fn an_empty_deedar_url_is_unset() {
+    if rerun_with_signing_off("an_empty_deedar_url_is_unset") {
+        return;
+    }
     let home = seat_home();
     assert_eq!(
         listed(home.path(), Some("")).await,
