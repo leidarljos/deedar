@@ -1036,18 +1036,18 @@ fn cmd_create(client: &mut Client, args: &[String]) -> Result<String, String> {
         Kind::Event => Body::Event { when, where_, who },
     };
     let asked = name.clone();
-    let (deed, _) = client
-        .create(CreateRequest {
-            id,
-            name,
-            sources,
-            agent_id: agent,
-            activity_id: activity,
-            grants,
-            body,
-            supersedes,
-        })
-        .map_err(|e| frozen_hint(&e, &asked))?;
+    let prior = supersedes.clone();
+    let created = client.create(CreateRequest {
+        id,
+        name,
+        sources,
+        agent_id: agent,
+        activity_id: activity,
+        grants,
+        body,
+        supersedes,
+    });
+    let (deed, _) = created.map_err(|e| frozen_hint(client, &e, &asked, prior.as_ref()))?;
     // The last line is always the accession to cite: the kind lines above
     // end in a path or a digest, which no citation accepts.
     Ok(format!("{}accession={}\n", format_one(&deed), deed.id))
@@ -1057,14 +1057,53 @@ fn cmd_create(client: &mut Client, args: &[String]) -> Result<String, String> {
 /// The same deed again is no error: the store hands it back. A frozen id
 /// here differs from what the store has, so the revision needs a name of
 /// its own and a `--supersedes` link to the deed it revises.
-fn frozen_hint(e: &deed::Error, name: &str) -> String {
-    match e {
-        deed::Error::Frozen(id) => format!(
-            "{e}; the store has {id} with other content, or it was deleted. \
-             A revision takes a new name and points at the old deed: \
-             --name {name}-v2 --supersedes {id}"
-        ),
-        _ => e.to_string(),
+/// When this create already passed `--supersedes P` and the freeze names
+/// P, P has a successor. The hint names the tip `current` walks to.
+/// A fork or a cycle has no single tip, so the line lists those accessions.
+fn frozen_hint(
+    client: &mut Client,
+    e: &deed::Error,
+    name: &str,
+    supersedes: Option<&DeedId>,
+) -> String {
+    let deed::Error::Frozen(id) = e else {
+        return e.to_string();
+    };
+    if let Some(prior) = supersedes.filter(|prior| prior.as_str() == id) {
+        if let Some(line) = revised_by(client, prior) {
+            return format!("{e}; {line}");
+        }
+    }
+    format!(
+        "{e}; the store has {id} with other content, or it was deleted. \
+         A revision takes a new name and points at the old deed: \
+         --name {name}-v2 --supersedes {id}"
+    )
+}
+
+/// `P is already revised by TIP; revise that: --supersedes TIP` when `current`
+/// walks off `prior`. A fork or a cycle lists those accessions instead: there
+/// is no one deed to pass to `--supersedes`. `None` when `prior` is still the
+/// tip, which is a successor file naming a deed that is gone, so the ordinary
+/// frozen line still applies.
+fn revised_by(client: &mut Client, prior: &DeedId) -> Option<String> {
+    match client.current(prior) {
+        Ok(tip) if tip.id.as_str() != prior.as_str() => {
+            let tip = tip.id;
+            Some(format!(
+                "{prior} is already revised by {tip}; revise that: --supersedes {tip}"
+            ))
+        }
+        Err(deed::Error::InvalidBody(body)) => {
+            let (kind, names) = body.split_once(' ')?;
+            if (kind != "fork" && kind != "cycle") || names.split_whitespace().next().is_none() {
+                return None;
+            }
+            Some(format!(
+                "{prior} is already revised by {names}; revise one of those"
+            ))
+        }
+        _ => None,
     }
 }
 
