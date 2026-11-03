@@ -26,6 +26,20 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
 
+  # release.yml publishes macOS archives, so the suite runs on macOS too.
+  # Formatting and clippy are the ubuntu job's checks.
+  test-macos:
+    runs-on: macos-latest
+    # The ubuntu job bounds fmt, clippy, and this same test command
+    # together at 20 minutes. This job runs the tests under that same bound.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.97.1
+      - run: cargo test --workspace
+
   licenses:
     name: cargo deny check licenses
     runs-on: ubuntu-latest
