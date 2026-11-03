@@ -103,10 +103,16 @@ fn current_many(url: &str, args: &[String]) -> Result<Report, String> {
                     }
                 }
                 // The accession was there. A later miss is about the chain,
-                // not about the name the seat typed.
+                // not about the name the seat typed. A fork or a cycle is
+                // still an answer.
                 Err(e) => {
-                    stale += 1;
-                    text.push_str(&format!("{raw} FAILED: {e}\n"));
+                    let msg = e.to_string();
+                    if let Some(lines) = current_note(&msg) {
+                        text.push_str(&lines);
+                    } else {
+                        stale += 1;
+                        text.push_str(&format!("{raw} FAILED: {msg}\n"));
+                    }
                 }
             },
             Err(e) => {
@@ -120,6 +126,28 @@ fn current_many(url: &str, args: &[String]) -> Result<Report, String> {
         ok: stale == 0,
         text,
     })
+}
+
+/// Stdout for a fork or a cycle, and one stderr line that names it.
+///
+/// `current` carries these as `invalid body: fork <ids>` or
+/// `invalid body: cycle <ids>`, in accession order. The graph is odd
+/// and the answer is still those ids, so the command exits 0. Any other
+/// error is left to the caller.
+fn current_note(err: &str) -> Option<String> {
+    let rest = err.strip_prefix("invalid body: ")?;
+    let (kind, names) = rest.split_once(' ')?;
+    if (kind != "fork" && kind != "cycle") || names.is_empty() {
+        return None;
+    }
+    eprintln!("deedar: warning: {kind} {names}");
+    let mut out = String::new();
+    for id in names.split_whitespace() {
+        out.push_str("id=");
+        out.push_str(id);
+        out.push('\n');
+    }
+    Some(out)
 }
 
 fn evidence_many(url: &str, args: &[String]) -> Result<Report, String> {
@@ -516,8 +544,13 @@ fn run(args: Vec<String>) -> Result<String, String> {
         Some("current") => {
             let raw = rest.get(1).ok_or("current needs an id")?;
             let id = resolve_id(&mut client, &url, raw)?;
-            let d = client.current(&id).map_err(|e| e.to_string())?;
-            Ok(format_one(&d))
+            match client.current(&id) {
+                Ok(d) => Ok(format_one(&d)),
+                Err(e) => {
+                    let msg = e.to_string();
+                    current_note(&msg).ok_or(msg)
+                }
+            }
         }
         Some("log") => cmd_log(&mut client, &url, &rest[1..]),
         Some("export") => cmd_export(&mut client, &url, &rest[1..]),
