@@ -276,10 +276,13 @@ pub fn verify_consistency(
     last == 0 && hex(&from_old) == old_root && hex(&from_new) == new_root
 }
 
-/// A 32 byte hash from its hex, or nothing when the text is not one.
+/// A 32 byte hash from the lower-case hex [`hex`] writes, or nothing when the
+/// text is not that.
 #[must_use]
 pub fn from_hex(text: &str) -> Option<[u8; 32]> {
-    if text.len() != 64 {
+    // `from_str_radix` alone also reads `+b` as `0b` and `B` as `b`, so a
+    // proof with a changed byte would still check.
+    if text.len() != 64 || !text.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')) {
         return None;
     }
     let mut out = [0u8; 32];
