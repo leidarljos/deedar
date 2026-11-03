@@ -1,28 +1,12 @@
+mod common;
+
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use deed::{Body, DeedId, Error, FormField, Grant, Kind, MailMessageId, Measure, Source, Step};
 use deedar::{encode_response, is_write_once_addr, Client, CreateRequest, FsStore, Response};
 
-/// The machine's own signing key, when it has one, would sign deeds into
-/// scratch stores that list no signer, and their evidence would fail for that
-/// reason instead. The switch is set once, by the first scratch store any test
-/// here asks for, so every later read of the environment comes after it.
-fn keyless() {
-    static OFF: std::sync::Once = std::sync::Once::new();
-    OFF.call_once(|| std::env::set_var("DEEDAR_HOST_SIGNING_KEY", "off"));
-}
-
-fn tmp_url() -> String {
-    keyless();
-    let n = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("time")
-        .as_nanos();
-    let dir = std::env::temp_dir().join(format!("deedar-store-{n}"));
-    std::fs::create_dir_all(&dir).unwrap();
-    format!("file://{}", dir.display())
-}
+use common::{scratch, tmp_url};
 
 fn write_blob(dir: &std::path::Path, name: &str, bytes: &[u8]) -> PathBuf {
     let p = dir.join(name);
@@ -707,11 +691,7 @@ fn trail_fails_when_an_input_deed_is_tombstoned() {
 
 #[test]
 fn fs_store_direct_create_uses_same_writer() {
-    let n = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let dir = std::env::temp_dir().join(format!("deedar-fs-{n}"));
+    let dir = scratch("deedar-fs");
     let mut store = FsStore::open(&dir).unwrap();
     let (d, _) = store
         .create(req(

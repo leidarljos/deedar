@@ -7,7 +7,7 @@ use std::path::Path;
 
 use deed::DeedId;
 
-use common::{file, open, tmp_url, write_blob};
+use common::{file, open, scratch, tmp_url, write_blob};
 
 fn copy_tree(src: &Path, dst: &Path) {
     fs::create_dir_all(dst).unwrap();
@@ -32,11 +32,7 @@ fn copy_without_layout_still_gets_trail_evidence_list() {
     let mut client = open(&url);
     client.create(file("deed-file-compat", sitting)).unwrap();
 
-    let n = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let dest = std::env::temp_dir().join(format!("deedar-compat-{n}"));
+    let dest = scratch("deedar-compat");
     copy_tree(&root, &dest);
     let layout = dest.join("layout");
     if layout.exists() {

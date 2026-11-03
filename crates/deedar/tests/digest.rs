@@ -1,14 +1,10 @@
+mod common;
+
 use deed::{Body, DeedId, Error};
 use deedar::{deed_digest, Client, CreateRequest};
 
 fn tmp_url() -> String {
-    let n = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("time")
-        .as_nanos();
-    let dir = std::env::temp_dir().join(format!("deedar-digest-{n}"));
-    std::fs::create_dir_all(&dir).unwrap();
-    format!("file://{}", dir.display())
+    format!("file://{}", common::scratch("deedar-digest").display())
 }
 
 fn file_req(id: &str, path: std::path::PathBuf) -> CreateRequest {

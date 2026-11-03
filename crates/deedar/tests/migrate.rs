@@ -7,7 +7,7 @@ use std::path::Path;
 
 use deed::DeedId;
 
-use common::{open, quote, tmp_url};
+use common::{open, quote, scratch, tmp_url};
 
 fn copy_tree(src: &Path, dst: &Path) {
     fs::create_dir_all(dst).unwrap();
@@ -37,11 +37,7 @@ fn open_writes_layout_and_gets_a_pre_layout_deed() {
         .unwrap();
 
     let src = deedar::store_dir(&url).unwrap();
-    let n = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let dest = std::env::temp_dir().join(format!("deedar-pre-layout-{n}"));
+    let dest = scratch("deedar-pre-layout");
     copy_tree(&src, &dest);
     let layout = dest.join("layout");
     if layout.exists() {

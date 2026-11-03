@@ -5,10 +5,11 @@
 //! only one a store can demand, because a keyed-hash verifier holds the key it
 //! checks with and can therefore mint what it checks.
 
+mod common;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use deed::{Body, DeedId, Error};
 use deedar::{Client, CreateRequest};
@@ -22,11 +23,7 @@ fn isolate() -> (std::sync::MutexGuard<'static, ()>, String, PathBuf) {
         std::env::remove_var("DEEDAR_HOST_KEY");
         std::env::remove_var("DEEDAR_HOST_SIGNING_KEY");
     }
-    let n = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("time")
-        .as_nanos();
-    let parent = std::env::temp_dir().join(format!("deedar-host-{n}"));
+    let parent = common::scratch("deedar-host");
     let store = parent.join("store");
     fs::create_dir_all(&store).unwrap();
     // The default signing key is read from the config directory; a machine
