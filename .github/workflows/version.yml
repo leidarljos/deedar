@@ -1,0 +1,35 @@
+name: version
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cog:
+    name: cog --check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-python@v5
+        with:
+          # 3.12 matches the docs workflow. tomllib, which reads the
+          # manifest, is in the stdlib from 3.11.
+          python-version: "3.12"
+      # cogapp, not cocogitto: both install a command named cog. 3.6.0 is
+      # the cogapp release pinned in CI for packset and vissue, so this job
+      # runs the same generator a maintainer runs with `cog -r @cogfiles.txt`.
+      # The version is written by hand only in Cargo.toml. Every copy
+      # cogfiles.txt lists has to be what that generator would write.
+      - name: cog --check
+        run: |
+          set -euo pipefail
+          python -m pip install -q 'cogapp==3.6.0'
+          cog --check --diff --check-fail-msg='run cog -r @cogfiles.txt' @cogfiles.txt

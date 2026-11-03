@@ -12,8 +12,12 @@ _ROOT = _DOCS.parent.parent
 project = "deedar"
 copyright = "2026, Rohit Goswami"
 author = "Rohit Goswami"
-release = "0.1.0"
-version = "0.1"
+# |version| is major.minor. |release| is the full crate version.
+# cog writes both from [workspace.package] in the workspace Cargo.toml.
+# [[[cog import versions; cog.outl(f'release = "{versions.version()}"'); cog.outl(f'version = "{versions.minor()}"') ]]]
+release = "0.6.1"
+version = "0.6"
+# [[[end]]]
 
 extensions = [
     "sphinx.ext.mathjax",
