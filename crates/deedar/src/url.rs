@@ -35,6 +35,21 @@ impl StoreUrl {
     }
 }
 
+/// Where a seat keeps its store when nobody says otherwise.
+///
+/// `$XDG_DATA_HOME/deedar/store`, or `~/.local/share/deedar/store`. The
+/// command line and the MCP server both ask here, so they open one store.
+#[must_use]
+pub fn default_store() -> Option<PathBuf> {
+    let base = std::env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| {
+            std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/share"))
+        })?;
+    Some(base.join("deedar").join("store"))
+}
+
 pub fn open(raw: &str) -> Result<FsStore> {
     let url = StoreUrl::parse(raw)?;
     FsStore::open(url.dir())

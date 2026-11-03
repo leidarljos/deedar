@@ -132,17 +132,22 @@ fn bad(e: impl std::fmt::Display) -> McpError {
 
 #[tool_router]
 impl DeedarServer {
-    /// Open on the store `DEEDAR_URL` names.
+    /// Open on the store `DEEDAR_URL` names, else the seat's own store, as
+    /// the command line does. An empty `DEEDAR_URL` is unset.
     ///
     /// # Errors
     ///
     /// Fails when no store is configured and none can be guessed.
     pub fn from_env() -> anyhow::Result<Self> {
-        let url = std::env::var("DEEDAR_URL").unwrap_or_else(|_| {
-            let home = std::env::var("HOME").unwrap_or_default();
-            format!("file://{home}/.local/share/deedar/store")
-        });
-        Ok(Self { url })
+        if let Some(url) = std::env::var("DEEDAR_URL").ok().filter(|u| !u.is_empty()) {
+            return Ok(Self { url });
+        }
+        let dir = deedar::default_store().ok_or_else(|| {
+            anyhow::anyhow!("DEEDAR_URL is unset and so are XDG_DATA_HOME and HOME")
+        })?;
+        Ok(Self {
+            url: format!("file://{}", dir.display()),
+        })
     }
 
     /// Open on a named store, for a test.

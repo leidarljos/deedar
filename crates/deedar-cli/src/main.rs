@@ -608,17 +608,6 @@ fn create_help() -> String {
         .into()
 }
 
-/// Where a seat keeps its store when nobody says otherwise.
-///
-/// `$XDG_DATA_HOME/deedar/store`, or `~/.local/share/deedar/store`.
-fn default_store() -> Option<PathBuf> {
-    let base = env::var_os("XDG_DATA_HOME")
-        .map(PathBuf::from)
-        .filter(|p| p.is_absolute())
-        .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/share")))?;
-    Some(base.join("deedar").join("store"))
-}
-
 /// The store to act on: `--url`, then `DEEDAR_URL`, then the seat's own if it
 /// exists. An absent seat store names that path and the command that sets
 /// `DEEDAR_URL`.
@@ -636,7 +625,7 @@ fn take_url(args: &[String]) -> Result<(String, Vec<String>), String> {
         i += 1;
     }
     if url.is_empty() {
-        let seat = default_store();
+        let seat = deedar::default_store();
         match seat {
             Some(dir) if dir.is_dir() => url = format!("file://{}", dir.display()),
             Some(dir) => {

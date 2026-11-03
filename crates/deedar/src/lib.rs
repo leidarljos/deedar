@@ -40,7 +40,7 @@ pub use receipt::{
     check_handover, check_since, kept_head, sign_head, Bridge, Handover, Receipt, SignedHead,
 };
 pub use timestamp::{imprint_hash, timestamp_req};
-pub use url::{open, StoreUrl};
+pub use url::{default_store, open, StoreUrl};
 pub use vouch::{Checked, Vouch};
 pub use wire::{
     decode_request, decode_response, encode_request, encode_response, Request, Response,
