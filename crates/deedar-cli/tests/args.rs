@@ -53,6 +53,7 @@ usage: deedar [--url FILE] create|get|list|trail|evidence|delete|leave|timestamp
 deedar --help            this page
 deedar create --help     kinds and flags, including --path
 evidence, current and export take one id, several ids, or - to read them from stdin
+list takes --kind KIND, --agent ID and --text WORDS
 log takes head, list, audit, backfill, prove ID, or bridge SIZE
 import takes a satchel directory, and --allow-unsigned-head for a missing or unlisted signature
 check takes a satchel directory, --since KEPT_HEAD, --bridge FILE and --keep FILE; vouch takes sign FILE or check FILE
@@ -150,6 +151,13 @@ fn a_step_equal_to_version_is_stored() {
         "id=deed-procedure-version kind=procedure name=procedure",
     );
     line(&got, "steps=1");
+}
+
+#[test]
+fn usage_names_the_list_filters() {
+    let home = tempfile::tempdir().unwrap();
+    let page = ok(home.path(), &["--help"]);
+    line(&page, "list takes --kind KIND, --agent ID and --text WORDS");
 }
 
 #[test]

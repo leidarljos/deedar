@@ -1,10 +1,9 @@
 Command line
 ============
 
-``deedar [--url FILE] VERB ...``. The store is ``--url``, else ``DEEDAR_URL``,
-else the seat's own store under the user's data directory (``$XDG_DATA_HOME/deedar/store``).
-``create`` and ``import`` make that store when it is not there yet,
-and print ``deedar: created the store at PATH`` on stderr.
+``deedar [--url FILE] VERB ...``.
+The store is ``--url``, else ``DEEDAR_URL``, else the seat's own store under the user's data directory (``$XDG_DATA_HOME/deedar/store``).
+``create`` and ``import`` make that store when it is not there yet, and print ``deedar: created the store at PATH`` on stderr.
 A read names the missing path and stops.
 
 =================================================================================== ====================================================================================================================================================================================================================================
@@ -12,7 +11,7 @@ Verb                                                                            
 =================================================================================== ====================================================================================================================================================================================================================================
 ``create KIND --name N --agent A [--path P] [--input DEED]... [--supersedes DEED]`` mint one deed; kind-specific flags below
 ``get ID``                                                                          one deed, flattened
-``list``                                                                            every deed, newest first
+``list``                                                                            every deed in accession order; ``--kind``, ``--agent`` and ``--text`` narrow it
 ``trail ID``                                                                        the deed and every input it was made from
 ``evidence ID... \vert -``                                                          the bytes are intact; one line each; non-zero on any failure
 ``current ID... \vert -``                                                           the tip of each supersede chain; non-zero when any citation is stale or missing

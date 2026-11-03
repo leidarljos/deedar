@@ -586,6 +586,7 @@ fn usage() -> String {
      deedar --help            this page\n\
      deedar create --help     kinds and flags, including --path\n\
      evidence, current and export take one id, several ids, or - to read them from stdin\n\
+     list takes --kind KIND, --agent ID and --text WORDS\n\
      log takes head, list, audit, backfill, prove ID, or bridge SIZE\n\
      import takes a satchel directory, and --allow-unsigned-head for a missing or unlisted signature\n\
      check takes a satchel directory, --since KEPT_HEAD, --bridge FILE and --keep FILE; vouch takes sign FILE or check FILE\n\
