@@ -1,7 +1,8 @@
 //! The deed store over MCP. Every tool reads; `delete` is not offered.
 //! The `log` verbs answer whether the store still answers for what it published.
 
-use std::path::PathBuf;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 
 use rmcp::{
     handler::server::wrapper::Json, handler::server::wrapper::Parameters,
@@ -28,6 +29,21 @@ const RESOURCE_TTL_MS: u64 = 0;
 #[derive(Clone)]
 pub struct DeedarServer {
     url: String,
+    /// Set when `url` is the seat store, not a store `DEEDAR_URL` named.
+    ///
+    /// A named store is opened as given, including creating it. The seat
+    /// store is one fixed path. A write creates it. A read that finds it
+    /// missing returns the command line's hint and creates nothing.
+    seat: Option<PathBuf>,
+}
+
+/// Whether the tool writes the store.
+///
+/// Export is the write this server offers. Everything else reads, and a
+/// read has nothing to create.
+enum Access {
+    Read,
+    Write,
 }
 
 /// One deed, flattened: the fields every deed has, and the body rendered.
@@ -165,8 +181,16 @@ fn source_text(source: &deed::Source) -> String {
     }
 }
 
-fn open(url: &str) -> Result<Client, McpError> {
-    Client::open(url).map_err(|e| McpError::internal_error(format!("{e}"), None))
+/// The command line's error when the seat store is not a directory.
+fn missing_seat(dir: &Path) -> McpError {
+    let path = dir.display();
+    McpError::internal_error(
+        format!(
+            "DEEDAR_URL is unset and there is no store at {path}; \
+             `export DEEDAR_URL=file://{path}` or `deedar --url file://{path}`"
+        ),
+        None,
+    )
 }
 
 fn bad(e: impl std::fmt::Display) -> McpError {
@@ -216,18 +240,22 @@ impl DeedarServer {
     /// Open on the store `DEEDAR_URL` names, else the seat's own store, as
     /// the command line does. An empty `DEEDAR_URL` is unset.
     ///
+    /// The seat directory is not created here. A later read that finds it
+    /// missing returns the command line's hint, and a write creates it.
+    ///
     /// # Errors
     ///
     /// Fails when no store is configured and none can be guessed.
     pub fn from_env() -> anyhow::Result<Self> {
         if let Some(url) = std::env::var("DEEDAR_URL").ok().filter(|u| !u.is_empty()) {
-            return Ok(Self { url });
+            return Ok(Self { url, seat: None });
         }
         let dir = deedar::default_store().ok_or_else(|| {
             anyhow::anyhow!("DEEDAR_URL is unset and so are XDG_DATA_HOME and HOME")
         })?;
         Ok(Self {
             url: format!("file://{}", dir.display()),
+            seat: Some(dir),
         })
     }
 
@@ -235,7 +263,40 @@ impl DeedarServer {
     #[cfg(test)]
     #[must_use]
     pub fn at(url: impl Into<String>) -> Self {
-        Self { url: url.into() }
+        Self {
+            url: url.into(),
+            seat: None,
+        }
+    }
+
+    /// Open the store this server was pointed at.
+    ///
+    /// A write of a seat store that is not there yet creates it and returns
+    /// the line the command line prints on stderr. A read of that missing
+    /// store is the command line's error and creates nothing. A file already
+    /// at the path is that same error: it is not a directory to create.
+    fn open(&self, access: Access) -> Result<(Client, Option<String>), McpError> {
+        let create = match &self.seat {
+            Some(dir) if !dir.is_dir() => {
+                if matches!(access, Access::Write) && !dir.exists() {
+                    Some(dir.clone())
+                } else {
+                    return Err(missing_seat(dir));
+                }
+            }
+            _ => None,
+        };
+        let client = Client::open(&self.url).map_err(bad)?;
+        let created = create.map(|dir| {
+            let line = format!("deedar: created the store at {}", dir.display());
+            // The command line prints this on stderr, off the deed text.
+            // A pipe does not flush on a newline, so a reader of that pipe
+            // would otherwise see the line only after the process exits.
+            eprintln!("{line}");
+            let _ = std::io::stderr().flush();
+            line
+        });
+        Ok((client, created))
     }
 
     #[tool(
@@ -246,7 +307,7 @@ impl DeedarServer {
         &self,
         Parameters(args): Parameters<IdArgs>,
     ) -> Result<Json<DeedRow>, McpError> {
-        let mut client = open(&self.url)?;
+        let (mut client, _) = self.open(Access::Read)?;
         let id = resolve_arg(&mut client, &args.id)?;
         let deed = match client.get(&id) {
             Ok(deed) => deed,
@@ -263,7 +324,7 @@ impl DeedarServer {
         &self,
         Parameters(args): Parameters<ListArgs>,
     ) -> Result<Json<Vec<DeedRow>>, McpError> {
-        let mut client = open(&self.url)?;
+        let (mut client, _) = self.open(Access::Read)?;
         let kind = match args.kind.as_deref() {
             Some(raw) => Some(deed::Kind::parse(raw).map_err(bad)?),
             None => None,
@@ -290,7 +351,7 @@ impl DeedarServer {
         &self,
         Parameters(args): Parameters<IdArgs>,
     ) -> Result<Json<Vec<DeedRow>>, McpError> {
-        let mut client = open(&self.url)?;
+        let (mut client, _) = self.open(Access::Read)?;
         let id = resolve_arg(&mut client, &args.id)?;
         let rows = match client.trail(&id) {
             Ok(rows) => rows,
@@ -311,7 +372,7 @@ impl DeedarServer {
         &self,
         Parameters(args): Parameters<IdArgs>,
     ) -> Result<Json<CurrentResult>, McpError> {
-        let mut client = open(&self.url)?;
+        let (mut client, _) = self.open(Access::Read)?;
         let id = resolve_arg(&mut client, &args.id)?;
         let answer = match client.current_walk(&id).map_err(bad)? {
             Walk::Tip(tip) => {
@@ -345,7 +406,7 @@ impl DeedarServer {
         &self,
         Parameters(args): Parameters<IdArgs>,
     ) -> Result<CallToolResult, McpError> {
-        let mut client = open(&self.url)?;
+        let (mut client, _) = self.open(Access::Read)?;
         let id = resolve_arg(&mut client, &args.id)?;
         let ev = match client.evidence(&id) {
             Ok(ev) => ev,
@@ -365,7 +426,7 @@ impl DeedarServer {
         annotations(title = "The log head", read_only_hint = true, open_world_hint = false)
     )]
     async fn deedar_log_head(&self) -> Result<Json<HeadRow>, McpError> {
-        let client = open(&self.url)?;
+        let (client, _) = self.open(Access::Read)?;
         let head = client.log_head().map_err(bad)?;
         Ok(Json(HeadRow {
             size: head.size,
@@ -382,7 +443,7 @@ impl DeedarServer {
         )
     )]
     async fn deedar_log_audit(&self) -> Result<Json<AuditRow>, McpError> {
-        let client = open(&self.url)?;
+        let (client, _) = self.open(Access::Read)?;
         let audit = client.log_audit().map_err(bad)?;
         Ok(Json(AuditRow {
             clean: audit.is_clean(),
@@ -411,7 +472,7 @@ impl DeedarServer {
         &self,
         Parameters(args): Parameters<ExportArgs>,
     ) -> Result<CallToolResult, McpError> {
-        let mut client = open(&self.url)?;
+        let (mut client, created) = self.open(Access::Write)?;
         let into = PathBuf::from(&args.into);
         // Resolve first, then read the log once for the whole handover; see
         // the command line's export for why the order is the order.
@@ -432,10 +493,18 @@ impl DeedarServer {
             }
         }
         if refused.is_empty() {
-            return Ok(CallToolResult::success(vec![ContentBlock::text(format!(
+            let mut text = String::new();
+            if let Some(line) = created {
+                // The same line is on stderr. The tool result is what a seat
+                // reads back, so the line is here too.
+                text.push_str(&line);
+                text.push('\n');
+            }
+            text.push_str(&format!(
                 "exported {} deeds, {wrote} files\n",
                 args.accessions.len()
-            ))]));
+            ));
+            return Ok(CallToolResult::success(vec![ContentBlock::text(text)]));
         }
         // Asked for and not supplied is the caller's problem to know about.
         Err(McpError::internal_error(refused.join("\n"), None))
@@ -501,7 +570,8 @@ impl DeedarServer {
         &self,
         Parameters(args): Parameters<BridgeArgs>,
     ) -> Result<CallToolResult, McpError> {
-        let bridge = open(&self.url)?
+        let (client, _) = self.open(Access::Read)?;
+        let bridge = client
             .bridge(args.from)
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
         Ok(CallToolResult::success(vec![ContentBlock::text(
@@ -560,7 +630,7 @@ impl ServerHandler for DeedarServer {
             .ok_or_else(|| {
                 McpError::resource_not_found(format!("not a {SCHEME} uri: {uri}"), None)
             })?;
-        let mut client = open(&self.url)?;
+        let (mut client, _) = self.open(Access::Read)?;
         let id = client
             .resolve(accession)
             .map_err(|e| McpError::resource_not_found(format!("{e}"), None))?;
