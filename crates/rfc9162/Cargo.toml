@@ -1,0 +1,16 @@
+[package]
+name = "rfc9162"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+description = "RFC 9162 Merkle tree hashes, inclusion and consistency proofs, over leaf hashes"
+keywords = ["merkle", "transparency", "rfc9162", "append-only", "log"]
+categories = ["cryptography"]
+
+[dependencies]
+sha2.workspace = true

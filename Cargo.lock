@@ -337,6 +337,7 @@ dependencies = [
  "ed25519-dalek",
  "hmac",
  "libc",
+ "rfc9162",
  "sha2",
  "tempfile",
  "ureq",
@@ -1046,6 +1047,13 @@ name = "regex-syntax"
 version = "0.8.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
+
+[[package]]
+name = "rfc9162"
+version = "0.6.1"
+dependencies = [
+ "sha2",
+]
 
 [[package]]
 name = "ring"
