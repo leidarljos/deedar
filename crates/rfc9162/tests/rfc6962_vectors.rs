@@ -3,8 +3,8 @@
 //! from the leaf inputs, and every proof over them.
 
 use rfc9162::{
-    consistency_proof, hex, inclusion_proof, leaf_hash, root, verify_consistency,
-    verify_inclusion, Head,
+    consistency_proof, hex, inclusion_proof, leaf_hash, root, verify_consistency, verify_inclusion,
+    Head,
 };
 
 fn inputs() -> Vec<Vec<u8>> {
@@ -59,11 +59,23 @@ fn every_leaf_and_every_prefix_proves_against_the_published_roots() {
         assert_eq!(head.root, ROOTS[size - 1]);
         for index in 0..size {
             let path = inclusion_proof(&all[..size], index).unwrap();
-            assert!(verify_inclusion(&all[index], index, size, &path, ROOTS[size - 1]));
+            assert!(verify_inclusion(
+                &all[index],
+                index,
+                size,
+                &path,
+                ROOTS[size - 1]
+            ));
         }
         for old in 1..=size {
             let path = consistency_proof(&all[..size], old).unwrap();
-            assert!(verify_consistency(old, ROOTS[old - 1], size, ROOTS[size - 1], &path));
+            assert!(verify_consistency(
+                old,
+                ROOTS[old - 1],
+                size,
+                ROOTS[size - 1],
+                &path
+            ));
         }
     }
 }
@@ -71,6 +83,9 @@ fn every_leaf_and_every_prefix_proves_against_the_published_roots() {
 #[test]
 fn the_domain_names_the_log_in_the_signed_bytes() {
     let head = Head::over(&leaves());
-    assert_eq!(head.material("a-log"), format!("a-log\t8\t{}", ROOTS[7]).into_bytes());
+    assert_eq!(
+        head.material("a-log"),
+        format!("a-log\t8\t{}", ROOTS[7]).into_bytes()
+    );
     assert_ne!(head.material("a-log"), head.material("another-log"));
 }
