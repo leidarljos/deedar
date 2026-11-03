@@ -19,10 +19,13 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       # The index transcript compiles deedar and a clock interposer, so this
-      # job needs the same toolchain the check workflow builds with.
+      # job needs the same toolchain the check workflow builds with, and the
+      # components rust-toolchain.toml lists, so rustup adds none on the
+      # first cargo call.
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.97.1
+          components: rustfmt, clippy
       - uses: actions/setup-python@v5
         with:
           # 3.12 matches the docs workflow. tomllib, which reads the

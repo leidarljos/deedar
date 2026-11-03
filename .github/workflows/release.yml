@@ -46,7 +46,9 @@ jobs:
         with:
           ref: refs/tags/${{ env.TAG }}
       # rust-toolchain.toml pins the compiler, and cargo builds with the pin
-      # whatever the action sets as default. The target goes on the pin.
+      # whatever the action sets as default. The target goes on the pin, and
+      # so do the components the pin lists, so rustup adds none on the first
+      # cargo call.
       - name: The pinned toolchain
         id: pin
         run: |
@@ -58,6 +60,7 @@ jobs:
         with:
           toolchain: ${{ steps.pin.outputs.channel }}
           targets: ${{ matrix.target }}
+          components: rustfmt, clippy
       - name: The target is installed for the pin
         run: rustup target list --installed | grep -qx '${{ matrix.target }}'
       - run: cargo build --locked --release --target ${{ matrix.target }} -p deedar-cli -p deedar-mcp
