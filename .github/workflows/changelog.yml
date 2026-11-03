@@ -1,0 +1,52 @@
+name: changelog
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  draft:
+    name: towncrier build --draft
+    runs-on: ubuntu-latest
+    # Same ceiling as the cargo check job. This job installs towncrier and
+    # drafts twice, so a hung install still ends with that job.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # 26.9.0 is the towncrier release current on 2026-11-03. The pin keeps
+      # this draft on the release the config was tried with.
+      - name: Install towncrier 26.9.0
+        run: python -m pip install --disable-pip-version-check 'towncrier==26.9.0'
+      - name: Draft the changelog
+        run: |
+          set -euo pipefail
+          # The draft heading needs a version. Towncrier does not write the
+          # file. The workspace package version is the one a release cuts.
+          version=$(awk -F'"' '/^version = /{print $2; exit}' Cargo.toml)
+          test -n "$version"
+          towncrier build --draft --version "$version"
+      - name: A malformed fragment fails the draft
+        run: |
+          set -euo pipefail
+          version=$(awk -F'"' '/^version = /{print $2; exit}' Cargo.toml)
+          name=not-a-fragment.md
+          printf '%s\n' 'This name has no fragment type.' > "changelog.d/$name"
+          set +e
+          out=$(towncrier build --draft --version "$version" 2>&1)
+          code=$?
+          set -e
+          printf '%s\n' "$out"
+          rm -f "changelog.d/$name"
+          test "$code" -ne 0
+          printf '%s\n' "$out" | grep -F "Invalid news fragment name: $name"

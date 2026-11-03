@@ -2,6 +2,8 @@
 
 Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
 
+<!-- towncrier release notes start -->
+
 ## 0.6.1 (2026-10-31)
 
 - The 0.6.0 tag did not build: the workspace pinned its own crates at
