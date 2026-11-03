@@ -4,7 +4,9 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use deed::{Body, DeedId, Error, FormField, Grant, Kind, MailMessageId, Measure, Source, Step};
-use deedar::{encode_response, is_write_once_addr, Client, CreateRequest, FsStore, Response};
+use deedar::{
+    encode_response, is_write_once_addr, Client, CreateRequest, Filter, FsStore, Response,
+};
 
 use common::{scratch, tmp_url};
 
@@ -779,4 +781,334 @@ fn fs_store_direct_create_uses_same_writer() {
         ))
         .unwrap();
     assert_eq!(d.kind, Kind::Event);
+}
+
+fn shelf(client: &mut Client, id: &str, name: &str, agent: &str, body: Body) {
+    client
+        .create(CreateRequest {
+            id: Some(DeedId::parse(id).unwrap()),
+            name: name.into(),
+            sources: Vec::new(),
+            agent_id: agent.into(),
+            activity_id: None,
+            grants: Vec::new(),
+            body,
+            supersedes: None,
+        })
+        .unwrap_or_else(|e| panic!("create {id}: {e}"));
+}
+
+fn found(client: &mut Client, filter: Filter) -> Vec<String> {
+    client
+        .find(&filter)
+        .expect("find")
+        .iter()
+        .map(|deed| deed.id.as_str().to_string())
+        .collect()
+}
+
+fn accessions(ids: &[&str]) -> Vec<String> {
+    ids.iter().map(|id| (*id).to_string()).collect()
+}
+
+fn quote_of(excerpt: &str, url: &str, edition: &str) -> Body {
+    Body::Quote {
+        edition: edition.into(),
+        start: 0,
+        end: excerpt.len() as u64,
+        excerpt: excerpt.into(),
+        urls: vec![url.into()],
+    }
+}
+
+/// A shelf of mixed kinds and agents. `find` returns the accessions each
+/// filter names, and the three filters together return only the overlap.
+/// Text looks at the name and at excerpt, title, subject, step text and url.
+/// An edition that says RFC, an event whose where says RFC, and a name `rf`
+/// beside an excerpt `c 9162` do not match `rfc`: those are not searched
+/// fields, and fields are not joined.
+#[test]
+fn find_keeps_the_accessions_each_filter_names() {
+    let url = tmp_url();
+    let root = deedar::store_dir(&url).unwrap();
+    let notes = write_blob(&root, "notes.txt", b"notes");
+    let letter = write_blob(&root, "letter.eml", b"From: desk");
+    let shot = write_blob(&root, "shot.jpg", b"jpeg");
+    let page = write_blob(&root, "page.html", b"<html>");
+    let plain = "https://example.invalid/plain";
+    let rfc = "https://www.rfc-editor.org/rfc/rfc9162";
+
+    let mut client = Client::open(&url).expect("open");
+    shelf(
+        &mut client,
+        "deed-event-hall",
+        "trip",
+        "walker",
+        Body::Event {
+            when: "Friday".into(),
+            where_: "RFC hall".into(),
+            who: "Sam".into(),
+        },
+    );
+    shelf(
+        &mut client,
+        "deed-file-rfcname",
+        "RFC notes",
+        "seat",
+        Body::File {
+            path: notes,
+            media_type: Some("text/plain".into()),
+        },
+    );
+    shelf(
+        &mut client,
+        "deed-mailDraft-subj",
+        "hello",
+        "scribe",
+        Body::MailDraft {
+            message_id: MailMessageId::parse("<desk@example.com>").unwrap(),
+            in_reply_to: None,
+            subject: "About RFC 9162".into(),
+            path: letter,
+        },
+    );
+    shelf(
+        &mut client,
+        "deed-page-url",
+        "snapshot",
+        "seat",
+        Body::Page {
+            url: rfc.into(),
+            snapshot: page,
+        },
+    );
+    shelf(
+        &mut client,
+        "deed-procedure-step",
+        "steps",
+        "walker",
+        Body::Procedure {
+            steps: vec![Step {
+                text: "Cite RFC 9162".into(),
+                done: false,
+            }],
+        },
+    );
+    shelf(
+        &mut client,
+        "deed-quote-edition",
+        "edition only",
+        "seat",
+        quote_of("plain words", plain, "https://edition.example/RFC-9162"),
+    );
+    shelf(
+        &mut client,
+        "deed-quote-excerpt",
+        "ct log",
+        "seat",
+        quote_of("from RFC 9162", plain, plain),
+    );
+    shelf(
+        &mut client,
+        "deed-quote-miss",
+        "heat",
+        "seat",
+        quote_of("a heat pump moves heat", plain, plain),
+    );
+    shelf(
+        &mut client,
+        "deed-quote-named",
+        "the RFC note",
+        "seat",
+        quote_of("plain words", plain, plain),
+    );
+    shelf(
+        &mut client,
+        "deed-quote-split",
+        "rf",
+        "seat",
+        quote_of("c 9162", plain, plain),
+    );
+    shelf(
+        &mut client,
+        "deed-quote-url",
+        "link",
+        "scribe",
+        quote_of("no letters of interest", rfc, plain),
+    );
+    shelf(
+        &mut client,
+        "deed-set-title",
+        "covers",
+        "seat",
+        Body::Set {
+            title: "RFC 9162 shelf".into(),
+            members: vec![shot],
+        },
+    );
+
+    let all = [
+        "deed-event-hall",
+        "deed-file-rfcname",
+        "deed-mailDraft-subj",
+        "deed-page-url",
+        "deed-procedure-step",
+        "deed-quote-edition",
+        "deed-quote-excerpt",
+        "deed-quote-miss",
+        "deed-quote-named",
+        "deed-quote-split",
+        "deed-quote-url",
+        "deed-set-title",
+    ];
+    let listed: Vec<String> = client
+        .list()
+        .expect("list")
+        .iter()
+        .map(|deed| deed.id.as_str().to_string())
+        .collect();
+    assert_eq!(listed, accessions(&all));
+    assert_eq!(found(&mut client, Filter::default()), accessions(&all));
+    assert_eq!(
+        found(
+            &mut client,
+            Filter {
+                text: Some(String::new()),
+                ..Filter::default()
+            }
+        ),
+        accessions(&all),
+        "an empty substring keeps the shelf"
+    );
+
+    assert_eq!(
+        found(
+            &mut client,
+            Filter {
+                kind: Some(Kind::Quote),
+                ..Filter::default()
+            }
+        ),
+        accessions(&[
+            "deed-quote-edition",
+            "deed-quote-excerpt",
+            "deed-quote-miss",
+            "deed-quote-named",
+            "deed-quote-split",
+            "deed-quote-url",
+        ])
+    );
+    assert_eq!(
+        found(
+            &mut client,
+            Filter {
+                kind: Some(Kind::File),
+                ..Filter::default()
+            }
+        ),
+        accessions(&["deed-file-rfcname"])
+    );
+    assert_eq!(
+        found(
+            &mut client,
+            Filter {
+                agent: Some("seat".into()),
+                ..Filter::default()
+            }
+        ),
+        accessions(&[
+            "deed-file-rfcname",
+            "deed-page-url",
+            "deed-quote-edition",
+            "deed-quote-excerpt",
+            "deed-quote-miss",
+            "deed-quote-named",
+            "deed-quote-split",
+            "deed-set-title",
+        ])
+    );
+    assert_eq!(
+        found(
+            &mut client,
+            Filter {
+                agent: Some("Seat".into()),
+                ..Filter::default()
+            }
+        ),
+        accessions(&[]),
+        "an agent id matches the stamped bytes"
+    );
+
+    let rfc_text = [
+        "deed-file-rfcname",
+        "deed-mailDraft-subj",
+        "deed-page-url",
+        "deed-procedure-step",
+        "deed-quote-excerpt",
+        "deed-quote-named",
+        "deed-quote-url",
+        "deed-set-title",
+    ];
+    assert_eq!(
+        found(
+            &mut client,
+            Filter {
+                text: Some("rfc".into()),
+                ..Filter::default()
+            }
+        ),
+        accessions(&rfc_text)
+    );
+    assert_eq!(
+        found(
+            &mut client,
+            Filter {
+                text: Some("RfC".into()),
+                ..Filter::default()
+            }
+        ),
+        accessions(&rfc_text),
+        "text folds case"
+    );
+    assert_eq!(
+        found(
+            &mut client,
+            Filter {
+                text: Some("9162".into()),
+                ..Filter::default()
+            }
+        ),
+        accessions(&[
+            "deed-mailDraft-subj",
+            "deed-page-url",
+            "deed-procedure-step",
+            "deed-quote-excerpt",
+            "deed-quote-split",
+            "deed-quote-url",
+            "deed-set-title",
+        ])
+    );
+
+    assert_eq!(
+        found(
+            &mut client,
+            Filter {
+                kind: Some(Kind::Quote),
+                agent: Some("seat".into()),
+                text: Some("rfc".into()),
+            }
+        ),
+        accessions(&["deed-quote-excerpt", "deed-quote-named"])
+    );
+    assert_eq!(
+        found(
+            &mut client,
+            Filter {
+                kind: Some(Kind::Quote),
+                agent: Some("scribe".into()),
+                text: Some("9162".into()),
+            }
+        ),
+        accessions(&["deed-quote-url"])
+    );
 }

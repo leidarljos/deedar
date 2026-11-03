@@ -215,12 +215,26 @@ impl DeedarServer {
     }
 
     #[tool(
-        description = "Every deed the store serves, in accession order.",
+        description = "Deeds the store serves, in accession order. kind and agent match exactly; text is a case-insensitive substring of the name or of a body's excerpt, title, subject, step text or url. Omit every argument for the whole shelf.",
         annotations(title = "List deeds", read_only_hint = true, open_world_hint = false)
     )]
-    async fn deedar_list(&self) -> Result<Json<Vec<DeedRow>>, McpError> {
+    async fn deedar_list(
+        &self,
+        Parameters(args): Parameters<ListArgs>,
+    ) -> Result<Json<Vec<DeedRow>>, McpError> {
         let mut client = open(&self.url)?;
-        Ok(Json(client.list().map_err(bad)?.iter().map(row).collect()))
+        let kind = match args.kind.as_deref() {
+            Some(raw) => Some(deed::Kind::parse(raw).map_err(bad)?),
+            None => None,
+        };
+        let rows = client
+            .find(&deedar::Filter {
+                kind,
+                agent: args.agent,
+                text: args.text,
+            })
+            .map_err(bad)?;
+        Ok(Json(rows.iter().map(row).collect()))
     }
 
     #[tool(

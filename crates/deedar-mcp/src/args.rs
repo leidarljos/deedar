@@ -6,6 +6,19 @@
 use schemars::JsonSchema;
 use serde::Deserialize;
 
+/// Which deeds `deedar_list` keeps. Every field is optional. An omitted
+/// field does not constrain, and the fields that are set all have to match.
+#[derive(Deserialize, JsonSchema)]
+pub struct ListArgs {
+    /// A kind token: `file`, `quote`, `patch` and the rest. Exact.
+    pub kind: Option<String>,
+    /// The agent id stamped on the deed. Exact.
+    pub agent: Option<String>,
+    /// Case-insensitive substring of the name, or of a body's excerpt,
+    /// title, subject, step text or url.
+    pub text: Option<String>,
+}
+
 /// One deed, by accession or by a `sha256:` of it or of a product path.
 #[derive(Deserialize, JsonSchema)]
 pub struct IdArgs {

@@ -740,3 +740,96 @@ async fn current_on_a_cycle_returns_each_member_once() {
     assert_branch(&again, "cycle", &[&ay, &em]);
     running.cancel().await.expect("stop");
 }
+
+fn row_ids(value: &Value) -> Vec<&str> {
+    let rows = value
+        .as_array()
+        .unwrap_or_else(|| panic!("list is an array, got {value}"));
+    rows.iter()
+        .map(|row| {
+            row.get("id")
+                .and_then(Value::as_str)
+                .unwrap_or_else(|| panic!("id is a string, got {row}"))
+        })
+        .collect()
+}
+
+/// `deedar_list` with an agent returns that agent's rows. With no arguments
+/// it returns the whole shelf, which is what a call returned before filters.
+#[tokio::test]
+async fn deedar_list_with_an_agent_returns_only_that_agents_rows() {
+    let scratch = scratch();
+    let mut oracle = store(&scratch.url);
+    // Every deed scratch() stores is stamped `seat`. This row is somebody else's.
+    let excerpt = "scribe line";
+    oracle
+        .create(CreateRequest {
+            id: Some(DeedId::parse("deed-quote-scribe").expect("id")),
+            name: "scribe note".into(),
+            sources: Vec::new(),
+            agent_id: "scribe".into(),
+            activity_id: None,
+            grants: Vec::new(),
+            body: Body::Quote {
+                edition: EDITION.into(),
+                start: 0,
+                end: excerpt.len() as u64,
+                excerpt: excerpt.into(),
+                urls: vec![EDITION.into()],
+            },
+            supersedes: None,
+        })
+        .expect("scribe");
+
+    let client = serve(&scratch.url).await;
+    let peer = client.peer();
+
+    let whole = ask(peer, "deedar_list", None).await;
+    assert_eq!(
+        row_ids(&whole),
+        [
+            "deed-file-one",
+            "deed-file-solo",
+            "deed-file-two",
+            "deed-quote-made",
+            "deed-quote-scribe",
+            "deed-quote-src",
+            "deed-quote-v1",
+            "deed-quote-v2",
+        ]
+    );
+
+    let seat = ask(peer, "deedar_list", Some(json!({ "agent": "seat" }))).await;
+    assert_eq!(row_ids(&seat), ACCESSIONS);
+    for row in seat.as_array().expect("rows") {
+        assert_eq!(row["agent"], json!("seat"));
+    }
+
+    let scribe = ask(peer, "deedar_list", Some(json!({ "agent": "scribe" }))).await;
+    assert_eq!(row_ids(&scribe), ["deed-quote-scribe"]);
+
+    let quotes = ask(peer, "deedar_list", Some(json!({ "kind": "quote" }))).await;
+    assert_eq!(
+        row_ids(&quotes),
+        [
+            "deed-quote-made",
+            "deed-quote-scribe",
+            "deed-quote-src",
+            "deed-quote-v1",
+            "deed-quote-v2",
+        ]
+    );
+
+    let quoted = ask(peer, "deedar_list", Some(json!({ "text": "Quoted" }))).await;
+    assert_eq!(row_ids(&quoted), ["deed-quote-made"]);
+
+    let one = ask(
+        peer,
+        "deedar_list",
+        Some(json!({ "kind": "quote", "agent": "seat", "text": "quoted" })),
+    )
+    .await;
+    assert_eq!(row_ids(&one), ["deed-quote-made"]);
+
+    client.cancel().await.expect("stop");
+}

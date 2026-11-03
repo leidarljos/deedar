@@ -3,7 +3,7 @@
 //! ```text
 //! just deedar / any client
 //!           |
-//!      Client::create|get|list|trail|evidence|delete|leave|timestamp|current|migrate
+//!      Client::create|get|list|find|trail|evidence|delete|leave|timestamp|current|migrate
 //!           |  Cap'n  (schema/deedar.capnp)
 //!           v
 //!        FsStore  -- write-once bytes + frozen deed + evidence
@@ -46,6 +46,74 @@ pub use vouch::{Checked, Vouch};
 pub use wire::{
     decode_request, decode_response, encode_request, encode_response, Request, Response,
 };
+
+/// Which rows of [`Client::list`] to keep.
+///
+/// An unset field does not constrain. Fields that are set all have to match.
+/// `kind` is the deed's kind and `agent` is the agent id the writer stamped,
+/// both compared exactly: an agent id is an identifier, not prose.
+/// `text` is a case-insensitive substring of the name or of the body's
+/// excerpt, title, subject, step text or url. An edition, a form value, a
+/// table measure and an event's where are not those fields, so they do not
+/// count. Nothing is ranked, indexed or capped.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Filter {
+    pub kind: Option<Kind>,
+    pub agent: Option<String>,
+    pub text: Option<String>,
+}
+
+impl Filter {
+    fn matches(&self, deed: &Deed) -> bool {
+        if self.kind.as_ref().is_some_and(|kind| deed.kind != *kind) {
+            return false;
+        }
+        if self
+            .agent
+            .as_ref()
+            .is_some_and(|agent| deed.produced_by.agent_id != *agent)
+        {
+            return false;
+        }
+        if self
+            .text
+            .as_ref()
+            .is_some_and(|text| !text_matches(deed, text))
+        {
+            return false;
+        }
+        true
+    }
+}
+
+/// The empty substring is contained in every string, so an empty `text`
+/// keeps every deed. Any other needle matches when one searched field
+/// contains it on its own: the name and a body's fields are not joined
+/// into one string. Case follows [`str::to_lowercase`], the standard
+/// library's Unicode case fold, so a title matches the way a seat typed it.
+fn text_matches(deed: &Deed, needle: &str) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    let needle = needle.to_lowercase();
+    let hit = |hay: &str| hay.to_lowercase().contains(&needle);
+    if hit(&deed.name) {
+        return true;
+    }
+    match &deed.body {
+        Body::Quote { excerpt, urls, .. } => hit(excerpt) || urls.iter().any(|url| hit(url)),
+        Body::Set { title, .. } => hit(title),
+        Body::MailDraft { subject, .. } => hit(subject),
+        Body::Page { url, .. } => hit(url),
+        Body::Procedure { steps } => steps.iter().any(|step| hit(&step.text)),
+        Body::File { .. }
+        | Body::Patch { .. }
+        | Body::Clip { .. }
+        | Body::Form { .. }
+        | Body::Table { .. }
+        | Body::Event { .. } => false,
+    }
+}
 
 /// Agent and grants the writer stamps onto the deed.
 pub struct CreateRequest {
@@ -227,6 +295,20 @@ impl Client {
             Response::Err(e) => Err(map_err(&e)),
             _ => Err(deed::Error::Decode("list response".into())),
         }
+    }
+
+    /// The deeds [`Self::list`] would return that match `filter`, in that
+    /// same accession order.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the shelf cannot be read, as [`Self::list`] does.
+    pub fn find(&mut self, filter: &Filter) -> Result<Vec<Deed>> {
+        let deeds = self.list()?;
+        Ok(deeds
+            .into_iter()
+            .filter(|deed| filter.matches(deed))
+            .collect())
     }
 
     pub fn trail(&mut self, id: &DeedId) -> Result<Vec<Deed>> {

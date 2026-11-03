@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use deed::{Body, Deed, DeedId, FormField, Grant, Kind, MailMessageId, Measure, Source, Step};
-use deedar::{Client, CreateRequest, StoreUrl, UnsignedHead};
+use deedar::{Client, CreateRequest, Filter, StoreUrl, UnsignedHead};
 
 fn main() -> ExitCode {
     match dispatch(env::args().skip(1).collect()) {
@@ -509,10 +509,7 @@ fn run(args: Vec<String>) -> Result<String, String> {
             let d = client.get(&id).map_err(|e| e.to_string())?;
             Ok(format_one(&d))
         }
-        Some("list") => {
-            let rows = client.list().map_err(|e| e.to_string())?;
-            Ok(format_list(&rows))
-        }
+        Some("list") => cmd_list(&mut client, &rest[1..]),
         Some("trail") => {
             let raw = rest.get(1).ok_or("trail needs an id")?;
             let id = resolve_id(&mut client, &url, raw)?;
@@ -1296,6 +1293,45 @@ fn format_one(d: &Deed) -> String {
         }
     }
     out
+}
+
+/// `deedar list [--kind K] [--agent A] [--text T]`.
+///
+/// An omitted flag does not constrain. The flags that are set all have to
+/// match, and the rows stay in accession order.
+fn cmd_list(client: &mut Client, args: &[String]) -> Result<String, String> {
+    let mut kind = None;
+    let mut agent = None;
+    let mut text = None;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--kind" => {
+                let raw = list_value(args, &mut i, "--kind")?;
+                kind = Some(Kind::parse(&raw).map_err(|e| e.to_string())?);
+            }
+            "--agent" => agent = Some(list_value(args, &mut i, "--agent")?),
+            "--text" => text = Some(list_value(args, &mut i, "--text")?),
+            other => {
+                return Err(format!(
+                    "list takes --kind K, --agent A and --text T, and also got {other}"
+                ))
+            }
+        }
+        i += 1;
+    }
+    let rows = client
+        .find(&Filter { kind, agent, text })
+        .map_err(|e| e.to_string())?;
+    Ok(format_list(&rows))
+}
+
+fn list_value(args: &[String], i: &mut usize, flag: &str) -> Result<String, String> {
+    let value = args
+        .get(*i + 1)
+        .ok_or_else(|| format!("{flag} needs a value"))?;
+    *i += 1;
+    Ok(value.clone())
 }
 
 fn format_list(rows: &[Deed]) -> String {
