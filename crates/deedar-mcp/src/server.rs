@@ -173,6 +173,44 @@ fn bad(e: impl std::fmt::Display) -> McpError {
     McpError::internal_error(format!("{e}"), None)
 }
 
+/// `NotFound` and `InvalidId` for the accession the seat typed are
+/// `invalid_params`, and the line names the tool to call next. A `NotFound`
+/// for some other accession, such as a source the trail could not read, is
+/// still that caller's miss, with the store's own line. Every other error
+/// is the store's fault.
+fn tool_failure(
+    client: &mut Client,
+    raw: &str,
+    asked: Option<&deed::DeedId>,
+    err: deed::Error,
+) -> McpError {
+    let about_argument = match &err {
+        deed::Error::InvalidId(_) => true,
+        deed::Error::NotFound(missing) => {
+            missing == raw || asked.is_some_and(|id| id.as_str() == missing)
+        }
+        _ => false,
+    };
+    if about_argument {
+        return match deedar::explain_accession(client, raw, "deedar_list", "deedar_get") {
+            Ok(text) => McpError::invalid_params(text, None),
+            Err(failed) => bad(failed),
+        };
+    }
+    if matches!(err, deed::Error::NotFound(_)) {
+        McpError::invalid_params(err.to_string(), None)
+    } else {
+        bad(err)
+    }
+}
+
+fn resolve_arg(client: &mut Client, raw: &str) -> Result<deed::DeedId, McpError> {
+    match client.resolve(raw) {
+        Ok(id) => Ok(id),
+        Err(e) => Err(tool_failure(client, raw, None, e)),
+    }
+}
+
 #[tool_router]
 impl DeedarServer {
     /// Open on the store `DEEDAR_URL` names, else the seat's own store, as
@@ -209,8 +247,11 @@ impl DeedarServer {
         Parameters(args): Parameters<IdArgs>,
     ) -> Result<Json<DeedRow>, McpError> {
         let mut client = open(&self.url)?;
-        let id = client.resolve(&args.id).map_err(bad)?;
-        let deed = client.get(&id).map_err(bad)?;
+        let id = resolve_arg(&mut client, &args.id)?;
+        let deed = match client.get(&id) {
+            Ok(deed) => deed,
+            Err(e) => return Err(tool_failure(&mut client, &args.id, Some(&id), e)),
+        };
         Ok(Json(row(&deed)))
     }
 
@@ -250,10 +291,12 @@ impl DeedarServer {
         Parameters(args): Parameters<IdArgs>,
     ) -> Result<Json<Vec<DeedRow>>, McpError> {
         let mut client = open(&self.url)?;
-        let id = client.resolve(&args.id).map_err(bad)?;
-        Ok(Json(
-            client.trail(&id).map_err(bad)?.iter().map(row).collect(),
-        ))
+        let id = resolve_arg(&mut client, &args.id)?;
+        let rows = match client.trail(&id) {
+            Ok(rows) => rows,
+            Err(e) => return Err(tool_failure(&mut client, &args.id, Some(&id), e)),
+        };
+        Ok(Json(rows.iter().map(row).collect()))
     }
 
     #[tool(
@@ -269,9 +312,15 @@ impl DeedarServer {
         Parameters(args): Parameters<IdArgs>,
     ) -> Result<Json<CurrentResult>, McpError> {
         let mut client = open(&self.url)?;
-        let id = client.resolve(&args.id).map_err(bad)?;
+        let id = resolve_arg(&mut client, &args.id)?;
         let answer = match client.current_walk(&id).map_err(bad)? {
-            Walk::Tip(tip) => CurrentResult::One(row(&client.get(&tip).map_err(bad)?)),
+            Walk::Tip(tip) => {
+                let deed = match client.get(&tip) {
+                    Ok(deed) => deed,
+                    Err(e) => return Err(tool_failure(&mut client, &args.id, Some(&id), e)),
+                };
+                CurrentResult::One(row(&deed))
+            }
             Walk::Fork(ids) => CurrentResult::Many(CurrentTips {
                 deeds: rows_for(&mut client, &ids)?,
                 note: CurrentNote::Fork,
@@ -297,8 +346,11 @@ impl DeedarServer {
         Parameters(args): Parameters<IdArgs>,
     ) -> Result<CallToolResult, McpError> {
         let mut client = open(&self.url)?;
-        let id = client.resolve(&args.id).map_err(bad)?;
-        let ev = client.evidence(&id).map_err(bad)?;
+        let id = resolve_arg(&mut client, &args.id)?;
+        let ev = match client.evidence(&id) {
+            Ok(ev) => ev,
+            Err(e) => return Err(tool_failure(&mut client, &args.id, Some(&id), e)),
+        };
         Ok(CallToolResult::success(vec![ContentBlock::text(format!(
             "id={} producedBy={} {} time={}\n",
             ev.deed_id,

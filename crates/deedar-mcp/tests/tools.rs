@@ -3,13 +3,13 @@
 //! The server is started on a scratch store. Every tool is listed and called.
 //! A good accession comes back as the fields that tool publishes. An accession
 //! the store does not hold, and a `sha256:` that names more than one deed,
-//! come back as the error text rather than a row.
+//! come back as `invalid_params` naming the next tool, rather than a row.
 
 use std::path::{Path, PathBuf};
 
 use deed::{Body, Deed, DeedId, Source};
 use deedar::{deed_digest, Client, CreateRequest};
-use rmcp::model::{CallToolRequestParams, CallToolResult};
+use rmcp::model::{CallToolRequestParams, CallToolResult, ErrorCode};
 use rmcp::transport::{ConfigureCommandExt, TokioChildProcess};
 use rmcp::{Peer, RoleClient, ServiceError, ServiceExt};
 use serde_json::{json, Map, Value};
@@ -280,6 +280,24 @@ async fn told(peer: &Peer<RoleClient>, name: &str, arguments: Value) -> String {
     }
 }
 
+struct Refusal {
+    code: ErrorCode,
+    message: String,
+}
+
+/// A protocol error, which is how a lookup miss reaches a seat. A tool
+/// result with `isError` carries no JSON-RPC code, so it is not this.
+async fn refusal(peer: &Peer<RoleClient>, name: &str, arguments: Value) -> Refusal {
+    match call(peer, name, Some(arguments)).await {
+        Ok(result) => panic!("{name} returned a result: {result:?}"),
+        Err(ServiceError::McpError(data)) => Refusal {
+            code: data.code,
+            message: data.message.into_owned(),
+        },
+        Err(other) => panic!("{name}: {other}"),
+    }
+}
+
 fn fields<'a>(value: &'a Value, expected: &[&str]) -> &'a Map<String, Value> {
     let map = value
         .as_object()
@@ -541,45 +559,61 @@ async fn every_tool_answers_with_its_fields_and_names_a_bad_accession() {
 
     let unknown = format!("deed not found: {MISSING}");
     let ambiguous = format!("invalid deed id: {shared} names {shared_by} deeds");
+    let unknown_line = format!("unknown accession {MISSING}; `deedar_list`");
+    let mut named: Vec<&str> = deeds
+        .iter()
+        .filter(|d| d.paths.iter().any(|p| p.display().to_string() == shared))
+        .map(|d| d.id.as_str())
+        .collect();
+    named.sort_unstable();
+    let shared_line = format!(
+        "ambiguous {shared} matches {shared_by} deeds, at most {} in byte order: {}; `deedar_list`",
+        deedar::PREFIX_CANDIDATES_SHOWN,
+        named.join(", ")
+    );
     for name in [
         "deedar_get",
         "deedar_trail",
         "deedar_current",
         "deedar_evidence",
     ] {
-        assert_eq!(told(peer, name, id_args(MISSING)).await, unknown, "{name}");
-        assert_eq!(
-            told(peer, name, id_args(&shared)).await,
-            ambiguous,
-            "{name}"
-        );
+        let missing = refusal(peer, name, id_args(MISSING)).await;
+        assert_eq!(missing.code, ErrorCode::INVALID_PARAMS, "{name}");
+        assert_eq!(missing.message, unknown_line, "{name}");
+        let several = refusal(peer, name, id_args(&shared)).await;
+        assert_eq!(several.code, ErrorCode::INVALID_PARAMS, "{name}");
+        assert_eq!(several.message, shared_line, "{name}");
     }
+    let one = refusal(peer, "deedar_get", id_args("deed-file-sol")).await;
+    assert_eq!(one.code, ErrorCode::INVALID_PARAMS);
+    assert_eq!(
+        one.message,
+        "prefix deed-file-sol matches deed-file-solo; `deedar_get deed-file-solo`"
+    );
 
     let refused = scratch.path("refused");
-    assert_eq!(
-        told(
-            peer,
-            "deedar_export",
-            json!({
-                "into": refused.display().to_string(),
-                "accessions": [MISSING],
-            })
-        )
-        .await,
-        format!("{MISSING}: {unknown}")
-    );
-    assert_eq!(
-        told(
-            peer,
-            "deedar_export",
-            json!({
-                "into": refused.display().to_string(),
-                "accessions": [shared],
-            })
-        )
-        .await,
-        format!("{shared}: {ambiguous}")
-    );
+    let missing_export = refusal(
+        peer,
+        "deedar_export",
+        json!({
+            "into": refused.display().to_string(),
+            "accessions": [MISSING],
+        }),
+    )
+    .await;
+    assert_eq!(missing_export.code, ErrorCode::INTERNAL_ERROR);
+    assert_eq!(missing_export.message, format!("{MISSING}: {unknown}"));
+    let ambiguous_export = refusal(
+        peer,
+        "deedar_export",
+        json!({
+            "into": refused.display().to_string(),
+            "accessions": [shared],
+        }),
+    )
+    .await;
+    assert_eq!(ambiguous_export.code, ErrorCode::INTERNAL_ERROR);
+    assert_eq!(ambiguous_export.message, format!("{shared}: {ambiguous}"));
 
     // A path that is not a directory is not a handover. An empty directory
     // is a handover that carried nothing, which is a different answer.
@@ -831,5 +865,73 @@ async fn deedar_list_with_an_agent_returns_only_that_agents_rows() {
     .await;
     assert_eq!(row_ids(&one), ["deed-quote-made"]);
 
+    client.cancel().await.expect("stop");
+}
+
+/// One past the line's bound, so the last match stays a count. The bound is
+/// [`deedar::PREFIX_CANDIDATES_SHOWN`].
+#[tokio::test]
+async fn a_prefix_of_several_accessions_lists_them_in_byte_order_up_to_the_bound() {
+    signing_off();
+    let home = tempfile::tempdir().expect("scratch");
+    let url = format!("file://{}", home.path().join("store").display());
+    let mut writer = Client::open(&url).expect("open");
+    let bound = deedar::PREFIX_CANDIDATES_SHOWN;
+    let total = bound + 1;
+    let mut ids = Vec::with_capacity(total);
+    for n in 1..=total {
+        let id = format!("deed-quote-p{n:02}");
+        quote(&mut writer, &id, &id, "a line", Vec::new(), None);
+        ids.push(id);
+    }
+    let shown = ids[..bound].join(", ");
+    let expected = format!(
+        "ambiguous prefix deed-quote-p matches {total} deeds, at most {bound} in byte order: \
+         {shown}; `deedar_list`"
+    );
+
+    let client = serve(&url).await;
+    let peer = client.peer();
+    for name in [
+        "deedar_get",
+        "deedar_trail",
+        "deedar_current",
+        "deedar_evidence",
+    ] {
+        let got = refusal(peer, name, id_args("deed-quote-p")).await;
+        assert_eq!(got.code, ErrorCode::INVALID_PARAMS, "{name}");
+        assert_eq!(got.message, expected, "{name}");
+        assert!(
+            !got.message.contains(&ids[bound]),
+            "{name}: {}",
+            got.message
+        );
+    }
+    client.cancel().await.expect("stop");
+}
+
+/// A trail that starts on a deed held here and walks to a source that is
+/// gone names that source.
+#[tokio::test]
+async fn a_trail_whose_source_is_missing_names_that_source() {
+    signing_off();
+    let home = tempfile::tempdir().expect("scratch");
+    let url = format!("file://{}", home.path().join("store").display());
+    let mut writer = Client::open(&url).expect("open");
+    let ghost = "deed-quote-ghost";
+    quote(
+        &mut writer,
+        "deed-quote-later",
+        "later",
+        "a line",
+        vec![Source::Deed(DeedId::parse(ghost).expect(ghost))],
+        None,
+    );
+
+    let client = serve(&url).await;
+    let peer = client.peer();
+    let got = refusal(peer, "deedar_trail", id_args("deed-quote-later")).await;
+    assert_eq!(got.code, ErrorCode::INVALID_PARAMS);
+    assert_eq!(got.message, format!("deed not found: {ghost}"));
     client.cancel().await.expect("stop");
 }

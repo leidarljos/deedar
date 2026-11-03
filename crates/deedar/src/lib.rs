@@ -19,6 +19,7 @@ mod host;
 mod import;
 mod leave;
 pub mod log;
+mod lookup;
 mod migrate;
 pub mod receipt;
 mod timestamp;
@@ -37,6 +38,7 @@ pub use fs::{is_write_once_addr, FsStore};
 pub use fs::{Audit, Exporter, Missing};
 pub use import::{Imported, UnsignedHead};
 pub use log::{Entry as LogEntry, Head as LogHead};
+pub use lookup::{explain_accession, prefix_matches, PREFIX_CANDIDATES_SHOWN};
 pub use receipt::{
     check_handover, check_since, kept_head, sign_head, Bridge, Handover, Receipt, SignedHead,
 };

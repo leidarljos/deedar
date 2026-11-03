@@ -836,19 +836,9 @@ fn explain_open(url: &str, err: &deed::Error) -> String {
     }
 }
 
-/// Accessions an ambiguous-prefix line prints.
-///
-/// The line names every match up to this many, in byte order, and always
-/// says how many matched. Eight is enough to tell a shared revision prefix
-/// from a shared kind without the line becoming the whole store; anything
-/// past it stays a count, and `deedar list` is the next command. The same
-/// bound is used for every store.
-const PREFIX_CANDIDATES_SHOWN: usize = 8;
-
 /// A parsed accession resolves before the store is consulted, so a missing
 /// name and a prefix of a real one look the same until `get`. A prefix of
-/// several is listed here, up to [`PREFIX_CANDIDATES_SHOWN`], in the same
-/// byte order as `list`.
+/// several is listed from the store, in the same byte order as `list`.
 fn resolve_id(client: &mut Client, url: &str, raw: &str) -> Result<DeedId, String> {
     match client.resolve(raw) {
         Ok(id) => match client.get(&id) {
@@ -861,77 +851,15 @@ fn resolve_id(client: &mut Client, url: &str, raw: &str) -> Result<DeedId, Strin
 
 fn id_error(client: &mut Client, url: &str, raw: &str, err: &deed::Error) -> String {
     match err {
-        deed::Error::NotFound(_) | deed::Error::InvalidId(_) => {
-            explain_accession(client, url, raw).unwrap_or_else(|failed| failed)
-        }
+        deed::Error::NotFound(_) | deed::Error::InvalidId(_) => deedar::explain_accession(
+            client,
+            raw,
+            &format!("deedar --url {url} list"),
+            &format!("deedar --url {url} get"),
+        )
+        .unwrap_or_else(|failed| failed.to_string()),
         other => other.to_string(),
     }
-}
-
-fn explain_accession(client: &mut Client, url: &str, raw: &str) -> Result<String, String> {
-    let (ids, proper_prefix) = prefix_matches(client, raw)?;
-    let line = match ids.as_slice() {
-        [] => format!("unknown accession {raw}; `deedar --url {url} list`"),
-        [only] if proper_prefix => {
-            format!("prefix {raw} matches {only}; `deedar --url {url} get {only}`")
-        }
-        [only] => format!("unknown accession {raw}; `deedar --url {url} get {only}`"),
-        many => {
-            let shown = many.len().min(PREFIX_CANDIDATES_SHOWN);
-            let listed = many[..shown].join(", ");
-            let kind = if proper_prefix {
-                "ambiguous prefix"
-            } else {
-                "ambiguous"
-            };
-            let n = many.len();
-            format!(
-                "{kind} {raw} matches {n} deeds, at most {PREFIX_CANDIDATES_SHOWN} in byte order: \
-                 {listed}; `deedar --url {url} list`"
-            )
-        }
-    };
-    Ok(line)
-}
-
-/// Accessions whose id, deed digest, or product path starts with `raw`.
-///
-/// `proper_prefix` is set when one of those is longer than `raw`, which is
-/// a prefix the seat can extend. An exact product path shared by two deeds
-/// is not a prefix; it still names both accessions.
-fn prefix_matches(client: &mut Client, raw: &str) -> Result<(Vec<String>, bool), String> {
-    let mut ids = Vec::new();
-    let mut proper_prefix = false;
-    for deed in client.list().map_err(|e| e.to_string())? {
-        let id = deed.id.to_string();
-        let digest = deedar::deed_digest(&deed);
-        let mut hit = starts_with(&id, raw) || starts_with(&digest, raw);
-        let mut extends = extends_prefix(&id, raw) || extends_prefix(&digest, raw);
-        for path in &deed.paths {
-            let Some(text) = path.to_str() else {
-                continue;
-            };
-            hit |= starts_with(text, raw);
-            extends |= extends_prefix(text, raw);
-        }
-        if hit {
-            proper_prefix |= extends;
-            ids.push(id);
-        }
-    }
-    // Accessions are ASCII, so this char order is byte order, and it is the
-    // order `list` prints. Sorting here keeps the line on that rule if `list`
-    // ever changes order.
-    ids.sort();
-    Ok((ids, proper_prefix))
-}
-
-fn starts_with(text: &str, raw: &str) -> bool {
-    text.starts_with(raw)
-}
-
-fn extends_prefix(text: &str, raw: &str) -> bool {
-    text.starts_with(raw) && text != raw
 }
 
 /// What to tell a seat whose host signs with a key its store does not accept.
