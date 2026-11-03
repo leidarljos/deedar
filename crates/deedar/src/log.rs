@@ -60,7 +60,9 @@ pub use rfc9162::{
     verify_consistency, verify_inclusion, Head,
 };
 
-/// The domain deedar signs a head under, as `Head::material(DOMAIN)`.
+/// The name of deedar's log as a `Head::material` domain. A signed head does
+/// not use it: `receipt` signs `deedar-head-v1`, a NUL byte, then the size and
+/// root.
 pub const DOMAIN: &str = "deedar-log-v1";
 
 #[cfg(test)]
@@ -83,7 +85,8 @@ mod tests {
         assert!(Entry::parse("a\tb\t1\tc\n").is_err());
     }
 
-    /// deedar's head material is the bytes it was before the tree moved out.
+    /// `Head::material(DOMAIN)` is `deedar-log-v1`, the size and the root,
+    /// tab-separated.
     #[test]
     fn the_head_material_is_unchanged() {
         let head = Head {

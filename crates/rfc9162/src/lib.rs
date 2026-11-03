@@ -73,9 +73,10 @@ impl Head {
         }
     }
 
-    /// The bytes a signature covers: `domain`, size and root, tab-separated.
+    /// Bytes for a signature to cover: `domain`, size and root, tab-separated.
     /// The domain names the log, so a head signed for one log is not a head of
-    /// another (deedar signs as `deedar-log-v1`).
+    /// another. A log with its own signed format, as deedar's is, need not
+    /// call this.
     #[must_use]
     pub fn material(&self, domain: &str) -> Vec<u8> {
         format!("{domain}\t{}\t{}", self.size, self.root).into_bytes()
