@@ -1,18 +1,32 @@
-# Licenses this workspace may depend on. CI runs `cargo deny check licenses`.
+# Dependency policy. CI and `just check` run `cargo deny check`.
 
+# The RustSec advisory database is the default. No advisory is ignored.
+[advisories]
+
+# `warn` is cargo-deny's default for this lint. The lockfile has two
+# versions each of base64, getrandom, syn and windows-sys, and collapsing
+# those is separate from reporting them.
+[bans]
+multiple-versions = "warn"
+
+# crates.io is the only source. Every locked crate comes from that
+# registry, so another registry or a git source fails the check.
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+
+# Licenses this workspace may depend on.
 [licenses]
 allow = [
     "Apache-2.0",
-    "BSD-2-Clause",
     "BSD-3-Clause",
-    "BSL-1.0",
-    "CC0-1.0",
     # webpki-roots ships the Mozilla CA list under this licence.
     "CDLA-Permissive-2.0",
     "ISC",
     "MIT",
     "Unicode-3.0",
-    "Unicode-DFS-2016",
     "Zlib",
 ]
+# 0.8 is cargo-deny's default confidence for matching licence text.
 confidence-threshold = 0.8

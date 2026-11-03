@@ -43,8 +43,8 @@ jobs:
           components: rustfmt, clippy
       - run: cargo test --workspace
 
-  licenses:
-    name: cargo deny check licenses
+  deny:
+    name: cargo deny check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -62,5 +62,5 @@ jobs:
       - name: Build cargo-deny 0.20.2 from source
         if: steps.deny.outputs.cache-hit != 'true'
         run: cargo install --locked cargo-deny --version 0.20.2
-      - name: cargo deny check licenses
-        run: cargo deny check licenses
+      - name: cargo deny check
+        run: cargo deny check
