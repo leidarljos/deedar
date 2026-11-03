@@ -27,6 +27,7 @@ pub mod vouch;
 mod wire;
 
 pub use attest::{Demand, Policy};
+pub use current::Walk;
 pub use deed::{
     walk_trail, Body, Deed, DeedId, Draft, Error, Evidence, Face, FormField, Grant, Kind,
     MailMessageId, Measure, ProducedBy, Result, Source, Step,
@@ -291,6 +292,24 @@ impl Client {
             Response::Err(e) => Err(map_err(&e)),
             _ => Err(deed::Error::Decode("current response".into())),
         }
+    }
+
+    /// Where the supersede walk from `id` ended.
+    ///
+    /// Read straight off the store rather than through the wire. The wire
+    /// carries a fork or a cycle as `invalid body:` text, and
+    /// [`Self::current`] returns that as `InvalidBody`. The command prints
+    /// it and exits 0. This returns the accessions the walk found, in
+    /// accession order.
+    ///
+    /// # Errors
+    ///
+    /// `NotFound` when the deed the walk ends on is missing, and
+    /// `Tombstoned` when that deed is tombstoned. A sidecar that does not
+    /// parse, or a deeds directory that cannot be read, returns that error.
+    /// A fork or a cycle is [`Walk::Fork`] or [`Walk::Cycle`], not an error.
+    pub fn current_walk(&self, id: &DeedId) -> Result<Walk> {
+        self.store.current_walk(id)
     }
 
     pub fn migrate(&mut self) -> Result<()> {

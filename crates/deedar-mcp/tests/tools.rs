@@ -609,3 +609,134 @@ async fn every_tool_answers_with_its_fields_and_names_a_bad_accession() {
 
     client.cancel().await.expect("stop");
 }
+
+struct Held {
+    _home: tempfile::TempDir,
+    url: String,
+}
+
+fn held() -> Held {
+    signing_off();
+    let home = tempfile::tempdir().expect("scratch");
+    let url = format!("file://{}", home.path().join("store").display());
+    Held { _home: home, url }
+}
+
+fn deeds_dir(url: &str) -> PathBuf {
+    deedar::store_dir(url).expect("store").join("deeds")
+}
+
+fn assert_branch(value: &Value, note: &str, deeds: &[&Deed]) {
+    let row = fields(value, &["deeds", "note"]);
+    assert_eq!(string_at(row, "note"), note);
+    let got = row["deeds"]
+        .as_array()
+        .unwrap_or_else(|| panic!("deeds is an array, got {value}"));
+    assert_eq!(got.len(), deeds.len(), "{value}");
+    for (row, deed) in got.iter().zip(deeds) {
+        assert_deed(row, deed);
+    }
+}
+
+/// A second supersede of one prior is a fork. `m` holds the successor
+/// file and `a` names the same prior, so `a` sorts first. Both tips come
+/// back, the call is not an error, and a tip of that fork is still the
+/// one deed.
+#[tokio::test]
+async fn current_on_a_fork_returns_both_tips_in_accession_order() {
+    let held = held();
+    let mut oracle = store(&held.url);
+    quote(
+        &mut oracle,
+        "deed-quote-root",
+        "root",
+        "the root",
+        Vec::new(),
+        None,
+    );
+    quote(
+        &mut oracle,
+        "deed-quote-m",
+        "em",
+        "the em",
+        Vec::new(),
+        Some("deed-quote-root"),
+    );
+    quote(
+        &mut oracle,
+        "deed-quote-a",
+        "ay",
+        "the ay",
+        Vec::new(),
+        None,
+    );
+    // Create records one successor. It refuses a second, so a fork's
+    // other edge is this sidecar: a `.supersedes` naming the same prior.
+    std::fs::write(
+        deeds_dir(&held.url).join("deed-quote-a.supersedes"),
+        "deed-quote-root\n",
+    )
+    .expect("supersedes");
+    let ay = deed(&mut oracle, "deed-quote-a");
+    let em = deed(&mut oracle, "deed-quote-m");
+
+    let running = serve(&held.url).await;
+    let peer = running.peer();
+    let forked = call(peer, "deedar_current", Some(id_args("deed-quote-root")))
+        .await
+        .expect("current");
+    assert_eq!(forked.is_error, Some(false), "{forked:?}");
+    assert_branch(&payload(forked), "fork", &[&ay, &em]);
+    let tip = ask(peer, "deedar_current", Some(id_args("deed-quote-a"))).await;
+    assert_deed(&tip, &ay);
+    running.cancel().await.expect("stop");
+}
+
+/// A walk that steps back onto its path is a cycle. Each member is named
+/// once, in accession order, the call is not an error, and asking from a
+/// member gives the same answer.
+#[tokio::test]
+async fn current_on_a_cycle_returns_each_member_once() {
+    let held = held();
+    let mut oracle = store(&held.url);
+    quote(
+        &mut oracle,
+        "deed-quote-z",
+        "tail",
+        "the tail",
+        Vec::new(),
+        None,
+    );
+    quote(
+        &mut oracle,
+        "deed-quote-a",
+        "ay",
+        "the ay",
+        Vec::new(),
+        Some("deed-quote-z"),
+    );
+    quote(
+        &mut oracle,
+        "deed-quote-m",
+        "em",
+        "the em",
+        Vec::new(),
+        None,
+    );
+    let deeds = deeds_dir(&held.url);
+    std::fs::write(deeds.join("deed-quote-a.successor"), "deed-quote-m\n").expect("successor");
+    std::fs::write(deeds.join("deed-quote-m.successor"), "deed-quote-a\n").expect("successor");
+    let ay = deed(&mut oracle, "deed-quote-a");
+    let em = deed(&mut oracle, "deed-quote-m");
+
+    let running = serve(&held.url).await;
+    let peer = running.peer();
+    let cycled = call(peer, "deedar_current", Some(id_args("deed-quote-z")))
+        .await
+        .expect("current");
+    assert_eq!(cycled.is_error, Some(false), "{cycled:?}");
+    assert_branch(&payload(cycled), "cycle", &[&ay, &em]);
+    let again = ask(peer, "deedar_current", Some(id_args("deed-quote-a"))).await;
+    assert_branch(&again, "cycle", &[&ay, &em]);
+    running.cancel().await.expect("stop");
+}

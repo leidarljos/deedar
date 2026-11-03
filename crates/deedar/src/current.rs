@@ -33,16 +33,34 @@ impl FsStore {
     /// `NotFound` when the deed the walk ends on is missing, and
     /// `Tombstoned` when that deed is tombstoned. A fork or a cycle
     /// returns `InvalidBody` carrying `fork {id}...` or `cycle {id}...`.
-    /// The command prints those as above and still exits 0. A sidecar
-    /// that does not parse, or a deeds directory that cannot be read,
-    /// returns that error.
+    /// [`Self::current_walk`] returns those accessions as data. The
+    /// command prints the `InvalidBody` as above and still exits 0. A
+    /// sidecar that does not parse, or a deeds directory that cannot be
+    /// read, returns that error.
     pub fn current(&self, id: &DeedId) -> Result<Deed> {
-        let superseded_by = self.superseded_by()?;
-        match walk(self, id, &superseded_by)? {
+        match self.current_walk(id)? {
             Walk::Tip(tip) => self.get(&tip),
             Walk::Fork(ids) => Err(Error::InvalidBody(format!("fork {}", join_ids(&ids)))),
             Walk::Cycle(ids) => Err(Error::InvalidBody(format!("cycle {}", join_ids(&ids)))),
         }
+    }
+
+    /// The ending [`Self::current`] turns into one deed or an `InvalidBody`.
+    ///
+    /// A fork or a cycle is an answer the command prints and exits 0 on.
+    /// The accessions are in accession order, each once. Callers that want
+    /// them take them here, rather than reading them back out of the error
+    /// string.
+    ///
+    /// # Errors
+    ///
+    /// `NotFound` when the deed the walk ends on is missing, and
+    /// `Tombstoned` when that deed is tombstoned. A sidecar that does not
+    /// parse, or a deeds directory that cannot be read, returns that error.
+    /// A fork or a cycle is not an error.
+    pub fn current_walk(&self, id: &DeedId) -> Result<Walk> {
+        let superseded_by = self.superseded_by()?;
+        walk(self, id, &superseded_by)
     }
 
     /// The successor `current` steps to from `id`: named by `{id}.successor`,
@@ -133,7 +151,12 @@ fn read_successor(path: &std::path::Path) -> Result<Option<DeedId>> {
 }
 
 /// Where the walk from one accession ended.
-enum Walk {
+///
+/// [`FsStore::current`] returns the tip, and a fork or a cycle as
+/// `InvalidBody` text. This is that same ending with the accessions
+/// kept apart from the error text.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Walk {
     /// One deed has no live edge out.
     Tip(DeedId),
     /// More than one does. Accession order.

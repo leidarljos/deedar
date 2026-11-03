@@ -10,7 +10,7 @@ use rmcp::{
 };
 use serde::Serialize;
 
-use deedar::Client;
+use deedar::{Client, Walk};
 
 use crate::args::*;
 
@@ -101,6 +101,41 @@ pub struct HandoverRow {
     pub bridged_from: Option<usize>,
 }
 
+/// What `deedar_current` returns.
+///
+/// One tip is the deed, the same object a seat already reads. A fork or
+/// a cycle is every current deed and a `note`, and that call still
+/// succeeds. The two shapes are untagged so the one-tip object does not
+/// grow a field.
+#[derive(Debug, Clone, Serialize, schemars::JsonSchema)]
+#[serde(untagged)]
+pub enum CurrentResult {
+    /// The one deed with no live edge out.
+    One(DeedRow),
+    /// Every deed the walk ended on.
+    Many(CurrentTips),
+}
+
+/// Every deed a fork or a cycle ended on.
+#[derive(Debug, Clone, Serialize, schemars::JsonSchema)]
+pub struct CurrentTips {
+    /// Accession order, the order `deedar current` prints.
+    pub deeds: Vec<DeedRow>,
+    /// Which ending this is.
+    pub note: CurrentNote,
+}
+
+/// Why more than one deed is current.
+#[derive(Debug, Clone, Copy, Serialize, schemars::JsonSchema)]
+pub enum CurrentNote {
+    /// More than one deed has no live edge out.
+    #[serde(rename = "fork")]
+    Fork,
+    /// The walk stepped back onto a deed already on its path.
+    #[serde(rename = "cycle")]
+    Cycle,
+}
+
 fn row(deed: &deed::Deed) -> DeedRow {
     DeedRow {
         id: deed.id.to_string(),
@@ -112,6 +147,14 @@ fn row(deed: &deed::Deed) -> DeedRow {
         digest: deedar::deed_digest(deed),
         body: serde_json::to_value(&deed.body).unwrap_or(serde_json::Value::Null),
     }
+}
+
+fn rows_for(client: &mut Client, ids: &[deed::DeedId]) -> Result<Vec<DeedRow>, McpError> {
+    let mut out = Vec::with_capacity(ids.len());
+    for id in ids {
+        out.push(row(&client.get(id).map_err(bad)?));
+    }
+    Ok(out)
 }
 
 fn source_text(source: &deed::Source) -> String {
@@ -200,7 +243,7 @@ impl DeedarServer {
     }
 
     #[tool(
-        description = "The deed that supersedes this one, or this one when nothing does. A citation that is not the tip is stale, and this is how a caller finds out without reading the chain.",
+        description = "The deed that supersedes this one, or this one when nothing does. A fork or a cycle is every current deed in accession order, with a note of which, and the call succeeds. A citation that is not the tip is stale, and this is how a caller finds out without reading the chain.",
         annotations(
             title = "The current deed",
             read_only_hint = true,
@@ -210,11 +253,21 @@ impl DeedarServer {
     async fn deedar_current(
         &self,
         Parameters(args): Parameters<IdArgs>,
-    ) -> Result<Json<DeedRow>, McpError> {
+    ) -> Result<Json<CurrentResult>, McpError> {
         let mut client = open(&self.url)?;
         let id = client.resolve(&args.id).map_err(bad)?;
-        let deed = client.current(&id).map_err(bad)?;
-        Ok(Json(row(&deed)))
+        let answer = match client.current_walk(&id).map_err(bad)? {
+            Walk::Tip(tip) => CurrentResult::One(row(&client.get(&tip).map_err(bad)?)),
+            Walk::Fork(ids) => CurrentResult::Many(CurrentTips {
+                deeds: rows_for(&mut client, &ids)?,
+                note: CurrentNote::Fork,
+            }),
+            Walk::Cycle(ids) => CurrentResult::Many(CurrentTips {
+                deeds: rows_for(&mut client, &ids)?,
+                note: CurrentNote::Cycle,
+            }),
+        };
+        Ok(Json(answer))
     }
 
     #[tool(
