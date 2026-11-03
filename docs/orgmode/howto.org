@@ -373,7 +373,47 @@ $ deedar-mcp
 #+end_src
 # [[[end]]]
 
-Every tool reads: =deedar_get=, =deedar_trail=, =deedar_evidence=,
-=deedar_current=, =deedar_check=, =deedar_log_head=, =deedar_log_bridge=,
-=deedar_log_audit=. Two prompts sequence a handover check and standing
-behind one deed.
+The server is the =deedar-mcp= binary. It speaks on standard input and
+output and takes no arguments. =deedar mcp= prints =unknown command mcp=.
+
+With =DEEDAR_URL= unset or empty, the server uses the seat store, the same
+path the command line uses: =$XDG_DATA_HOME/deedar/store=, or
+=~/.local/share/deedar/store=. Starting the process does not create that
+directory. A read of a missing seat store returns the same hint as
+=deedar list= and creates nothing. =deedar_export= creates that store and
+prints =deedar: created the store at PATH=, then writes the handover or
+reports a missing accession. =deedar_check= does not open the store: it
+checks the bag it was given.
+
+A client runs =deedar-mcp= with no arguments:
+
+#+begin_src json
+{
+  "mcpServers": {
+    "deedar": {
+      "command": "deedar-mcp"
+    }
+  }
+}
+#+end_src
+
+Set =DEEDAR_URL= in that client's environment when the store is not the
+seat store. =DEEDAR_HOST_SIGNING_KEY= is the same variable the command line
+reads.
+
+Each line is one tool the server registers. =reads= leaves every deed as it
+was. =writes= also writes a directory the caller names.
+
+- =deedar_check= reads. Check deeds somebody else handed over: that each one's bytes match the digest its log entry recorded, and that its path reaches the head the bag names.
+- =deedar_current= reads. The deed that supersedes this one, or this one when nothing does. A fork or a cycle is every current deed in accession order, with a note of which, and the call succeeds.
+- =deedar_evidence= reads. Whether the store still holds evidence for a deed, and what it says: who produced it and when.
+- =deedar_export= writes. Write deeds into a directory with the proof they were logged here first, which is what a handover carries.
+- =deedar_get= reads. One deed by accession, or by a `sha256:` of the deed or of one of its product paths.
+- =deedar_list= reads. Deeds the store serves, in accession order. kind and agent match exactly; text is a case-insensitive substring of the name or of a body's excerpt, title, subject, step text or url. Omit every argument for the whole shelf.
+- =deedar_log_audit= reads. Whether the store answers for what it logged, and logged what it serves.
+- =deedar_log_bridge= reads. The record joining a head a reader already holds to this log's own, so they can tell a log that grew from one that was rewritten.
+- =deedar_log_head= reads. The append-only log's head: how many deeds it covers and the Merkle root over them.
+- =deedar_trail= reads. The deed and every input it was made from: its sources that are deeds, and theirs, walked back to the leaves.
+
+Two prompts, =check_a_handover= and =stand_behind_a_deed=, sequence a
+handover check and standing behind one deed.
