@@ -33,10 +33,11 @@ struct Report {
 
 /// Route the verbs that report per-id, and hand the rest to [`run`].
 fn dispatch(args: Vec<String>) -> Result<Report, String> {
-    // Before the store is resolved: asking which build this is must work on a
-    // machine that has no store yet, and it is how anything checking for drift
-    // finds out.
-    if args.iter().any(|a| a == "--version" || a == "-V") {
+    // Version and help are answered before the store is resolved, so they
+    // work on a machine that has no store yet. They count only in flag
+    // position: `--excerpt --help` is an excerpt, not a request for help.
+    let split = split_argv(&args);
+    if split.version {
         return Ok(Report {
             text: format!(
                 "deedar {}
@@ -46,9 +47,9 @@ fn dispatch(args: Vec<String>) -> Result<Report, String> {
             ok: true,
         });
     }
-    if args.iter().any(|a| a == "--help" || a == "-h") {
+    if split.help {
         return Ok(Report {
-            text: help_text(&args),
+            text: help_text(&split.rest),
             ok: true,
         });
     }
@@ -596,11 +597,16 @@ fn usage() -> String {
         .into()
 }
 
+/// Help for the verb, the first word that is not a flag.
+///
+/// [`split_argv`] has already removed a global `--url` and its value, so
+/// that value is not read as the verb: `deedar --url FILE create --help`
+/// is create's page.
 fn help_text(args: &[String]) -> String {
     let verb = args
         .iter()
         .map(String::as_str)
-        .find(|a| !a.starts_with('-') && *a != "--url");
+        .find(|a| !a.starts_with('-'));
     match verb {
         Some("create") => create_help(),
         _ => usage(),
@@ -621,28 +627,111 @@ fn create_help() -> String {
         .into()
 }
 
-/// The store to act on: `--url`, then `DEEDAR_URL`, then the seat's own.
+/// `--help`, `-h`, `--version`, `-V`, and the import switch
+/// `--allow-unsigned-head`. None of these takes the next argument.
+fn is_switch(arg: &str) -> bool {
+    matches!(
+        arg,
+        "--help" | "-h" | "--version" | "-V" | "--allow-unsigned-head"
+    )
+}
+
+/// Global flags pulled off the words the verb reads.
+struct SplitArgv {
+    url: Option<String>,
+    help: bool,
+    version: bool,
+    /// `--url` and its value removed. Every other word, in order.
+    rest: Vec<String>,
+    url_error: Option<&'static str>,
+}
+
+/// Split global flags from the words the verb itself reads.
+///
+/// `--url`, `--help`/`-h` and `--version`/`-V` count only in flag position:
+/// before the verb, or among the verb's own flags. The word after an option
+/// that takes a value stays with that option, so `--excerpt --help` is an
+/// excerpt and `--name --url` is a name.
+///
+/// Before the verb the only option that takes a value is `--url`. An unknown
+/// option there must not swallow the verb or a later `--url`. After the verb,
+/// every option except [`is_switch`] takes one value: that is how create,
+/// check and export are written.
+fn split_argv(args: &[String]) -> SplitArgv {
+    let mut url = None;
+    let mut help = false;
+    let mut version = false;
+    let mut rest = Vec::with_capacity(args.len());
+    let mut url_error = None;
+    let mut verb_seen = false;
+    let mut i = 0;
+    while i < args.len() {
+        let arg = args[i].as_str();
+        // `-` is how evidence, current and export read ids from stdin.
+        let flag = arg.starts_with('-') && arg != "-";
+        if flag && arg == "--url" {
+            match args.get(i + 1) {
+                Some(value) => {
+                    url = Some(value.clone());
+                    i += 2;
+                }
+                None => {
+                    url_error = Some("--url needs a value");
+                    i += 1;
+                }
+            }
+            continue;
+        }
+        if flag && is_switch(arg) {
+            help |= arg == "--help" || arg == "-h";
+            version |= arg == "--version" || arg == "-V";
+            rest.push(args[i].clone());
+            i += 1;
+            continue;
+        }
+        if flag && verb_seen {
+            rest.push(args[i].clone());
+            i += 1;
+            if i < args.len() {
+                rest.push(args[i].clone());
+                i += 1;
+            }
+            continue;
+        }
+        rest.push(args[i].clone());
+        if !flag {
+            verb_seen = true;
+        }
+        i += 1;
+    }
+    SplitArgv {
+        url,
+        help,
+        version,
+        rest,
+        url_error,
+    }
+}
+
+/// The store to act on: `--url` in flag position, then `DEEDAR_URL`, then the
+/// seat's own. An `--url` that is the value of another flag is left for that
+/// flag.
 ///
 /// `create` and `import` use the seat path when that directory is not there
 /// yet, and opening it makes the directory. Any other verb names the missing
 /// path and stops, because there is nothing to read.
 fn take_url(args: &[String]) -> Result<(String, Vec<String>), String> {
-    let mut url = env::var("DEEDAR_URL").unwrap_or_default();
-    let mut rest = Vec::new();
-    let mut i = 0;
-    while i < args.len() {
-        if args[i] == "--url" {
-            url = args.get(i + 1).ok_or("--url needs a value")?.clone();
-            i += 2;
-            continue;
-        }
-        rest.push(args[i].clone());
-        i += 1;
+    let split = split_argv(args);
+    if let Some(err) = split.url_error {
+        return Err(err.to_string());
     }
+    let mut url = split
+        .url
+        .unwrap_or_else(|| env::var("DEEDAR_URL").unwrap_or_default());
     if url.is_empty() {
         let seat = deedar::default_store();
         match seat {
-            Some(dir) if dir.is_dir() || may_make_missing_seat(&dir, &rest) => {
+            Some(dir) if dir.is_dir() || may_make_missing_seat(&dir, &split.rest) => {
                 url = format!("file://{}", dir.display());
             }
             Some(dir) => {
@@ -660,7 +749,7 @@ fn take_url(args: &[String]) -> Result<(String, Vec<String>), String> {
             }
         }
     }
-    Ok((url, rest))
+    Ok((url, split.rest))
 }
 
 /// `create` and `import` may make a seat directory that is not there yet.
