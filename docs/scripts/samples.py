@@ -77,6 +77,7 @@ FENCES = {
     "ht-attest": "text",
     "ht-delete": "org",
     "ht-mcp": "org",
+    "index": "org",
 }
 
 _READY = False
@@ -491,6 +492,21 @@ def howto_mcp() -> str:
         session.close()
 
 
+def index() -> str:
+    # Relative note.rs, as the first minute has always shown it. The store
+    # is a fresh directory, so the root is the one-deed root.
+    session = Session("index")
+    try:
+        text = prelude(session, "off")
+        text += mint(session, "note.rs")
+        acc = last_accession(text)
+        text += session.step(f"deedar evidence {acc}")
+        text += session.step("deedar log head")
+        return text
+    finally:
+        session.close()
+
+
 def build_all() -> dict[str, str]:
     ensure_tools()
     parts = {"readme": readme()}
@@ -509,6 +525,7 @@ def build_all() -> dict[str, str]:
         [("deedar delete {acc}", 0), ("deedar log audit", 1)],
     )
     parts["ht-mcp"] = howto_mcp()
+    parts["index"] = index()
     missing = [name for name in FENCES if name not in parts]
     if missing:
         raise SystemExit("samples not built: " + ", ".join(missing))

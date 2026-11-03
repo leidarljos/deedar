@@ -8,3 +8,10 @@ docs/source/conf.py -I scripts
 README.md
 docs/orgmode/getting-started.org
 docs/orgmode/howto.org
+# The index first minute is a transcript of the binary at a pinned clock.
+docs/orgmode/index.org
+docs/orgmode/reference.org
+docs/source/index.rst
+docs/source/reference.rst
+docs/scripts/samples.py
+.github/workflows/version.yml

@@ -39,16 +39,30 @@ Install
 First minute
 ============
 
+The block is a fresh store with signing off, recorded with the clock
+stopped. Run it yourself and the time and the root will differ; the other
+lines will not.
+
 .. code:: console
 
+   $ export DEEDAR_URL=file:///tmp/deeds
+   $ export DEEDAR_HOST_SIGNING_KEY=off
    $ echo 'fn main() {}' > note.rs
    $ deedar create file --name "the parser patch" --path note.rs --agent you
    id=deed-file-the-parser-patch kind=file name=the parser patch
-   paths=sha256:536e506b...
+   paths=sha256:536e506bb90914c243a12b397b9a998f85ae2cbd9ba02dfd03a9e155ca5ca0f4
+   sources=
+   producedBy=you -
+   grants=
+   face=document
+   file=sha256:536e506bb90914c243a12b397b9a998f85ae2cbd9ba02dfd03a9e155ca5ca0f4
+   accession=deed-file-the-parser-patch
    $ deedar evidence deed-file-the-parser-patch
    id=deed-file-the-parser-patch ok
+   producedBy=you -
+   time=1700000000
    $ deedar log head
-   size=1 root=f56884f1...
+   size=1 root=b1799b9f22404b3626b3c43e80f26232922113b997a1e3377bc803ff799f4ee8
 
 The :doc:`tutorial <getting-started>` goes on to supersede the deed,
 hand it to another store with its receipt, and check it there.
