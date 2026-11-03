@@ -1,8 +1,31 @@
 //! RFC 3161 TimeStampReq over the on-disk evidence file.
 
-use std::io::Read;
+use std::io::{self, Read};
+use std::time::Duration;
 
 use sha2::{Digest, Sha256};
+
+/// How long a seat waits on a hook before a quiet `timestamp` counts as stuck.
+///
+/// RFC 3161 sets no deadline. The command runs in the foreground, and about
+/// ten seconds of silence is when a person stops waiting and assumes it has
+/// hung. A live authority finishes a handshake and one short DER reply well
+/// inside that, so both the connect and the read use this bound.
+const FOREGROUND_DEADLINE: Duration = Duration::from_secs(10);
+
+/// Connect deadline for `DEEDAR_TSA`.
+///
+/// A handshake that has not finished within [`FOREGROUND_DEADLINE`] is not
+/// going to: the peer is not answering. The seat still gets the `.tsq`.
+pub(crate) const CONNECT_TIMEOUT: Duration = FOREGROUND_DEADLINE;
+
+/// Per-read deadline for the timestamp reply.
+///
+/// ureq's default agent never times out a read, so an authority that accepts
+/// and then sends nothing blocks the command for good. The reply is one short
+/// DER body, so the same [`FOREGROUND_DEADLINE`] covers a slow signer and still
+/// returns while the seat is there.
+pub(crate) const READ_TIMEOUT: Duration = FOREGROUND_DEADLINE;
 
 /// SHA-256 of the on-disk `{id}.evidence` file bytes.
 pub fn imprint_hash(evidence_bytes: &[u8]) -> [u8; 32] {
@@ -56,15 +79,62 @@ fn put_len(out: &mut Vec<u8>, n: usize) {
     out.extend_from_slice(&bytes);
 }
 
-pub(crate) fn post_query(url: &str, req: &[u8]) -> deed::Result<Vec<u8>> {
-    let resp = ureq::post(url)
+pub(crate) enum QueryError {
+    /// The authority did not answer within `timeout`.
+    TimedOut {
+        timeout: Duration,
+    },
+    Other(String),
+}
+
+pub(crate) fn post_query(url: &str, req: &[u8]) -> Result<Vec<u8>, QueryError> {
+    let agent = ureq::AgentBuilder::new()
+        .timeout_connect(CONNECT_TIMEOUT)
+        .timeout_read(READ_TIMEOUT)
+        .build();
+    let resp = agent
+        .post(url)
         .set("Content-Type", "application/timestamp-query")
         .set("Accept", "application/timestamp-reply")
         .send_bytes(req)
-        .map_err(|e| deed::Error::Io(e.to_string()))?;
+        .map_err(query_error)?;
     let mut body = Vec::new();
     resp.into_reader()
         .read_to_end(&mut body)
-        .map_err(|e| deed::Error::Io(e.to_string()))?;
+        .map_err(read_error)?;
     Ok(body)
+}
+
+fn query_error(err: ureq::Error) -> QueryError {
+    let timeout = match err.kind() {
+        // Connect gives up before any reply byte. A later stall is a read.
+        ureq::ErrorKind::ConnectionFailed if io_timed_out(&err) => Some(CONNECT_TIMEOUT),
+        ureq::ErrorKind::Io if io_timed_out(&err) => Some(READ_TIMEOUT),
+        _ => None,
+    };
+    match timeout {
+        Some(timeout) => QueryError::TimedOut { timeout },
+        None => QueryError::Other(err.to_string()),
+    }
+}
+
+fn read_error(err: io::Error) -> QueryError {
+    if err.kind() == io::ErrorKind::TimedOut {
+        QueryError::TimedOut {
+            timeout: READ_TIMEOUT,
+        }
+    } else {
+        QueryError::Other(err.to_string())
+    }
+}
+
+fn io_timed_out(err: &ureq::Error) -> bool {
+    let mut source = std::error::Error::source(err);
+    while let Some(cur) = source {
+        if let Some(io_err) = cur.downcast_ref::<io::Error>() {
+            return io_err.kind() == io::ErrorKind::TimedOut;
+        }
+        source = std::error::Error::source(cur);
+    }
+    false
 }

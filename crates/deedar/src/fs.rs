@@ -7,7 +7,7 @@ use deed::{walk_trail, Body, Deed, DeedId, Draft, Error, Evidence, ProducedBy, R
 use hmac::{Hmac, Mac};
 use sha2::{Digest, Sha256};
 
-use crate::timestamp::{imprint_hash, post_query, timestamp_req};
+use crate::timestamp::{imprint_hash, post_query, timestamp_req, QueryError};
 use crate::wire::{self, Request, Response};
 use crate::CreateRequest;
 
@@ -866,12 +866,26 @@ impl FsStore {
             fs::read(self.evidence_path(id)).map_err(|_| Error::Evidence("missing".into()))?;
         let req = timestamp_req(&imprint_hash(&bytes));
         match std::env::var("DEEDAR_TSA") {
-            Ok(url) if !url.is_empty() => {
-                let body = post_query(&url, &req)?;
-                let dest = self.tsr_path(id);
-                atomic_write(&dest, &body)?;
-                Ok(dest)
-            }
+            Ok(url) if !url.is_empty() => match post_query(&url, &req) {
+                Ok(body) => {
+                    let dest = self.tsr_path(id);
+                    atomic_write(&dest, &body)?;
+                    Ok(dest)
+                }
+                // The handshake never finished, or the authority accepted and
+                // then sent nothing. Keep the query the same way the no-TSA
+                // path does, and leave the deed alone.
+                Err(QueryError::TimedOut { timeout }) => {
+                    let dest = self.tsq_path(id);
+                    atomic_write(&dest, &req)?;
+                    Err(Error::Io(format!(
+                        "DEEDAR_TSA {url} timed out after {}s; query saved at {} to send later",
+                        timeout.as_secs(),
+                        dest.display()
+                    )))
+                }
+                Err(QueryError::Other(msg)) => Err(Error::Io(msg)),
+            },
             _ => {
                 let dest = self.tsq_path(id);
                 atomic_write(&dest, &req)?;
