@@ -1,0 +1,1 @@
+The Merkle log (leaf and node hashes, root, inclusion and consistency proofs, head) is its own crate, `rfc9162`, which deedar re-exports from `deedar::log`. `Head::material` now takes the domain tag; deedar signs as `deedar::log::DOMAIN` (`deedar-log-v1`), so its signed bytes are unchanged.
