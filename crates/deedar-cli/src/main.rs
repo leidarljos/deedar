@@ -415,6 +415,9 @@ fn cmd_log(client: &mut Client, url: &str, args: &[String]) -> Result<String, St
             for row in &audit.missing {
                 out.push_str(&format!("missing {}\t{}\n", row.id, row.why));
             }
+            for row in &audit.unreadable {
+                out.push_str(&format!("unreadable {}\t{}\n", row.id, row.why));
+            }
             for id in &audit.unlogged {
                 out.push_str(&format!("unlogged {id}\n"));
             }

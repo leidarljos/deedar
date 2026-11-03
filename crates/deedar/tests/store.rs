@@ -622,29 +622,103 @@ fn the_same_file_again_hands_back_the_deed_it_froze() {
 }
 
 #[test]
-fn list_fails_on_a_corrupt_deed_file() {
+fn list_keeps_readable_deeds_when_one_cap_file_is_junk() {
     let url = tmp_url();
     let mut client = Client::open(&url).unwrap();
-    client
-        .create(req(
-            "deed-quote-heatpump",
-            "Heat",
-            Body::Quote {
-                edition: "ed".into(),
-                start: 0,
-                end: 4,
-                excerpt: "heat".into(),
-                urls: vec!["https://www.iea.org/x".into()],
-            },
-        ))
-        .unwrap();
+    for id in ["deed-quote-a", "deed-quote-b"] {
+        client
+            .create(req(
+                id,
+                id,
+                Body::Quote {
+                    edition: "ed".into(),
+                    start: 0,
+                    end: 4,
+                    excerpt: "heat".into(),
+                    urls: vec!["https://www.iea.org/x".into()],
+                },
+            ))
+            .unwrap();
+    }
+    let junk = deedar::store_dir(&url)
+        .unwrap()
+        .join("deeds")
+        .join("deed-quote-zz.cap");
+    std::fs::write(&junk, b"junk").unwrap();
+    let bytes = std::fs::read(&junk).unwrap();
+
+    let listed = client.list().expect("list");
+    let ids: Vec<_> = listed.iter().map(|d| d.id.as_str()).collect();
+    assert_eq!(ids, ["deed-quote-a", "deed-quote-b"]);
+    assert_eq!(
+        client
+            .get(&DeedId::parse("deed-quote-a").unwrap())
+            .unwrap()
+            .id
+            .as_str(),
+        "deed-quote-a"
+    );
+    let absent = client
+        .get(&DeedId::parse("deed-quote-nope").unwrap())
+        .expect_err("absent");
+    assert!(matches!(absent, Error::NotFound(_)), "{absent}");
+    let digest = deedar::deed_digest(&client.get(&DeedId::parse("deed-quote-a").unwrap()).unwrap());
+    assert_eq!(client.resolve(&digest).unwrap().as_str(), "deed-quote-a");
+
+    let audit = client.log_audit().unwrap();
+    assert!(!audit.is_clean(), "{audit:?}");
+    assert!(audit.missing.is_empty(), "{audit:?}");
+    assert_eq!(
+        audit.unreadable,
+        vec![deedar::Missing {
+            id: "deed-quote-zz".into(),
+            why: "store decode: not a deedar Cap'n frame".into(),
+        }]
+    );
+    assert_eq!(std::fs::read(&junk).unwrap(), bytes);
+}
+
+#[test]
+fn log_audit_names_a_logged_deed_whose_file_does_not_decode() {
+    let url = tmp_url();
+    let mut client = Client::open(&url).unwrap();
+    for id in ["deed-quote-a", "deed-quote-b"] {
+        client
+            .create(req(
+                id,
+                id,
+                Body::Quote {
+                    edition: "ed".into(),
+                    start: 0,
+                    end: 4,
+                    excerpt: "heat".into(),
+                    urls: vec!["https://www.iea.org/x".into()],
+                },
+            ))
+            .unwrap();
+    }
     let cap = deedar::store_dir(&url)
         .unwrap()
         .join("deeds")
-        .join("deed-quote-heatpump.cap");
-    std::fs::write(&cap, b"not-a-deed").unwrap();
-    let err = client.list().expect_err("corrupt");
-    assert!(matches!(err, Error::Decode(_) | Error::Io(_)), "{err}");
+        .join("deed-quote-a.cap");
+    std::fs::write(&cap, b"junk").unwrap();
+    let bytes = std::fs::read(&cap).unwrap();
+
+    let listed = client.list().expect("list");
+    let ids: Vec<_> = listed.iter().map(|d| d.id.as_str()).collect();
+    assert_eq!(ids, ["deed-quote-b"]);
+
+    let audit = client.log_audit().unwrap();
+    assert!(!audit.is_clean(), "{audit:?}");
+    assert!(audit.unreadable.is_empty(), "{audit:?}");
+    assert_eq!(
+        audit.missing,
+        vec![deedar::Missing {
+            id: "deed-quote-a".into(),
+            why: "store decode: not a deedar Cap'n frame".into(),
+        }]
+    );
+    assert_eq!(std::fs::read(&cap).unwrap(), bytes);
 }
 
 #[test]

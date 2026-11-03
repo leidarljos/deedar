@@ -93,7 +93,8 @@ impl Exporter<'_> {
 }
 
 /// What an audit found in both directions: logged and gone is tampering;
-/// served and never logged is a store that wants backfilling.
+/// served and never logged is a store that wants backfilling. A deed file
+/// that does not read, and that the log does not name, is unreadable.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Audit {
     /// Entries the log holds.
@@ -102,13 +103,17 @@ pub struct Audit {
     pub missing: Vec<Missing>,
     /// Served and never logged.
     pub unlogged: Vec<String>,
+    /// On the shelf, never logged, and not readable. `list` skips these so
+    /// one damaged file does not hide the others; the audit names them.
+    pub unreadable: Vec<Missing>,
 }
 
 impl Audit {
-    /// Whether the store answers for everything, in both directions.
+    /// Whether the store answers for everything, in both directions, and
+    /// every deed file on the shelf reads.
     #[must_use]
     pub fn is_clean(&self) -> bool {
-        self.missing.is_empty() && self.unlogged.is_empty()
+        self.missing.is_empty() && self.unlogged.is_empty() && self.unreadable.is_empty()
     }
 
     /// Nothing lost and something never logged: backfilling is the answer.
@@ -542,12 +547,13 @@ impl FsStore {
         })
     }
 
-    /// The log against the shelves: deeds logged and gone or changed, and
-    /// deeds served and never logged.
+    /// The log against the shelves: deeds logged and gone or changed, deeds
+    /// served and never logged, and deed files that do not read.
     ///
     /// # Errors
     ///
-    /// Fails when the log cannot be read.
+    /// Fails when the log or the deeds directory cannot be read. One deed
+    /// file that does not decode is a finding, not an error from here.
     pub fn log_audit(&self) -> Result<Audit> {
         let entries = self.log_entries()?;
         let mut out = Vec::new();
@@ -556,14 +562,24 @@ impl FsStore {
             logged.insert(entry.id.clone());
         }
         // The other direction; walking the log alone calls an empty log clean.
+        // A file that does not read is not served, so it is not unlogged.
+        // One the log names is missing, from `get` below. One it does not
+        // name stays visible here: `list` skips it.
+        let (served, skipped) = self.read_deeds()?;
         let mut unlogged: Vec<String> = Vec::new();
-        for deed in self.list()? {
+        for deed in served {
             let id = deed.id.to_string();
             if !logged.contains(&id) {
                 unlogged.push(id);
             }
         }
         unlogged.sort();
+        let mut unreadable = Vec::new();
+        for row in skipped {
+            if !logged.contains(&row.id) {
+                unreadable.push(row);
+            }
+        }
         for entry in entries {
             let Ok(id) = DeedId::parse(&entry.id) else {
                 out.push(Missing {
@@ -592,6 +608,7 @@ impl FsStore {
             logged: logged.len(),
             missing: out,
             unlogged,
+            unreadable,
         })
     }
 
@@ -786,7 +803,21 @@ impl FsStore {
     }
 
     pub fn list(&self) -> Result<Vec<Deed>> {
-        let mut out = Vec::new();
+        let (served, _) = self.read_deeds()?;
+        Ok(served)
+    }
+
+    /// Deeds the shelf can read, and accessions whose `.cap` cannot.
+    ///
+    /// `list` returns only the deeds. One damaged file used to fail this
+    /// walk, and every caller of `list` with it: `log audit`, a `sha256:`
+    /// lookup, and the unknown-accession hint. The file is left as it is.
+    /// A logged accession is `missing` on audit; one the log never named is
+    /// `unreadable`. A name that is not an accession was never served, and
+    /// this walk still skips it.
+    fn read_deeds(&self) -> Result<(Vec<Deed>, Vec<Missing>)> {
+        let mut served = Vec::new();
+        let mut unreadable = Vec::new();
         let entries = fs::read_dir(self.dir.join("deeds")).map_err(|e| Error::Io(e.to_string()))?;
         for entry in entries {
             let entry = entry.map_err(|e| Error::Io(e.to_string()))?;
@@ -799,11 +830,18 @@ impl FsStore {
                 if self.tomb_path(&id).exists() {
                     continue;
                 }
-                out.push(self.get(&id)?);
+                match self.get(&id) {
+                    Ok(deed) => served.push(deed),
+                    Err(e) => unreadable.push(Missing {
+                        id: id.to_string(),
+                        why: e.to_string(),
+                    }),
+                }
             }
         }
-        out.sort_by(|a, b| a.id.as_str().cmp(b.id.as_str()));
-        Ok(out)
+        served.sort_by(|a, b| a.id.as_str().cmp(b.id.as_str()));
+        unreadable.sort_by(|a, b| a.id.cmp(&b.id));
+        Ok((served, unreadable))
     }
 
     pub fn delete(&mut self, id: &DeedId) -> Result<()> {
