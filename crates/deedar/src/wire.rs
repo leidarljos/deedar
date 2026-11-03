@@ -1,5 +1,11 @@
 //! Cap'n-shaped encode/decode of schema/deedar.capnp.
 //! Field numbers match the schema ordinals.
+//!
+//! Every integer in this file is a protocol value, not a limit or a budget.
+//! Request opcodes are the method ordinals on `Deedar` in the schema.
+//! Response opcodes, and the kind, face, source, grant and body tags, are
+//! the same kind of value. The frame header is 8 bytes of magic, then a
+//! little-endian `u32` revision, then a little-endian `u32` payload length.
 
 use std::path::PathBuf;
 
@@ -180,6 +186,7 @@ pub fn decode_response(bytes: &[u8]) -> Result<Response> {
 }
 
 fn wrap(payload: &[u8]) -> Result<Vec<u8>> {
+    // 8 + 4 + 4. The header width is the frame described at the top of this file.
     let mut out = Vec::with_capacity(16 + payload.len());
     out.extend_from_slice(MAGIC);
     out.extend_from_slice(&REV.to_le_bytes());
@@ -189,6 +196,7 @@ fn wrap(payload: &[u8]) -> Result<Vec<u8>> {
 }
 
 fn unwrap(bytes: &[u8]) -> Result<&[u8]> {
+    // Magic, revision, length, at the widths named above.
     if bytes.len() < 16 || &bytes[..8] != MAGIC {
         return Err(Error::Decode("not a deedar Cap'n frame".into()));
     }

@@ -1,0 +1,416 @@
+Handover bench, the run the settings in handover.rs are taken from.
+
+command: cargo bench -p deedar --bench handover -- --color never
+commit: 0bca3d786c37ff497b923eddc6bd55a1a0f6afee
+rustc: 1.97.1 (8bab26f4f 2026-07-14)
+cpu: Intel(R) Xeon(R) Processor, family 6, model 207, stepping 2
+cores: 8, 1 thread per core
+hypervisor: KVM
+
+The file at this commit set a receipt measurement of 8 s (100 samples, criterion's
+default sample) and an export measurement of 10 s with 10 samples. Output:
+
+     Running benches/handover.rs (target/release/deps/handover-5f2058c0c2a26542)
+Benchmarking receipt over a log of n/100
+Benchmarking receipt over a log of n/100: Warming up for 3.0000 s
+Benchmarking receipt over a log of n/100: Collecting 100 samples in estimated 8.1949 s (146k iterations)
+Benchmarking receipt over a log of n/100: Analyzing
+receipt over a log of n/100
+                        time:   [55.466 µs 55.573 µs 55.711 µs]
+                        thrpt:  [17.950 Kelem/s 17.994 Kelem/s 18.029 Kelem/s]
+Found 12 outliers among 100 measurements (12.00%)
+  2 (2.00%) high mild
+  10 (10.00%) high severe
+Benchmarking receipt over a log of n/1000
+Benchmarking receipt over a log of n/1000: Warming up for 3.0000 s
+Benchmarking receipt over a log of n/1000: Collecting 100 samples in estimated 8.0014 s (15k iterations)
+Benchmarking receipt over a log of n/1000: Analyzing
+receipt over a log of n/1000
+                        time:   [524.40 µs 526.32 µs 528.86 µs]
+                        thrpt:  [1.8909 Kelem/s 1.9000 Kelem/s 1.9069 Kelem/s]
+Found 13 outliers among 100 measurements (13.00%)
+  3 (3.00%) high mild
+  10 (10.00%) high severe
+Benchmarking receipt over a log of n/5000
+Benchmarking receipt over a log of n/5000: Warming up for 3.0000 s
+
+Warning: Unable to complete 100 samples in 8.0s. You may wish to increase target time to 14.5s, enable flat sampling, or reduce sample count to 50.
+Benchmarking receipt over a log of n/5000: Collecting 100 samples in estimated 14.496 s (5050 iterations)
+Benchmarking receipt over a log of n/5000: Analyzing
+receipt over a log of n/5000
+                        time:   [2.8616 ms 2.8669 ms 2.8735 ms]
+                        thrpt:  [348.00  elem/s 348.81  elem/s 349.46  elem/s]
+Found 12 outliers among 100 measurements (12.00%)
+  12 (12.00%) high severe
+
+Benchmarking export m deeds from a log of n/export_into each, n=1000/10
+Benchmarking export m deeds from a log of n/export_into each, n=1000/10: Warming up for 3.0000 s
+Benchmarking export m deeds from a log of n/export_into each, n=1000/10: Collecting 10 samples in estimated 10.085 s (4675 iterations)
+Benchmarking export m deeds from a log of n/export_into each, n=1000/10: Analyzing
+export m deeds from a log of n/export_into each, n=1000/10
+                        time:   [2.1181 ms 2.1243 ms 2.1298 ms]
+                        thrpt:  [4.6952 Kelem/s 4.7073 Kelem/s 4.7211 Kelem/s]
+Found 2 outliers among 10 measurements (20.00%)
+  1 (10.00%) high mild
+  1 (10.00%) high severe
+Benchmarking export m deeds from a log of n/one exporter, n=1000/10
+Benchmarking export m deeds from a log of n/one exporter, n=1000/10: Warming up for 3.0000 s
+Benchmarking export m deeds from a log of n/one exporter, n=1000/10: Collecting 10 samples in estimated 10.051 s (3795 iterations)
+Benchmarking export m deeds from a log of n/one exporter, n=1000/10: Analyzing
+export m deeds from a log of n/one exporter, n=1000/10
+                        time:   [2.6309 ms 2.6403 ms 2.6514 ms]
+                        thrpt:  [3.7716 Kelem/s 3.7875 Kelem/s 3.8010 Kelem/s]
+Benchmarking export m deeds from a log of n/export_into each, n=1000/100
+Benchmarking export m deeds from a log of n/export_into each, n=1000/100: Warming up for 3.0000 s
+Benchmarking export m deeds from a log of n/export_into each, n=1000/100: Collecting 10 samples in estimated 10.748 s (495 iterations)
+Benchmarking export m deeds from a log of n/export_into each, n=1000/100: Analyzing
+export m deeds from a log of n/export_into each, n=1000/100
+                        time:   [21.644 ms 21.707 ms 21.743 ms]
+                        thrpt:  [4.5991 Kelem/s 4.6067 Kelem/s 4.6202 Kelem/s]
+Benchmarking export m deeds from a log of n/one exporter, n=1000/100
+Benchmarking export m deeds from a log of n/one exporter, n=1000/100: Warming up for 3.0000 s
+Benchmarking export m deeds from a log of n/one exporter, n=1000/100: Collecting 10 samples in estimated 10.957 s (495 iterations)
+Benchmarking export m deeds from a log of n/one exporter, n=1000/100: Analyzing
+export m deeds from a log of n/one exporter, n=1000/100
+                        time:   [22.112 ms 22.157 ms 22.198 ms]
+                        thrpt:  [4.5049 Kelem/s 4.5132 Kelem/s 4.5224 Kelem/s]
+Benchmarking export m deeds from a log of n/export_into each, n=5000/100
+Benchmarking export m deeds from a log of n/export_into each, n=5000/100: Warming up for 3.0000 s
+Benchmarking export m deeds from a log of n/export_into each, n=5000/100: Collecting 10 samples in estimated 10.209 s (165 iterations)
+Benchmarking export m deeds from a log of n/export_into each, n=5000/100: Analyzing
+export m deeds from a log of n/export_into each, n=5000/100
+                        time:   [61.422 ms 61.516 ms 61.644 ms]
+                        thrpt:  [1.6222 Kelem/s 1.6256 Kelem/s 1.6281 Kelem/s]
+Found 1 outliers among 10 measurements (10.00%)
+  1 (10.00%) high mild
+Benchmarking export m deeds from a log of n/one exporter, n=5000/100
+Benchmarking export m deeds from a log of n/one exporter, n=5000/100: Warming up for 3.0000 s
+Benchmarking export m deeds from a log of n/one exporter, n=5000/100: Collecting 10 samples in estimated 10.594 s (165 iterations)
+Benchmarking export m deeds from a log of n/one exporter, n=5000/100: Analyzing
+export m deeds from a log of n/one exporter, n=5000/100
+                        time:   [64.148 ms 64.193 ms 64.248 ms]
+                        thrpt:  [1.5565 Kelem/s 1.5578 Kelem/s 1.5589 Kelem/s]
+Found 3 outliers among 10 measurements (30.00%)
+  1 (10.00%) low mild
+  2 (20.00%) high mild
+
+EXIT:0
+
+What that output says
+---------------------
+
+Criterion 0.5 defaults are a 5 s measurement, 100 samples, and auto sampling.
+Auto uses a flat sample when a linear sample would take more than twice the
+measurement, and otherwise a linear one. It warns when the chosen mode is down
+to one iteration at its smallest step. The flat recommendation is
+floor(measurement / iteration), then down to a multiple of ten. The linear
+warning names the time 100 one-iteration samples would take, and a smaller
+sample count from the same measurement. The noise threshold those comparisons
+use is 0.01: a 95% interval inside 1% of the mean is inside that threshold.
+
+Receipt over a log of 5000, measured under the 8 s setting, mean 2.8669 ms
+(interval 2.8616 ms to 2.8735 ms, half-width 0.21% of the mean). The run printed:
+
+    Warning: Unable to complete 100 samples in 8.0s. You may wish to increase target time to 14.5s, enable flat sampling, or reduce sample count to 50.
+
+5050 iterations is 100 * 101 / 2, the linear schedule at one iteration on the
+first sample, and 5050 * 2.8669 ms is 14.5 s. That is why 8 s warns and why the
+suggested sample count at 8 s is 50. At the default 5 s the linear schedule
+would still take 14.5 s, which is more than twice 5 s, so auto selects flat.
+50 ms a sample holds ceil(50 / 2.8669) = 18 iterations, and flat does not warn.
+
+The same receipt group at 100 entries, mean 55.573 microseconds, collected
+146k iterations in the 8 s and still reported 10% severe outliers (12 outliers
+in 100, 2 of them mild). The log of 5000 reported 12% severe. The outlier rate
+did not fall as the samples went from many iterations to one, so it is not a
+reason to measure for longer than the sampler needs. Every 95% interval in the
+receipt group was under 0.5% of its mean.
+
+Export, one exporter, 100 deeds from a log of 5000, is the slowest iteration:
+mean 64.193 ms, interval 64.148 ms to 64.248 ms, half-width 0.08% of the mean.
+At a 5 s measurement and 100 samples, flat gives each sample 50 ms, which is
+one iteration, and the warning would ask for about 6.4 s or fewer samples.
+floor(5 / 0.064248) = 77, and the multiple of ten below that is 70. At 70
+samples a 5 s measurement gives each sample 71.4 ms, two of those iterations,
+which is the step at which the flat warning stops. The headroom before it
+returns is an iteration of 71.4 ms, against a measured upper bound of 64.248 ms.
+
+A flat-mode reading of only the slow export says 70 samples. That count still
+warns, and the next run is why. The settings that follow both runs are
+criterion's 5 s measurement for both groups, 100 samples for receipts, and 40
+samples for export.
+
+
+Second run: 5 s measurement, 100 receipt samples, 70 export samples
+--------------------------------------------------------------------
+
+Same command, same machine, same commit, after the bench file dropped the 8 s
+and 10 s overrides. `target/criterion` still held the first run, so the
+"regressed" lines compare the two processes. The library under test had not
+changed. A mean that moves 12% between runs while each run's own interval stays
+under half a percent is the machine, not a longer sample: more iterations would
+tighten an interval that is already inside the 0.01 noise threshold.
+
+     Running benches/handover.rs (target/release/deps/handover-5f2058c0c2a26542)
+Benchmarking receipt over a log of n/100
+Benchmarking receipt over a log of n/100: Warming up for 3.0000 s
+Benchmarking receipt over a log of n/100: Collecting 100 samples in estimated 5.1636 s (86k iterations)
+Benchmarking receipt over a log of n/100: Analyzing
+receipt over a log of n/100
+                        time:   [62.002 µs 62.431 µs 62.907 µs]
+                        thrpt:  [15.896 Kelem/s 16.018 Kelem/s 16.128 Kelem/s]
+                 change:
+                        time:   [+11.418% +12.632% +14.081%] (p = 0.00 < 0.05)
+                        thrpt:  [-12.343% -11.215% -10.248%]
+                        Performance has regressed.
+Found 13 outliers among 100 measurements (13.00%)
+  4 (4.00%) low mild
+  2 (2.00%) high mild
+  7 (7.00%) high severe
+Benchmarking receipt over a log of n/1000
+Benchmarking receipt over a log of n/1000: Warming up for 3.0000 s
+Benchmarking receipt over a log of n/1000: Collecting 100 samples in estimated 6.0560 s (10k iterations)
+Benchmarking receipt over a log of n/1000: Analyzing
+receipt over a log of n/1000
+                        time:   [582.92 µs 584.15 µs 585.72 µs]
+                        thrpt:  [1.7073 Kelem/s 1.7119 Kelem/s 1.7155 Kelem/s]
+                 change:
+                        time:   [+10.335% +10.868% +11.422%] (p = 0.00 < 0.05)
+                        thrpt:  [-10.251% -9.8027% -9.3668%]
+                        Performance has regressed.
+Found 9 outliers among 100 measurements (9.00%)
+  4 (4.00%) high mild
+  5 (5.00%) high severe
+Benchmarking receipt over a log of n/5000
+Benchmarking receipt over a log of n/5000: Warming up for 3.0000 s
+Benchmarking receipt over a log of n/5000: Collecting 100 samples in estimated 5.0316 s (1700 iterations)
+Benchmarking receipt over a log of n/5000: Analyzing
+receipt over a log of n/5000
+                        time:   [2.9247 ms 2.9304 ms 2.9361 ms]
+                        thrpt:  [340.59  elem/s 341.25  elem/s 341.92  elem/s]
+                 change:
+                        time:   [+1.4212% +1.9343% +2.3356%] (p = 0.00 < 0.05)
+                        thrpt:  [-2.2823% -1.8976% -1.4013%]
+                        Performance has regressed.
+
+Benchmarking export m deeds from a log of n/export_into each, n=1000/10
+Benchmarking export m deeds from a log of n/export_into each, n=1000/10: Warming up for 3.0000 s
+
+Warning: Unable to complete 70 samples in 5.0s. You may wish to increase target time to 5.4s, enable flat sampling, or reduce sample count to 40.
+Benchmarking export m deeds from a log of n/export_into each, n=1000/10: Collecting 70 samples in estimated 5.4417 s (2485 iterations)
+Benchmarking export m deeds from a log of n/export_into each, n=1000/10: Analyzing
+export m deeds from a log of n/export_into each, n=1000/10
+                        time:   [2.1564 ms 2.1620 ms 2.1684 ms]
+                        thrpt:  [4.6118 Kelem/s 4.6253 Kelem/s 4.6374 Kelem/s]
+                 change:
+                        time:   [+0.6161% +1.6535% +2.7806%] (p = 0.01 < 0.05)
+                        thrpt:  [-2.7054% -1.6266% -0.6123%]
+                        Change within noise threshold.
+Found 1 outliers among 70 measurements (1.43%)
+  1 (1.43%) high severe
+Benchmarking export m deeds from a log of n/one exporter, n=1000/10
+Benchmarking export m deeds from a log of n/one exporter, n=1000/10: Warming up for 3.0000 s
+
+Warning: Unable to complete 70 samples in 5.0s. You may wish to increase target time to 6.8s, enable flat sampling, or reduce sample count to 40.
+Benchmarking export m deeds from a log of n/one exporter, n=1000/10: Collecting 70 samples in estimated 6.8208 s (2485 iterations)
+Benchmarking export m deeds from a log of n/one exporter, n=1000/10: Analyzing
+export m deeds from a log of n/one exporter, n=1000/10
+                        time:   [2.6830 ms 2.6902 ms 2.7000 ms]
+                        thrpt:  [3.7037 Kelem/s 3.7173 Kelem/s 3.7272 Kelem/s]
+                 change:
+                        time:   [+1.0096% +1.3738% +1.7370%] (p = 0.00 < 0.05)
+                        thrpt:  [-1.7073% -1.3551% -0.9995%]
+                        Performance has regressed.
+Found 3 outliers among 70 measurements (4.29%)
+  1 (1.43%) low mild
+  1 (1.43%) high mild
+  1 (1.43%) high severe
+Benchmarking export m deeds from a log of n/export_into each, n=1000/100
+Benchmarking export m deeds from a log of n/export_into each, n=1000/100: Warming up for 3.0000 s
+Benchmarking export m deeds from a log of n/export_into each, n=1000/100: Collecting 70 samples in estimated 6.6003 s (280 iterations)
+Benchmarking export m deeds from a log of n/export_into each, n=1000/100: Analyzing
+export m deeds from a log of n/export_into each, n=1000/100
+                        time:   [21.817 ms 21.898 ms 22.019 ms]
+                        thrpt:  [4.5415 Kelem/s 4.5666 Kelem/s 4.5836 Kelem/s]
+                 change:
+                        time:   [+0.6169% +1.0210% +1.5663%] (p = 0.00 < 0.05)
+                        thrpt:  [-1.5422% -1.0107% -0.6131%]
+                        Change within noise threshold.
+Found 1 outliers among 70 measurements (1.43%)
+  1 (1.43%) high severe
+Benchmarking export m deeds from a log of n/one exporter, n=1000/100
+Benchmarking export m deeds from a log of n/one exporter, n=1000/100: Warming up for 3.0000 s
+Benchmarking export m deeds from a log of n/one exporter, n=1000/100: Collecting 70 samples in estimated 6.2647 s (280 iterations)
+Benchmarking export m deeds from a log of n/one exporter, n=1000/100: Analyzing
+export m deeds from a log of n/one exporter, n=1000/100
+                        time:   [22.291 ms 22.333 ms 22.397 ms]
+                        thrpt:  [4.4649 Kelem/s 4.4778 Kelem/s 4.4860 Kelem/s]
+                 change:
+                        time:   [+0.5528% +0.9070% +1.2792%] (p = 0.00 < 0.05)
+                        thrpt:  [-1.2630% -0.8989% -0.5497%]
+                        Change within noise threshold.
+Found 13 outliers among 70 measurements (18.57%)
+  2 (2.86%) low severe
+  2 (2.86%) low mild
+  5 (7.14%) high mild
+  4 (5.71%) high severe
+Benchmarking export m deeds from a log of n/export_into each, n=5000/100
+Benchmarking export m deeds from a log of n/export_into each, n=5000/100: Warming up for 3.0000 s
+Benchmarking export m deeds from a log of n/export_into each, n=5000/100: Collecting 70 samples in estimated 8.7224 s (140 iterations)
+Benchmarking export m deeds from a log of n/export_into each, n=5000/100: Analyzing
+export m deeds from a log of n/export_into each, n=5000/100
+                        time:   [61.731 ms 61.812 ms 61.903 ms]
+                        thrpt:  [1.6154 Kelem/s 1.6178 Kelem/s 1.6199 Kelem/s]
+                 change:
+                        time:   [+0.2796% +0.4645% +0.6627%] (p = 0.00 < 0.05)
+                        thrpt:  [-0.6583% -0.4623% -0.2788%]
+                        Change within noise threshold.
+Found 7 outliers among 70 measurements (10.00%)
+  3 (4.29%) high mild
+  4 (5.71%) high severe
+Benchmarking export m deeds from a log of n/one exporter, n=5000/100
+Benchmarking export m deeds from a log of n/one exporter, n=5000/100: Warming up for 3.0000 s
+Benchmarking export m deeds from a log of n/one exporter, n=5000/100: Collecting 70 samples in estimated 8.9699 s (140 iterations)
+Benchmarking export m deeds from a log of n/one exporter, n=5000/100: Analyzing
+export m deeds from a log of n/one exporter, n=5000/100
+                        time:   [64.019 ms 64.076 ms 64.148 ms]
+                        thrpt:  [1.5589 Kelem/s 1.5607 Kelem/s 1.5620 Kelem/s]
+                 change:
+                        time:   [-0.3359% -0.1925% -0.0387%] (p = 0.00 < 0.05)
+                        thrpt:  [+0.0387% +0.1929% +0.3370%]
+                        Change within noise threshold.
+Found 3 outliers among 70 measurements (4.29%)
+  1 (1.43%) high mild
+  2 (2.86%) high severe
+
+EXIT:0
+
+Receipts did not warn. The log of 5000 collected 1700 iterations in 5.0 s
+(flat, 17 a sample) and reported no outliers. Its interval, 2.9247 ms to
+2.9361 ms around 2.9304 ms, is 0.19% of the mean.
+
+Exports of 10 deeds from a log of 1000 did warn. At about 2.2 ms and 2.7 ms
+those iterations stay on linear sampling, and 70 samples is 2485 iterations on
+that schedule, more than 5 s holds at one iteration each:
+
+    Warning: Unable to complete 70 samples in 5.0s. You may wish to increase target time to 5.4s, enable flat sampling, or reduce sample count to 40.
+    Warning: Unable to complete 70 samples in 5.0s. You may wish to increase target time to 6.8s, enable flat sampling, or reduce sample count to 40.
+
+The time in each warning is how long the one-iteration schedule took, so
+setting the measurement to it leaves the sampler on that step and the warning
+returns. Both warnings name 40 samples. At 40 the linear schedule is
+40 * 41 / 2 = 820 iterations, and 5 s / 820 is 6.1 ms, so an iteration under
+that gets at least two on the first sample and the linear warning stops. An
+iteration over 6.1 ms, up to the 125 ms one flat sample holds at 5 s / 40, is
+measured flat with at least two iterations. The slow export, 64.1 ms, is in that range:
+this run already measured it flat, 140 iterations across 70 samples, with no
+warning, and 40 samples still leaves it two iterations (125 ms against 64 ms).
+
+The export sample count is therefore 40.
+
+
+Third run: the settings in handover.rs (5 s, 100 receipt samples, 40 export samples)
+-------------------------------------------------------------------------------------
+
+Same command and machine. `target/criterion` was removed first, so this output
+is not a comparison against the earlier runs. No sampler warning was printed.
+
+     Running benches/handover.rs (target/release/deps/handover-5f2058c0c2a26542)
+Benchmarking receipt over a log of n/100
+Benchmarking receipt over a log of n/100: Warming up for 3.0000 s
+Benchmarking receipt over a log of n/100: Collecting 100 samples in estimated 5.0711 s (91k iterations)
+Benchmarking receipt over a log of n/100: Analyzing
+receipt over a log of n/100
+                        time:   [55.680 µs 55.711 µs 55.743 µs]
+                        thrpt:  [17.939 Kelem/s 17.950 Kelem/s 17.960 Kelem/s]
+Found 3 outliers among 100 measurements (3.00%)
+  3 (3.00%) high mild
+Benchmarking receipt over a log of n/1000
+Benchmarking receipt over a log of n/1000: Warming up for 3.0000 s
+Benchmarking receipt over a log of n/1000: Collecting 100 samples in estimated 5.3550 s (10k iterations)
+Benchmarking receipt over a log of n/1000: Analyzing
+receipt over a log of n/1000
+                        time:   [529.45 µs 529.87 µs 530.38 µs]
+                        thrpt:  [1.8854 Kelem/s 1.8873 Kelem/s 1.8888 Kelem/s]
+Found 9 outliers among 100 measurements (9.00%)
+  7 (7.00%) high mild
+  2 (2.00%) high severe
+Benchmarking receipt over a log of n/5000
+Benchmarking receipt over a log of n/5000: Warming up for 3.0000 s
+Benchmarking receipt over a log of n/5000: Collecting 100 samples in estimated 5.1633 s (1800 iterations)
+Benchmarking receipt over a log of n/5000: Analyzing
+receipt over a log of n/5000
+                        time:   [2.8812 ms 2.8836 ms 2.8861 ms]
+                        thrpt:  [346.48  elem/s 346.79  elem/s 347.07  elem/s]
+Found 3 outliers among 100 measurements (3.00%)
+  2 (2.00%) high mild
+  1 (1.00%) high severe
+
+Benchmarking export m deeds from a log of n/export_into each, n=1000/10
+Benchmarking export m deeds from a log of n/export_into each, n=1000/10: Warming up for 3.0000 s
+Benchmarking export m deeds from a log of n/export_into each, n=1000/10: Collecting 40 samples in estimated 5.3511 s (2460 iterations)
+Benchmarking export m deeds from a log of n/export_into each, n=1000/10: Analyzing
+export m deeds from a log of n/export_into each, n=1000/10
+                        time:   [2.1516 ms 2.1571 ms 2.1628 ms]
+                        thrpt:  [4.6237 Kelem/s 4.6359 Kelem/s 4.6478 Kelem/s]
+Found 1 outliers among 40 measurements (2.50%)
+  1 (2.50%) high severe
+Benchmarking export m deeds from a log of n/one exporter, n=1000/10
+Benchmarking export m deeds from a log of n/one exporter, n=1000/10: Warming up for 3.0000 s
+Benchmarking export m deeds from a log of n/one exporter, n=1000/10: Collecting 40 samples in estimated 6.5820 s (2460 iterations)
+Benchmarking export m deeds from a log of n/one exporter, n=1000/10: Analyzing
+export m deeds from a log of n/one exporter, n=1000/10
+                        time:   [2.6644 ms 2.6727 ms 2.6836 ms]
+                        thrpt:  [3.7264 Kelem/s 3.7415 Kelem/s 3.7532 Kelem/s]
+Found 2 outliers among 40 measurements (5.00%)
+  1 (2.50%) high mild
+  1 (2.50%) high severe
+Benchmarking export m deeds from a log of n/export_into each, n=1000/100
+Benchmarking export m deeds from a log of n/export_into each, n=1000/100: Warming up for 3.0000 s
+Benchmarking export m deeds from a log of n/export_into each, n=1000/100: Collecting 40 samples in estimated 5.2467 s (240 iterations)
+Benchmarking export m deeds from a log of n/export_into each, n=1000/100: Analyzing
+export m deeds from a log of n/export_into each, n=1000/100
+                        time:   [21.896 ms 21.951 ms 22.028 ms]
+                        thrpt:  [4.5396 Kelem/s 4.5557 Kelem/s 4.5671 Kelem/s]
+Found 1 outliers among 40 measurements (2.50%)
+  1 (2.50%) high severe
+Benchmarking export m deeds from a log of n/one exporter, n=1000/100
+Benchmarking export m deeds from a log of n/one exporter, n=1000/100: Warming up for 3.0000 s
+Benchmarking export m deeds from a log of n/one exporter, n=1000/100: Collecting 40 samples in estimated 5.3670 s (240 iterations)
+Benchmarking export m deeds from a log of n/one exporter, n=1000/100: Analyzing
+export m deeds from a log of n/one exporter, n=1000/100
+                        time:   [22.469 ms 22.541 ms 22.639 ms]
+                        thrpt:  [4.4172 Kelem/s 4.4364 Kelem/s 4.4506 Kelem/s]
+Found 1 outliers among 40 measurements (2.50%)
+  1 (2.50%) high severe
+Benchmarking export m deeds from a log of n/export_into each, n=5000/100
+Benchmarking export m deeds from a log of n/export_into each, n=5000/100: Warming up for 3.0000 s
+Benchmarking export m deeds from a log of n/export_into each, n=5000/100: Collecting 40 samples in estimated 7.4146 s (120 iterations)
+Benchmarking export m deeds from a log of n/export_into each, n=5000/100: Analyzing
+export m deeds from a log of n/export_into each, n=5000/100
+                        time:   [61.513 ms 61.606 ms 61.733 ms]
+                        thrpt:  [1.6199 Kelem/s 1.6232 Kelem/s 1.6257 Kelem/s]
+Found 2 outliers among 40 measurements (5.00%)
+  2 (5.00%) high severe
+Benchmarking export m deeds from a log of n/one exporter, n=5000/100
+Benchmarking export m deeds from a log of n/one exporter, n=5000/100: Warming up for 3.0000 s
+Benchmarking export m deeds from a log of n/one exporter, n=5000/100: Collecting 40 samples in estimated 5.1925 s (80 iterations)
+Benchmarking export m deeds from a log of n/one exporter, n=5000/100: Analyzing
+export m deeds from a log of n/one exporter, n=5000/100
+                        time:   [64.709 ms 64.802 ms 64.915 ms]
+                        thrpt:  [1.5405 Kelem/s 1.5432 Kelem/s 1.5454 Kelem/s]
+Found 6 outliers among 40 measurements (15.00%)
+  3 (7.50%) low mild
+  2 (5.00%) high mild
+  1 (2.50%) high severe
+
+EXIT:0
+
+Receipt of a log of 5000: 1800 iterations, flat, 18 a sample. Interval 2.8812 ms
+to 2.8861 ms around 2.8836 ms, half-width 0.09% of the mean. One severe outlier.
+
+The faster exports collected 2460 iterations across 40 samples. That is three
+times 820, so the first linear sample held three iterations, and the linear
+warning stayed quiet. The slow export collected 80 and 120 iterations, two and
+three a sample, flat, also without a warning. The slowest upper bound was
+64.915 ms, under the 125 ms a flat sample holds at this count.

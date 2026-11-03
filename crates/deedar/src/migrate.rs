@@ -6,6 +6,9 @@ use deed::{Error, Result};
 use crate::fs::FsStore;
 
 /// Write `{store}/layout` as `1\n` when the file is missing.
+///
+/// `1` is the only layout version this crate writes. A different version would
+/// be a protocol change, not a tuning value.
 pub fn ensure_layout(dir: &Path) -> Result<()> {
     let path = dir.join("layout");
     if !path.exists() {

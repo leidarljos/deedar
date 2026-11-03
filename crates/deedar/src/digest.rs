@@ -50,6 +50,7 @@ fn is_sha256_addr(raw: &str) -> bool {
     let Some(hex) = raw.strip_prefix("sha256:") else {
         return false;
     };
+    // SHA-256 is 32 octets (FIPS 180-4); the text form is two hex characters each.
     hex.len() == 64 && hex.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
 }
 

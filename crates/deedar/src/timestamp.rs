@@ -39,6 +39,8 @@ fn der_tlv(tag: u8, contents: &[u8]) -> Vec<u8> {
 }
 
 fn put_len(out: &mut Vec<u8>, n: usize) {
+    // X.690: a length under 128 is one short-form byte. A longer length sets
+    // the high bit and then counts the length octets that follow.
     if n < 128 {
         out.push(n as u8);
         return;

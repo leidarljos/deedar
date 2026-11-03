@@ -43,9 +43,10 @@ const DOMAIN: &[u8] = b"deedar-vouch-v1";
 /// them guessing which key to try.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Vouch {
-    /// The verifying key, as 32 bytes.
+    /// The verifying key. Ed25519 keys are 32 octets (RFC 8032).
     pub signer: [u8; 32],
-    /// The signature over the covered bytes.
+    /// The signature over the covered bytes. An Ed25519 signature is 64 octets
+    /// (RFC 8032).
     pub signature: [u8; 64],
 }
 
@@ -64,8 +65,9 @@ impl Vouch {
     ///
     /// # Errors
     ///
-    /// Fails when the line is not this scheme, a 32-byte key and a 64-byte
-    /// signature. A signature that is nearly right is one nobody can check.
+    /// Fails when the line is not this scheme, a 32-octet key and a 64-octet
+    /// signature (RFC 8032). The signature is hex, so that is 128 characters.
+    /// A signature that is nearly right is one nobody can check.
     pub fn parse(text: &str) -> Result<Self> {
         let mut parts = text.split_whitespace();
         let (Some(scheme), Some(key), Some(sig), None) =
@@ -77,6 +79,7 @@ impl Vouch {
             return Err(Error::Evidence(format!("vouch: scheme {scheme:?}")));
         }
         let signer = from_hex(key).ok_or_else(|| Error::Evidence("vouch: key".into()))?;
+        // 64 signature octets, two hex characters each (RFC 8032).
         if sig.len() != 128 {
             return Err(Error::Evidence("vouch: signature length".into()));
         }
@@ -121,6 +124,7 @@ pub fn covered_for_test(bytes: &[u8]) -> Vec<u8> {
 fn covered(bytes: &[u8]) -> Vec<u8> {
     let mut message = Vec::with_capacity(DOMAIN.len() + 1 + bytes.len());
     message.extend_from_slice(DOMAIN);
+    // A zero octet ends the domain, so the manifest cannot be read as a longer tag.
     message.push(0);
     message.extend_from_slice(bytes);
     message

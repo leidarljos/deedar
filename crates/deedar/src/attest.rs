@@ -94,6 +94,9 @@ fn parse_signer(raw: &str) -> Result<[u8; 32]> {
 }
 
 /// Fixed-width hex to 32 bytes.
+///
+/// An Ed25519 verifying key is 32 octets (RFC 8032), and hex is two characters
+/// per octet, so a key is 64 characters. Any other length is not one.
 #[must_use]
 pub fn from_hex(text: &str) -> Option<[u8; 32]> {
     let text = text.trim();

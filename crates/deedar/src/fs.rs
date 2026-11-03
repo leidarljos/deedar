@@ -1105,6 +1105,7 @@ fn read_writer_key(path: &Path) -> Result<Option<[u8; 32]>> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(Error::Io(e.to_string())),
         Ok(bytes) if bytes.len() == 32 => {
+            // The key `seed_key` writes: 32 bytes, the HMAC-SHA256 tag width.
             let mut key = [0u8; 32];
             key.copy_from_slice(&bytes);
             Ok(Some(key))
@@ -1214,6 +1215,10 @@ fn copy_hashed(
 /// The key keys every evidence hash in the store, so it has to be one nobody
 /// can guess. A hash of the clock is not: the file's own mtime puts the
 /// nanosecond within a few million tries.
+///
+/// Thirty-two bytes is the HMAC-SHA256 tag width (FIPS 180-4). RFC 2104 hashes
+/// a key down only when it is longer than the hash block, 64 bytes for
+/// SHA-256, so a key of the tag width is used whole.
 fn seed_key() -> Result<[u8; 32]> {
     use std::io::Read;
     let mut k = [0u8; 32];
@@ -1231,6 +1236,7 @@ fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
     let mut file = fs::OpenOptions::new()
         .write(true)
         .create_new(true)
+        // POSIX owner read and write, and no other mode bits. This file is the key.
         .mode(0o600)
         .open(path)
         .map_err(|e| Error::Io(format!("{}: {e}", path.display())))?;

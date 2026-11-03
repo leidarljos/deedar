@@ -38,6 +38,7 @@ pub fn load(store_dir: &Path) -> Result<Option<[u8; 32]>> {
         return Ok(None);
     }
     let bytes = fs::read(&path).map_err(|e| Error::Io(e.to_string()))?;
+    // Same width as the store's writer key: one HMAC-SHA256 tag (FIPS 180-4).
     if bytes.len() != 32 {
         return Err(Error::Io("host.key must be 32 bytes".into()));
     }
@@ -49,6 +50,7 @@ pub fn load(store_dir: &Path) -> Result<Option<[u8; 32]>> {
 fn host_mac(key: &[u8; 32], deed_bytes: &[u8], unix_time: u64) -> Result<HmacSha256> {
     let mut mac = HmacSha256::new_from_slice(key).map_err(|e| Error::Io(e.to_string()))?;
     mac.update(HOST_DOMAIN);
+    // A zero octet ends the domain, so the deed cannot be read as a longer tag.
     mac.update(&[0]);
     mac.update(deed_bytes);
     mac.update(&unix_time.to_le_bytes());
@@ -100,6 +102,8 @@ pub fn default_signing_key_path() -> Option<PathBuf> {
 
 /// Load the 32-byte Ed25519 seed the host signs with, if it is configured.
 ///
+/// RFC 8032 defines that seed as 32 octets.
+///
 /// # Errors
 ///
 /// Fails when the file exists and is not a 32-byte seed.
@@ -120,7 +124,8 @@ pub fn load_signing_key() -> Result<Option<SigningKey>> {
 
 /// What a sidecar file holds.
 pub enum Sidecar {
-    /// `ed25519:<128 hex>`, verifiable against a public key.
+    /// `ed25519:<128 hex>`. An Ed25519 signature is 64 octets (RFC 8032), and
+    /// hex doubles that.
     Signature(Vec<u8>),
     /// Raw keyed-hash bytes, from before the signature existed.
     KeyedHash(Vec<u8>),
@@ -133,6 +138,7 @@ pub enum Sidecar {
 pub fn read_sidecar(bytes: &[u8]) -> Option<Sidecar> {
     if let Ok(text) = std::str::from_utf8(bytes) {
         if let Some(hex) = text.trim().strip_prefix(&format!("{ED25519}:")) {
+            // 64 signature octets, two hex characters each.
             if hex.len() == 128 {
                 let mut raw = Vec::with_capacity(64);
                 for pair in hex.as_bytes().chunks_exact(2) {
@@ -165,6 +171,7 @@ pub fn verify_ed25519(
     unix_time: u64,
     signature: &[u8],
 ) -> Result<()> {
+    // Ed25519 signatures are 64 octets (RFC 8032).
     let raw: [u8; 64] = signature
         .try_into()
         .map_err(|_| Error::Evidence("host signature length".into()))?;
@@ -189,6 +196,8 @@ pub fn attested_for_test(deed_bytes: &[u8], unix_time: u64) -> Vec<u8> {
 }
 
 fn attested(deed_bytes: &[u8], unix_time: u64) -> Vec<u8> {
+    // Domain, one zero octet so the tag cannot run into the deed, the deed,
+    // and the time as a little-endian `u64` (8 octets, the schema's `UInt64`).
     let mut message = Vec::with_capacity(HOST_DOMAIN.len() + 1 + deed_bytes.len() + 8);
     message.extend_from_slice(HOST_DOMAIN);
     message.push(0);
