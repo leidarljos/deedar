@@ -16,13 +16,18 @@ fn keyless() {
     OFF.call_once(|| std::env::set_var("DEEDAR_HOST_SIGNING_KEY", "off"));
 }
 
+/// A store of this test's own, named by pid and a counter: macOS reads the
+/// clock in whole microseconds, and two tests on parallel threads can start
+/// in the same one. The clock keeps a recycled pid off an earlier run's store.
 pub fn tmp_url() -> String {
     keyless();
+    static NTH: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let n = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("time")
         .as_nanos();
-    let dir = std::env::temp_dir().join(format!("deedar-suite-{n}"));
+    let nth = NTH.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("deedar-suite-{}-{n}-{nth}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     format!("file://{}", dir.display())
 }
