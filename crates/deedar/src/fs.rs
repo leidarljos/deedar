@@ -693,19 +693,20 @@ impl FsStore {
             let hex = write_once_hex(path).ok_or_else(|| {
                 Error::Evidence(format!("{id}: path {} is not write-once", path.display()))
             })?;
-            let raw = fs::read(self.dir.join("bytes").join(hex)).map_err(|_| {
+            let dir = out.join("bytes");
+            fs::create_dir_all(&dir).map_err(|e| Error::Io(e.to_string()))?;
+            let path = dir.join(hex);
+            let tmp = path.with_extension("tmp");
+            let digest = copy_hashed(&self.dir.join("bytes").join(hex), &tmp, |_| {
                 Error::Evidence(format!(
                     "{id}: path sha256:{hex} has no bytes in this store to hand over"
                 ))
             })?;
-            let digest = hex_encode(&Sha256::digest(&raw));
             if digest != hex {
+                let _ = fs::remove_file(&tmp);
                 return Err(Error::Evidence(format!("path sha256:{hex} does not match")));
             }
-            let dir = out.join("bytes");
-            fs::create_dir_all(&dir).map_err(|e| Error::Io(e.to_string()))?;
-            let path = dir.join(hex);
-            atomic_write(&path, &raw)?;
+            fs::rename(&tmp, &path).map_err(|e| Error::Io(e.to_string()))?;
             written.push(path);
         }
         if let Some(link) = read_supersedes(&self.supersedes_path(id))? {
@@ -899,9 +900,7 @@ impl FsStore {
                 )));
             };
             let dest = self.dir.join("bytes").join(hex);
-            let bytes =
-                fs::read(&dest).map_err(|_| Error::Evidence(format!("path {hex} missing")))?;
-            let digest = hex_encode(&Sha256::digest(&bytes));
+            let digest = sha256_file(&dest, |_| Error::Evidence(format!("path {hex} missing")))?;
             if digest != hex {
                 return Err(Error::Evidence(format!("path sha256:{hex} does not match")));
             }
@@ -998,13 +997,32 @@ impl FsStore {
         if !path.is_file() {
             return Err(Error::Io(format!("{} is not a file", path.display())));
         }
-        let bytes = fs::read(path).map_err(|e| Error::Io(e.to_string()))?;
-        let digest = Sha256::digest(&bytes);
-        let hex = hex_encode(&digest);
-        let dest = self.dir.join("bytes").join(&hex);
-        if !dest.exists() {
-            atomic_write(&dest, &bytes)?;
-        }
+        // The name is not known until the last byte is hashed, so the copy
+        // lands under one only this call uses: seats ingest into one store at
+        // once, from separate processes and from one server's threads.
+        static INGESTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = INGESTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let io = |e: std::io::Error| Error::Io(e.to_string());
+        let shelf = self.dir.join("bytes");
+        let tmp = shelf.join(format!("ingest.{}.{n}.tmp", std::process::id()));
+        let hex = match copy_hashed(path, &tmp, io) {
+            Ok(hex) => {
+                let dest = shelf.join(&hex);
+                if dest.exists() {
+                    fs::remove_file(&tmp)
+                } else {
+                    fs::rename(&tmp, &dest)
+                }
+                .map_err(io)?;
+                hex
+            }
+            // A shelf this process cannot write to still answers a rerun of
+            // the same create from the bytes it already holds.
+            Err(e) => match sha256_file(path, io) {
+                Ok(hex) if shelf.join(&hex).exists() => hex,
+                _ => return Err(e),
+            },
+        };
         Ok(PathBuf::from(format!("sha256:{hex}")))
     }
 
@@ -1130,6 +1148,65 @@ fn writer_key_tmp(path: &Path) -> PathBuf {
         .unwrap_or_else(|| std::ffi::OsString::from("writer.key"));
     name.push(format!(".{}.{n}.tmp", std::process::id()));
     path.with_file_name(name)
+}
+
+/// Bytes read per call when product bytes are hashed or copied, and all of a
+/// file this process holds at once. Every chunk costs a read and a write
+/// syscall; GNU coreutils timed eleven machines and copies 256 KiB at a time
+/// as the least syscall overhead on most of them (src/ioblksize.h). The bytes
+/// come from the page cache, which Linux fills ahead of a sequential reader
+/// in 128 KiB windows by default, so this is fewer calls than windows.
+/// measurements/stream-bytes.md: wall time flat from 8 KiB to 1 MiB, and peak
+/// RSS at the process baseline up to 256 KiB.
+const CHUNK: usize = 256 * 1024;
+
+/// The sha256 hex of everything `from` holds, read [`CHUNK`] bytes at a time,
+/// with every chunk also written to `to`; [`std::io::sink`] hashes alone. A
+/// failed read is `unreadable`'s to name, a failed write is I/O.
+fn sha256_through(
+    mut from: fs::File,
+    to: &mut impl std::io::Write,
+    unreadable: &impl Fn(std::io::Error) -> Error,
+) -> Result<String> {
+    use std::io::Read;
+    let mut hash = Sha256::new();
+    let mut chunk = vec![0u8; CHUNK];
+    loop {
+        let n = match from.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(n) => n,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(unreadable(e)),
+        };
+        hash.update(&chunk[..n]);
+        to.write_all(&chunk[..n])
+            .map_err(|e| Error::Io(e.to_string()))?;
+    }
+    Ok(hex_encode(&hash.finalize()))
+}
+
+/// The sha256 hex of the file at `path`, without holding it.
+fn sha256_file(path: &Path, unreadable: impl Fn(std::io::Error) -> Error) -> Result<String> {
+    let from = fs::File::open(path).map_err(&unreadable)?;
+    sha256_through(from, &mut std::io::sink(), &unreadable)
+}
+
+/// Copy the file at `from` to a new file at `tmp` and return the sha256 hex
+/// of what was copied, for the caller to rename into place. `tmp` is opened
+/// only once `from` is, and a copy that fails removes it again, so a missing
+/// source leaves nothing behind.
+fn copy_hashed(
+    from: &Path,
+    tmp: &Path,
+    unreadable: impl Fn(std::io::Error) -> Error,
+) -> Result<String> {
+    let src = fs::File::open(from).map_err(&unreadable)?;
+    let mut dst = fs::File::create(tmp).map_err(|e| Error::Io(e.to_string()))?;
+    let hex = sha256_through(src, &mut dst, &unreadable);
+    if hex.is_err() {
+        let _ = fs::remove_file(tmp);
+    }
+    hex
 }
 
 /// A fresh writer key from the kernel's random source.
