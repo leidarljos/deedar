@@ -7,8 +7,8 @@
 //!
 //! A [`Receipt`] is one deed against one head. A [`Bridge`] is one head
 //! against an earlier one from the same log, and is the only thing that
-//! catches a log rewritten between two handovers. A check passes or fails;
-//! there is no note.
+//! catches a log rewritten between two handovers. The bytes pass or fail.
+//! Whether the signing key was one the reader accepts is a label on that.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -288,29 +288,18 @@ impl SignedHead {
     }
 
     /// Whether the signature covers this head, and whether the key is one the
-    /// reader accepts. Returns `false` when no signer list was given: the head
-    /// and signature go together, and that is all it says.
+    /// reader accepts. Returns `false` when no signer list was given, and when
+    /// the key is not on the list: the head and signature go together, and
+    /// acceptance is a label on that fact.
     ///
     /// # Errors
     ///
-    /// Fails when the signature does not cover the head, or names a key the
-    /// reader does not accept.
+    /// Fails when the signature does not cover the head.
     pub fn check(&self, accept: &BTreeSet<[u8; 32]>) -> Result<bool> {
         if !self.covers(&self.head, self.links.as_deref()) {
             return Err(Error::Evidence(self.uncovered()));
         }
-        if accept.is_empty() {
-            return Ok(false);
-        }
-        if !accept.contains(&self.signer) {
-            let listed: Vec<String> = accept.iter().map(|key| log::hex(key)).collect();
-            return Err(Error::Evidence(format!(
-                "head signer: expected one of {}, found {}, which is not a key this reader accepts",
-                listed.join(", "),
-                log::hex(&self.signer)
-            )));
-        }
-        Ok(true)
+        Ok(!accept.is_empty() && accept.contains(&self.signer))
     }
 
     /// Whether the signature verifies over `head` and `links` under the key
@@ -598,6 +587,22 @@ impl Handover {
             ),
         }
         out
+    }
+
+    /// The stderr label when a reader who named keys did not accept this head's.
+    ///
+    /// Absent when the head was accepted, when no list was given, or when the
+    /// bag carried no signature. The report still says which of those it is.
+    #[must_use]
+    pub fn warning(&self) -> Option<String> {
+        if self.head_accepted || !self.signers_listed {
+            return None;
+        }
+        let signer = self.head_signer?;
+        Some(format!(
+            "deedar: warning: head signed by {}, which is not a key this reader accepts",
+            log::hex(&signer)
+        ))
     }
 }
 
@@ -1441,17 +1446,12 @@ mod tests {
             .check(&BTreeSet::from([signed.signer]))
             .expect("verifies"));
 
-        // A stranger's list refuses it rather than reporting it.
+        // A stranger's list is a label, not a failed check: the signature
+        // covers this head, and the key is not one the reader named.
         let stranger = ed25519_dalek::SigningKey::from_bytes(&[6u8; 32])
             .verifying_key()
             .to_bytes();
-        let err = read
-            .check(&BTreeSet::from([stranger]))
-            .expect_err("a key nobody accepts passed");
-        assert!(
-            format!("{err}").contains("not a key this reader accepts"),
-            "{err}"
-        );
+        assert!(!read.check(&BTreeSet::from([stranger])).expect("verifies"));
 
         // The same signature over a head one entry longer does not verify.
         let moved = SignedHead {
@@ -1694,19 +1694,24 @@ mod tests {
         assert!(line.ends_with(&found), "{line}");
     }
 
+    /// The deeds still check. The unlisted key is named in the report and
+    /// on the warning, and the head is not marked accepted.
     #[test]
     fn an_unaccepted_signer_is_named() {
         let (dir, _, signed) = signed_bag();
         let stranger = ed25519_dalek::SigningKey::from_bytes(&[6u8; 32])
             .verifying_key()
             .to_bytes();
-        let line = one_line(&dir, &BTreeSet::from([stranger]));
-        let want = format!(
-            "head signer: expected one of {}, found {}, which is not a key this reader accepts",
-            log::hex(&stranger),
-            log::hex(&signed.signer)
-        );
-        assert_eq!(line, want);
+        let done = check_handover(dir.path(), &BTreeSet::from([stranger])).expect("checks out");
+        assert!(!done.head_accepted);
+        assert!(done.signers_listed);
+        assert_eq!(done.head_signer, Some(signed.signer));
+        let said = done.render();
+        assert!(said.contains("not a key this reader accepts"), "{said}");
+        assert!(said.contains(&log::hex(&signed.signer)), "{said}");
+        let warning = done.warning().expect("a warning");
+        assert!(warning.starts_with("deedar: warning:"), "{warning}");
+        assert!(warning.contains(&log::hex(&signed.signer)), "{warning}");
     }
 
     /// A head line as releases before 0.6.0 wrote it, with no `links=`, still

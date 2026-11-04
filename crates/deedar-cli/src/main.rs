@@ -195,6 +195,9 @@ fn cmd_vouch(url: &str, args: &[String]) -> Result<String, String> {
             let policy = deedar::Policy::read(&dir).map_err(|e| e.to_string())?;
             let checked =
                 deedar::vouch::check(&path, &policy.signers).map_err(|e| e.to_string())?;
+            if let Some(line) = checked.warning() {
+                eprintln!("{line}");
+            }
             Ok(checked.render())
         }
         Some(other) => Err(format!("unknown vouch command {other}")),
@@ -240,6 +243,9 @@ fn cmd_check(url: &str, args: &[String]) -> Result<String, String> {
         .map(|policy| policy.signers)
         .unwrap_or_default();
     let done = deedar::check_handover(&dir, &accept).map_err(|e| e.to_string())?;
+    if let Some(line) = done.warning() {
+        eprintln!("{line}");
+    }
 
     let mut out = String::new();
     if let Some(path) = since {
@@ -344,7 +350,7 @@ fn cmd_export(client: &mut Client, url: &str, args: &[String]) -> Result<String,
 /// Check a satchel, then add its deeds to this store with the receipt fields
 /// they travelled with. `--allow-unsigned-head` takes a head this store did
 /// not accept, whether the signature is missing or by a key the layout does
-/// not list. `attestation = required` refuses both.
+/// not list. `attestation = required` still imports, and warns.
 fn cmd_import(client: &mut Client, args: &[String]) -> Result<String, String> {
     let mut bag: Option<PathBuf> = None;
     let mut unsigned = UnsignedHead::Refuse;
@@ -591,7 +597,7 @@ fn usage() -> String {
      import takes a satchel directory, and --allow-unsigned-head for a missing or unlisted signature\n\
      check takes a satchel directory, --since KEPT_HEAD, --bridge FILE and --keep FILE; vouch takes sign FILE or check FILE\n\
      host says whether the store's layout lists the host signing key, and exits 1 when it does not\n\
-     host accept adds the host signing key to the layout as a signer, and leaves every other line\n"
+     host accept adds the host signing key to the layout as a signer, warns when that layout says attestation = required, and leaves every other line\n"
         .into()
 }
 

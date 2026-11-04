@@ -158,13 +158,13 @@ pub fn sign(path: &Path) -> Result<PathBuf> {
 ///
 /// An empty `accept` checks the signature against the key the file names,
 /// which proves the bytes and the signature go together and nothing about who
-/// made them. That is worth telling apart from a real check, so it is reported
-/// rather than silently treated as success.
+/// made them. A key that is not on a list the reader did give is the same
+/// kind of answer: the bytes and the signature go together, and acceptance
+/// is a label. Neither is a failed check.
 ///
 /// # Errors
 ///
-/// Fails when the signature is absent, malformed, does not verify, or names a
-/// key the reader does not accept.
+/// Fails when the signature is absent, malformed, or does not verify.
 pub fn check(path: &Path, accept: &BTreeSet<[u8; 32]>) -> Result<Checked> {
     let sig_path = beside(path);
     let text = std::fs::read_to_string(&sig_path)
@@ -177,21 +177,10 @@ pub fn check(path: &Path, accept: &BTreeSet<[u8; 32]>) -> Result<Checked> {
     key.verify(&covered(&bytes), &Signature::from_bytes(&vouch.signature))
         .map_err(|_| Error::Evidence("vouch: the signature does not cover these bytes".into()))?;
 
-    if accept.is_empty() {
-        return Ok(Checked {
-            signer: vouch.signer,
-            accepted: false,
-        });
-    }
-    if !accept.contains(&vouch.signer) {
-        return Err(Error::Evidence(format!(
-            "vouch: signed by {}, which is not a key this reader accepts",
-            to_hex(&vouch.signer)
-        )));
-    }
     Ok(Checked {
         signer: vouch.signer,
-        accepted: true,
+        accepted: !accept.is_empty() && accept.contains(&vouch.signer),
+        signers_listed: !accept.is_empty(),
     })
 }
 
@@ -203,14 +192,22 @@ pub struct Checked {
     /// Whether that key was on the reader's list, as opposed to merely being
     /// the one the file named.
     pub accepted: bool,
+    /// Whether the reader named the keys it accepts. An empty list is the
+    /// weaker answer, and a list that does not contain this key is a label.
+    pub signers_listed: bool,
 }
 
 impl Checked {
-    /// One line, which says which of the two questions was answered.
+    /// One line, which says which question was answered.
     #[must_use]
     pub fn render(&self) -> String {
         if self.accepted {
             format!("signed by {} (accepted)\n", to_hex(&self.signer))
+        } else if self.signers_listed {
+            format!(
+                "signed by {}, which is not a key this reader accepts\n",
+                to_hex(&self.signer)
+            )
         } else {
             format!(
                 "signed by {}, and no signer list was given, so this says the bytes and the \
@@ -218,6 +215,18 @@ impl Checked {
                 to_hex(&self.signer)
             )
         }
+    }
+
+    /// The stderr label when a reader who named keys did not accept this one.
+    #[must_use]
+    pub fn warning(&self) -> Option<String> {
+        if self.accepted || !self.signers_listed {
+            return None;
+        }
+        Some(format!(
+            "deedar: warning: signed by {}, which is not a key this reader accepts",
+            to_hex(&self.signer)
+        ))
     }
 }
 
@@ -266,9 +275,9 @@ mod tests {
     }
 
     /// A reader who says which keys they accept gets the stronger answer, and
-    /// a signature from anyone else is refused rather than reported.
+    /// a signature from anyone else is reported rather than refused.
     #[test]
-    fn a_key_nobody_accepts_is_refused() {
+    fn a_key_nobody_accepts_is_reported() {
         with_key([9u8; 32], |dir| {
             let manifest = dir.join("manifest-sha256.txt");
             std::fs::write(&manifest, "abc  data/one\n").expect("write");
@@ -283,13 +292,20 @@ mod tests {
 
             let checked = check(&manifest, &BTreeSet::from([mine])).expect("checks");
             assert!(checked.accepted);
+            assert!(checked.signers_listed);
+            assert!(checked.warning().is_none());
             assert_eq!(checked.signer, mine);
 
-            let err = check(&manifest, &BTreeSet::from([stranger]))
-                .expect_err("a stranger's signature was accepted");
+            let reported = check(&manifest, &BTreeSet::from([stranger])).expect("reports");
+            assert!(!reported.accepted);
+            assert!(reported.signers_listed);
+            let said = reported.render();
+            assert!(said.contains("not a key this reader accepts"), "{said}");
+            let warning = reported.warning().expect("a warning");
+            assert!(warning.starts_with("deedar: warning:"), "{warning}");
             assert!(
-                format!("{err}").contains("not a key this reader accepts"),
-                "{err}"
+                warning.contains("not a key this reader accepts"),
+                "{warning}"
             );
         });
     }

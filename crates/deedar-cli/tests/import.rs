@@ -209,7 +209,7 @@ fn a_head_signed_by_a_listed_key_needs_no_flag() {
 
 /// `--allow-unsigned-head` takes a signature by a key the layout does not
 /// list. The deed was created with signing off, so there is no host sidecar
-/// for that key to fail afterwards. `check` still refuses the signer.
+/// for that key to fail afterwards. `check` reports the signer and warns.
 #[test]
 fn allow_unsigned_head_takes_an_unlisted_signature() {
     let home = tempfile::tempdir().unwrap();
@@ -248,10 +248,22 @@ fn allow_unsigned_head_takes_an_unlisted_signature() {
     )
     .unwrap();
 
-    let err = fails(home, "off", &["--url", &receiver, "check", "bag"]);
-    assert!(err.contains("not a key this reader accepts"), "{err}");
+    let checked = deedar(home, "off", &["--url", &receiver, "check", "bag"]);
+    assert!(
+        checked.status.success(),
+        "{}",
+        String::from_utf8_lossy(&checked.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&checked.stdout);
+    let stderr = String::from_utf8_lossy(&checked.stderr);
+    assert!(stdout.contains("not a key this reader accepts"), "{stdout}");
+    assert!(
+        stderr.contains("deedar: warning:") && stderr.contains("not a key this reader accepts"),
+        "{stderr}"
+    );
     let err = fails(home, "off", &["--url", &receiver, "import", "bag"]);
-    assert!(err.contains("not a key this reader accepts"), "{err}");
+    assert!(err.contains("does not list"), "{err}");
+    assert!(err.contains("--allow-unsigned-head"), "{err}");
     let said = ok(
         home,
         "off",
@@ -266,14 +278,25 @@ fn allow_unsigned_head_takes_an_unlisted_signature() {
     assert!(ev.contains("id=deed-quote-signed ok"), "{ev}");
 }
 
-/// A layout that demands attestation refuses an unsigned head, flag or not.
+/// A layout that demands attestation still imports an unsigned head when
+/// the flag is set, and warns. Without the flag nothing is written.
 #[test]
-fn attestation_required_refuses_an_unsigned_head_even_with_the_flag() {
+fn attestation_required_imports_an_unsigned_head_with_the_flag_and_warns() {
     let home = tempfile::tempdir().unwrap();
     let home = home.path();
+    let key_path = home.join("host.key");
+    std::fs::write(&key_path, [7u8; 32]).unwrap();
+    let key = key_path.display().to_string();
     let sender = url(home, "sender");
     let receiver = url(home, "receiver");
-    quote(home, &sender, "off", "deed-quote-plain", &[]);
+    // The deed is attested. Export with signing off leaves the head unsigned
+    // and keeps the sidecar, which is what a required store can still hold.
+    quote(home, &sender, &key, "deed-quote-plain", &[]);
+    let host = ok(home, &key, &["--url", &sender, "host"]);
+    let public = host
+        .strip_prefix("host key: ")
+        .and_then(|rest| rest.split(',').next())
+        .unwrap_or_else(|| panic!("{host}"));
     ok(
         home,
         "off",
@@ -287,15 +310,37 @@ fn attestation_required_refuses_an_unsigned_head_even_with_the_flag() {
         ],
     );
     ok(home, "off", &["--url", &receiver, "list"]);
-    std::fs::write(home.join("receiver/layout"), "1\nattestation = required\n").unwrap();
+    std::fs::write(
+        home.join("receiver/layout"),
+        format!("1\nattestation = required\nsigner = {public}\n"),
+    )
+    .unwrap();
 
-    let err = fails(
+    let err = fails(home, "off", &["--url", &receiver, "import", "bag"]);
+    assert!(err.contains("--allow-unsigned-head"), "{err}");
+    assert_eq!(ok(home, "off", &["--url", &receiver, "log", "list"]), "");
+
+    let out = deedar(
         home,
         "off",
         &["--url", &receiver, "import", "bag", "--allow-unsigned-head"],
     );
-    assert!(err.contains("attestation = required"), "{err}");
-    assert_eq!(ok(home, "off", &["--url", &receiver, "log", "list"]), "");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stdout.contains("appended 1 log entries"), "{stdout}");
+    assert!(
+        stderr.contains("deedar: warning:") && stderr.contains("attestation = required"),
+        "{stderr}"
+    );
+    assert!(
+        ok(home, "off", &["--url", &receiver, "log", "list"]).contains("deed-quote-plain"),
+        "the deed was not logged"
+    );
 
     let err = fails(
         home,
@@ -305,5 +350,112 @@ fn attestation_required_refuses_an_unsigned_head_even_with_the_flag() {
     assert!(
         err.contains("unknown import flag --allow-unsigned"),
         "{err}"
+    );
+}
+
+/// `host accept` on a store that demands attestation adds the key and warns.
+/// A second accept, once the key is listed, is quiet.
+#[test]
+fn host_accept_on_a_required_store_adds_the_key_and_warns() {
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    let key_path = home.join("host.key");
+    std::fs::write(&key_path, [7u8; 32]).unwrap();
+    let key = key_path.display().to_string();
+    let store = url(home, "store");
+    ok(home, "off", &["--url", &store, "list"]);
+    std::fs::write(home.join("store/layout"), "1\nattestation = required\n").unwrap();
+
+    let out = deedar(home, &key, &["--url", &store, "host", "accept"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stdout.contains("added as a signer"), "{stdout}");
+    assert!(
+        stderr.contains("deedar: warning:") && stderr.contains("attestation = required"),
+        "{stderr}"
+    );
+    let layout = std::fs::read_to_string(home.join("store/layout")).unwrap();
+    assert!(layout.contains("attestation = required"), "{layout}");
+    assert!(layout.contains("signer = ed25519:"), "{layout}");
+
+    let again = deedar(home, &key, &["--url", &store, "host", "accept"]);
+    assert!(
+        again.status.success(),
+        "{}",
+        String::from_utf8_lossy(&again.stderr)
+    );
+    assert!(String::from_utf8_lossy(&again.stdout).contains("already a signer"));
+    assert!(
+        !String::from_utf8_lossy(&again.stderr).contains("deedar: warning:"),
+        "{}",
+        String::from_utf8_lossy(&again.stderr)
+    );
+}
+
+/// `vouch check` reports a key the layout does not list, and warns. With no
+/// list it says so and does not warn.
+#[test]
+fn vouch_check_reports_an_unlisted_key_and_warns() {
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    let key_path = home.join("host.key");
+    std::fs::write(&key_path, [7u8; 32]).unwrap();
+    let other_path = home.join("other.key");
+    std::fs::write(&other_path, [9u8; 32]).unwrap();
+    let key = key_path.display().to_string();
+    let other = other_path.display().to_string();
+    let store = url(home, "store");
+    ok(home, "off", &["--url", &store, "list"]);
+    std::fs::write(home.join("manifest-sha256.txt"), "abc  data/one\n").unwrap();
+    ok(
+        home,
+        &key,
+        &["--url", &store, "vouch", "sign", "manifest-sha256.txt"],
+    );
+
+    let open = deedar(
+        home,
+        "off",
+        &["--url", &store, "vouch", "check", "manifest-sha256.txt"],
+    );
+    assert!(
+        open.status.success(),
+        "{}",
+        String::from_utf8_lossy(&open.stderr)
+    );
+    assert!(String::from_utf8_lossy(&open.stdout).contains("no signer list was given"));
+    assert!(
+        !String::from_utf8_lossy(&open.stderr).contains("deedar: warning:"),
+        "{}",
+        String::from_utf8_lossy(&open.stderr)
+    );
+
+    let host = fails(home, &other, &["--url", &store, "host"]);
+    let public = host
+        .split_whitespace()
+        .find(|word| word.starts_with("ed25519:"))
+        .unwrap_or_else(|| panic!("{host}"));
+    std::fs::write(home.join("store/layout"), format!("1\nsigner = {public}\n")).unwrap();
+    let out = deedar(
+        home,
+        "off",
+        &["--url", &store, "vouch", "check", "manifest-sha256.txt"],
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stdout.contains("not a key this reader accepts"), "{stdout}");
+    assert!(
+        stderr.contains("deedar: warning:") && stderr.contains("not a key this reader accepts"),
+        "{stderr}"
     );
 }

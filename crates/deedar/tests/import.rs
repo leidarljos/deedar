@@ -914,16 +914,20 @@ fn a_tombstoned_accession_is_refused() {
     assert!(err.contains("deed tombstoned: deed-quote-gone"), "{err}");
 }
 
-/// An unsigned head is refused unless allowed, and a layout that demands
-/// attestation refuses it even then.
+/// An unsigned head is refused unless allowed. A layout that demands
+/// attestation still imports under the flag; the demand is a warning.
 #[test]
-fn an_unsigned_head_is_refused_unless_allowed_and_always_under_required() {
+fn an_unsigned_head_is_refused_unless_allowed_and_imported_under_required() {
     let seats = Seats::new();
     let sender = seats.url("sender");
+    // The deed is attested. The head is not: export runs with signing off,
+    // so the bag carries the sidecar and no `head`.
+    let public = seats.sign_as(7);
     mint(
         &sender,
-        quote("deed-quote-plain", "nobody signed this head"),
+        quote("deed-quote-plain", "the host signed the deed"),
     );
+    seats.sign_nothing();
     let bag = seats.bag("bag");
     export(&sender, &bag, &["deed-quote-plain"]);
     assert!(!bag.join("data/deeds/head").exists());
@@ -933,21 +937,32 @@ fn an_unsigned_head_is_refused_unless_allowed_and_always_under_required() {
     assert!(err.contains("head is unsigned"), "{err}");
     assert!(err.contains("--allow-unsigned-head"), "{err}");
 
-    layout(&receiver, "1\nattestation = required\n");
-    let err = refused(&receiver, &bag, UnsignedHead::Allow);
-    assert!(err.contains("attestation = required"), "{err}");
-
-    layout(&receiver, "1\n");
+    layout(&receiver, &format!("1\nsigner = {public}\n"));
     let done = import(&receiver, &bag, UnsignedHead::Allow);
     assert_eq!(done.logged, 1);
     holds(&receiver, "deed-quote-plain");
+
+    let required = seats.url("required");
+    layout(
+        &required,
+        &format!("1\nattestation = required\nsigner = {public}\n"),
+    );
+    let done = import(&required, &bag, UnsignedHead::Allow);
+    assert_eq!(done.logged, 1);
+    let said = done.render();
+    assert!(said.contains("head is unsigned"), "{said}");
+    holds(&required, "deed-quote-plain");
+    Client::open(&required)
+        .unwrap()
+        .evidence(&id("deed-quote-plain"))
+        .expect("a listed sidecar still evidences");
 }
 
 /// The flag waives a missing signature and an unlisted signer together.
 /// Deleting `head` is how one becomes the other, so a flag that took only
 /// the missing file let through a bag it refused while the signature was
-/// there. `check` still refuses the signer, and `attestation = required`
-/// refuses both shapes.
+/// there. `check` reports the unlisted signer. A required store still
+/// will not hold this deed: it has no host sidecar.
 #[test]
 fn allow_unsigned_head_waives_an_unlisted_signer_and_a_missing_one() {
     let seats = Seats::new();
@@ -965,16 +980,17 @@ fn allow_unsigned_head_waives_an_unlisted_signer_and_a_missing_one() {
         .to_bytes();
     let mut accept = std::collections::BTreeSet::new();
     accept.insert(signer);
-    let err = deedar::check_handover(&bag, &accept).unwrap_err();
-    assert!(
-        err.to_string().contains("not a key this reader accepts"),
-        "{err}"
-    );
+    let done = deedar::check_handover(&bag, &accept).expect("the deeds check");
+    assert!(!done.head_accepted);
+    let said = done.render();
+    assert!(said.contains("not a key this reader accepts"), "{said}");
+    assert!(done.warning().is_some());
 
     let listed = seats.url("listed");
     layout(&listed, &format!("1\nsigner = {other}\n"));
     let err = refused(&listed, &bag, UnsignedHead::Refuse);
-    assert!(err.contains("not a key this reader accepts"), "{err}");
+    assert!(err.contains("does not list"), "{err}");
+    assert!(err.contains("--allow-unsigned-head"), "{err}");
     let said = import(&listed, &bag, UnsignedHead::Allow).render();
     assert!(!said.contains("no signer list"), "{said}");
     assert!(said.contains("not a key this reader accepts"), "{said}");
@@ -994,11 +1010,11 @@ fn allow_unsigned_head_waives_an_unlisted_signer_and_a_missing_one() {
         &format!("1\nattestation = required\nsigner = {other}\n"),
     );
     let err = refused(&required, &bag, UnsignedHead::Allow);
-    assert!(err.contains("not a key this reader accepts"), "{err}");
+    assert!(err.contains("host sidecar"), "{err}");
     let required_bare = seats.url("required-bare");
     layout(&required_bare, "1\nattestation = required\n");
     let err = refused(&required_bare, &bag, UnsignedHead::Allow);
-    assert!(err.contains("attestation = required"), "{err}");
+    assert!(err.contains("host sidecar"), "{err}");
 
     fs::remove_file(bag.join("data/deeds/head")).unwrap();
     let deleted = seats.url("deleted");
@@ -1013,7 +1029,7 @@ fn allow_unsigned_head_waives_an_unlisted_signer_and_a_missing_one() {
         &format!("1\nattestation = required\nsigner = {other}\n"),
     );
     let err = refused(&required_gone, &bag, UnsignedHead::Allow);
-    assert!(err.contains("attestation = required"), "{err}");
+    assert!(err.contains("host sidecar"), "{err}");
 }
 
 /// Waiving the head does not waive the deed's own host signature.

@@ -75,8 +75,9 @@ writes nothing.
 The bag's head has to be signed by a key this store's ``layout`` lists.
 ``--allow-unsigned-head`` waives a missing signature and a signature by a
 key the layout does not list: deleting ``head`` makes those the same case.
-A store that says ``attestation = required`` refuses both. ``check`` still
-refuses a signer the layout does not list.
+A store that says ``attestation = required`` still imports under that flag,
+and warns. ``check`` reports a signer the layout does not list, and warns;
+it does not fail the deeds.
 
 Audit a store
 =============
@@ -103,8 +104,8 @@ the log says these were logged today.
 Demand attestation
 ==================
 
-A store can refuse to hand over a deed whose host sidecar is not signed by a
-key it accepts. In the store's ``layout``:
+``evidence`` fails a deed whose host sidecar is not signed by a key the
+layout accepts. ``get`` still returns the deed. In the store's ``layout``:
 
 .. code:: text
 
@@ -118,8 +119,9 @@ entitled to make them, because whoever can check it can mint it.
 
 The demand is worth what guards ``layout`` and the key. An agent that can
 edit the layout can list a key of its own, and an agent running as the
-key's owner can read the key. ``deedar host accept`` refuses to add a signer
-to a store that says required; add the line by hand.
+key's owner can read the key. ``deedar host accept`` adds a signer to a
+store that says required, and warns; the demand stays in the file.
+``evidence`` still fails a deed whose sidecar is not signed by a listed key.
 
 Retract a deed
 ==============

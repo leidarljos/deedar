@@ -82,8 +82,8 @@ the head is unsigned, so every proof above is against a head this bag asserted a
   travel with an export, `log bridge` proves a log grew from a head you
   kept, `log audit` finds a deed that was logged and is gone.
 - A configured host key signs heads, sidecars and satchel manifests. With signing off, nothing is signed. A receiver lists accepted keys in its store's `layout`.
-  `deedar host accept` adds this host's own key there, except in a store
-  whose layout says `attestation = required`.
+  `deedar host accept` adds this host's own key there. A store whose layout
+  says `attestation = required` still gains the key, and the command warns.
 - The default host key is one file per user account, so a signature names an
   account on one machine. Seats and agents under that account share it, and
   `--agent` is what the caller says. See the explanation page for keeping

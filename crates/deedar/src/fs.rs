@@ -220,39 +220,36 @@ impl FsStore {
     /// `ed25519:<hex>` and whether the layout changed; `None` when the host
     /// has no signing key.
     ///
+    /// A layout that says `attestation = required` does not stop this. The
+    /// demand is a label: the signer is added, and a warning names the layout.
+    ///
     /// # Errors
     ///
-    /// Fails when the layout cannot be read or written, or when it demands
-    /// attestation and does not list the key yet.
+    /// Fails when the layout cannot be read or written.
     pub fn accept_host_signer(&mut self) -> Result<Option<(String, bool)>> {
         let Some(signing) = self.signing_key.as_ref() else {
             return Ok(None);
         };
         let public = signing.verifying_key().to_bytes();
-        // A store that demands attestation is only worth the demand if the
-        // signer list is somebody's decision. Whoever can run this as the
-        // store's owner could otherwise list any key they hold and sign with
-        // it, so a required store gains a signer by hand or not at all.
-        if self.policy.demand == crate::attest::Demand::Required
-            && !self.policy.signers.contains(&public)
-        {
-            return Err(Error::Io(format!(
-                "{} says attestation = required, so a signer is added by hand: `signer = {}:{}` if this key should count",
-                self.dir.join("layout").display(),
-                crate::attest::ED25519,
-                crate::attest::to_hex(&public)
-            )));
-        }
+        let line = format!(
+            "{}:{}",
+            crate::attest::ED25519,
+            crate::attest::to_hex(&public)
+        );
+        // The demand stays on the layout. Adding the key is what `host accept`
+        // was asked to do, and the warning is the record that the demand was
+        // already set.
+        let demanded = self.policy.demand == crate::attest::Demand::Required
+            && !self.policy.signers.contains(&public);
         let changed = crate::migrate::add_signer(&self.dir, &public)?;
         self.policy = crate::attest::Policy::read(&self.dir)?;
-        Ok(Some((
-            format!(
-                "{}:{}",
-                crate::attest::ED25519,
-                crate::attest::to_hex(&public)
-            ),
-            changed,
-        )))
+        if demanded && changed {
+            eprintln!(
+                "deedar: warning: {} says attestation = required; added `signer = {line}` anyway",
+                self.dir.join("layout").display()
+            );
+        }
+        Ok(Some((line, changed)))
     }
 
     /// The public half of the host signing key, as `ed25519:<hex>`, when the

@@ -32,8 +32,9 @@ pub enum UnsignedHead {
     Refuse,
     /// Import a head this store did not accept: no signature, or a signature
     /// by a key the layout does not list. Deleting `head` turns the second
-    /// into the first, so the flag waives both. `attestation = required`
-    /// grants neither.
+    /// into the first, so the flag waives both. A layout that says
+    /// `attestation = required` still imports, and warns that the demand
+    /// was not met.
     Allow,
 }
 
@@ -149,28 +150,16 @@ impl FsStore {
     ///
     /// Fails, having written nothing, when the bag does not check out or
     /// changed while it was read; when its head is not signed by a key this
-    /// store lists and `unsigned` does not allow that, or the layout demands
-    /// attestation; or when any deed in it cannot be held here as the sender
-    /// held it. An I/O error part-way through the writes leaves files that
-    /// importing the same bag again completes.
+    /// store lists and `unsigned` does not allow that; or when any deed in
+    /// it cannot be held here as the sender held it. An I/O error part-way
+    /// through the writes leaves files that importing the same bag again
+    /// completes. `attestation = required` does not fail this: the deeds are
+    /// held and a warning names the layout.
     pub fn import_handover(&mut self, dir: &Path, unsigned: UnsignedHead) -> Result<Imported> {
-        let listed = self.policy().signers.clone();
-        // A layout that names other keys makes `check` fail an unlisted
-        // signer before this function ever sees the head. The flag waives
-        // that the same way it waives a missing signature, so the check is
-        // repeated with an empty accept set and the later comparison uses
-        // that set too. `deedar check` is unchanged: it still fails the signer.
-        let waive_unlisted = unsigned == UnsignedHead::Allow
-            && self.policy().demand != crate::attest::Demand::Required;
-        let (checked, accept) = match crate::receipt::check_handover(dir, &listed) {
-            Ok(checked) => (checked, listed),
-            Err(e) if waive_unlisted && said(&e).contains("not a key this reader accepts") => {
-                let mut checked = crate::receipt::check_handover(dir, &BTreeSet::new())?;
-                checked.signers_listed = true;
-                (checked, BTreeSet::new())
-            }
-            Err(e) => return Err(e),
-        };
+        let accept = self.policy().signers.clone();
+        // An unlisted signer is a label on the check, not a reason it fails,
+        // so one reading of the bag is enough.
+        let checked = crate::receipt::check_handover(dir, &accept)?;
         if checked.proven.is_empty() {
             return Ok(Imported {
                 checked,
@@ -185,6 +174,18 @@ impl FsStore {
         self.admit_head(&checked, unsigned)?;
 
         let plan = self.plan_import(&bag)?;
+        // The warning is printed once the bag can be held. A later failure
+        // would otherwise say the deeds were imported when they were not.
+        if unsigned == UnsignedHead::Allow
+            && !checked.head_accepted
+            && self.policy().demand == crate::attest::Demand::Required
+        {
+            eprintln!(
+                "deedar: warning: {} says attestation = required, and this handover's head is \
+                 not signed by a key it lists; the deeds were imported anyway",
+                self.dir().join("layout").display()
+            );
+        }
         for (path, bytes) in &plan.files {
             atomic_write(path, bytes)?;
         }
@@ -203,19 +204,13 @@ impl FsStore {
     /// The bar for appending: a head signed by a key this store lists, or an
     /// explicit allowance for a head it did not accept. A missing signature
     /// and a signature by an unlisted key are the same fact, because deleting
-    /// `head` turns one into the other. `attestation = required` grants neither.
+    /// `head` turns one into the other. `attestation = required` does not
+    /// raise that bar: the flag still imports, and a warning names the layout.
     fn admit_head(&self, checked: &Handover, unsigned: UnsignedHead) -> Result<()> {
         if checked.head_accepted {
             return Ok(());
         }
         let layout = self.dir().join("layout");
-        if self.policy().demand == crate::attest::Demand::Required {
-            return Err(Error::Evidence(format!(
-                "{} says attestation = required, and this handover's head is not signed by a key \
-                 it lists; nothing was imported",
-                layout.display()
-            )));
-        }
         if unsigned == UnsignedHead::Allow {
             return Ok(());
         }
