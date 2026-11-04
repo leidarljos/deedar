@@ -152,6 +152,8 @@ a node ``SHA-256(0x01 || left || right)``, the tree splits at the largest power
 of two below the width. ``head`` is ``size`` and ``root``, signed when a key is
 set. ``prove ID`` is the inclusion path; ``bridge SIZE`` the consistency path
 from an earlier head; ``audit`` the log against the shelves.
+The tree and both proofs are the ``rfc9162`` crate; ``deedar::log`` re-exports
+it and keeps the entry format and the file.
 
 Environment
 ===========
@@ -170,6 +172,7 @@ Crates
 Crate          Carries
 ============== ==================================================
 ``deed``       the deed types and canonical encoding
+``rfc9162``    the Merkle tree, inclusion and consistency proofs
 ``deedar``     store, log, receipts, signatures, attestation
 ``deedar-cli`` ``deedar``
 ``deedar-mcp`` the read-only Model Context Protocol (MCP) surface
