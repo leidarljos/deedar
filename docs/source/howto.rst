@@ -75,10 +75,10 @@ writes nothing.
 The bag's head has to be signed by a key this store's ``layout`` lists.
 ``--allow-unsigned-head`` waives a missing signature and a signature by a
 key the layout does not list: deleting ``head`` makes those the same case.
-A store that says ``attestation = required`` still imports under that flag,
-and warns. ``check`` reports a signer the layout does not list, warns, and
-exits ``EXIT_UNTRUSTED_SIGNER``. It does not fail the deeds. A signature
-that does not cover the bytes is still status 1.
+A store that says ``attestation = required`` still imports under that flag, and warns.
+``check`` reports a signer the layout does not list, warns, and exits ``EXIT_UNTRUSTED_SIGNER``.
+It does not fail the deeds.
+A signature that does not cover the bytes is still status 1.
 
 Audit a store
 =============
@@ -105,8 +105,9 @@ the log says these were logged today.
 Demand attestation
 ==================
 
-``evidence`` fails a deed whose host sidecar is not signed by a key the
-layout accepts. ``get`` still returns the deed. In the store's ``layout``:
+``evidence`` fails a deed whose host sidecar is not signed by a key the layout accepts.
+``get`` still returns the deed.
+In the store's ``layout``:
 
 .. code:: text
 

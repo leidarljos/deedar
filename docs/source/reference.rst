@@ -19,19 +19,18 @@ Verb                                                                            
 ``leave ID``                                                                        a left-behind marker for a deed that moved store
 ``timestamp ID``                                                                    a timestamp token over the deed
 ``export --into DIR ID... \vert -``                                                 deed, bytes, evidence, receipt (and signed head) into a satchel
-``import DIR [--allow-unsigned-head]``                                              check a satchel, then hold its deeds here with the receipt fields they travelled with and evidence under this store's key; writes nothing unless every deed can be held. ``--allow-unsigned-head`` waives a missing or unlisted signature. ``attestation = required`` warns and still imports
+``import DIR [--allow-unsigned-head]``                                              check a satchel and hold its deeds here with the receipt fields they travelled with; nothing is written unless every deed can be held, ``--allow-unsigned-head`` waives a missing or unlisted signature, and ``attestation = required`` warns and still imports
 ``check DIR [--since KEPT] [--bridge FILE] [--keep FILE]``                          every receipt against the head in the bag; with ``--since``, that the bag's bridge (``bridge.txt``) grows the head you kept into this one; ``--keep`` records this head for next time
 ``log head \vert list \vert audit \vert backfill \vert prove ID \vert bridge SIZE`` the append-only log
 ``vouch sign FILE \vert check FILE``                                                a detached Ed25519 signature beside a file
 ``migrate``                                                                         move a store to the current layout
 =================================================================================== ====================================================================================================================================================================================================================================
 
-Exit codes
-==========
+**Exit codes.**
 
 0 is the command did what it was asked.
-1 is the command did not: an unknown accession, a path that is not a store, a signature that does not cover the bytes, and the other refusals.
-2, ``EXIT_UNTRUSTED_SIGNER``, is ``check`` and ``vouch check`` when the check finished and the signer is not one this reader accepts.
+1 is a command that did not finish.
+2, ``EXIT_UNTRUSTED_SIGNER``, is a finished check of an untrusted signer.
 Stdout is the report and stderr is ``deedar: warning:``.
 
 Kinds
