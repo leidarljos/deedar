@@ -49,6 +49,15 @@ pub use wire::{
     decode_request, decode_response, encode_request, encode_response, Request, Response,
 };
 
+/// Status of `deedar check` and `deedar vouch check` when the check finished
+/// and the signer was not one the reader accepts.
+///
+/// 1 means the check did not finish: the bag does not check out, or the
+/// signature does not cover the bytes. This is the next status, so a script
+/// can tell those apart. The report is still printed, and the warning is
+/// still on stderr.
+pub const EXIT_UNTRUSTED_SIGNER: u8 = 2;
+
 /// Which rows of [`Client::list`] to keep.
 ///
 /// An unset field does not constrain. Fields that are set all have to match.

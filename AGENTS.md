@@ -8,8 +8,9 @@ the report says whether a key was accepted.
   `attestation = required` keeps that line, gains the signer, and the
   command warns.
 - `deedar check` and `deedar vouch check` report a signature by a key the
-  layout does not list. The deeds, or the file, still check, and the
-  command warns. A signature that does not cover the bytes still fails.
+  layout does not list, warn, and exit `EXIT_UNTRUSTED_SIGNER`. The deeds,
+  or the file, still check. A signature that does not cover the bytes
+  still fails with status 1.
 - `deedar import --allow-unsigned-head` keeps the deeds when the layout
   says `attestation = required`, and warns. Without the flag, an unsigned
   or unlisted head is not imported.

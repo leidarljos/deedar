@@ -32,6 +32,7 @@ A read names the missing path and stops.
 |---+---|
 | 0 | the command did what it was asked. =evidence= and =current= over several accessions also exit 0 when every one is ok |
 | 1 | the command did not. An unknown accession, an ambiguous prefix, an unset =DEEDAR_URL=, and a path that is not a store are this code, and so is every other refusal, including =host= when the layout does not list the signing key. =evidence= and =current= over several accessions exit 1 when any line failed. A refusal prints one stderr line, =deedar:= and the reason, naming the input and the next command. An ambiguous prefix also lists the matching accessions, in byte order, up to the bound that line states |
+| 2 | =check= and =vouch check= finished, and the signer is not one this reader accepts. The constant is =EXIT_UNTRUSTED_SIGNER=. Stdout is the report and stderr is =deedar: warning:=. A signature that does not cover the bytes is still 1 |
 
 * Kinds
 

@@ -11,24 +11,31 @@ fn main() -> ExitCode {
     match dispatch(env::args().skip(1).collect()) {
         Ok(report) => {
             print!("{}", report.text);
-            if report.ok {
-                ExitCode::SUCCESS
-            } else {
-                ExitCode::from(1)
+            match report.code {
+                None => ExitCode::SUCCESS,
+                Some(code) => ExitCode::from(code),
             }
         }
         Err(e) => {
             eprintln!("deedar: {e}");
-            ExitCode::from(1)
+            ExitCode::from(EXIT_FAILED)
         }
     }
 }
 
-/// What a verb produced: text to print, and whether the run succeeded. A set
-/// check prints its report and exits non-zero.
+/// The command did not finish. Distinct from [`deedar::EXIT_UNTRUSTED_SIGNER`],
+/// which is a check that did finish on a signer the reader does not accept.
+const EXIT_FAILED: u8 = 1;
+
+/// What a verb produced: text to print, and the status when it is not success.
+///
+/// `code` is `None` for success. `Some(EXIT_FAILED)` is a command that did
+/// not finish, including `evidence` and `current` over several accessions
+/// when any line failed. `Some(EXIT_UNTRUSTED_SIGNER)` is `check` or
+/// `vouch check` that finished and did not accept the signer.
 struct Report {
     text: String,
-    ok: bool,
+    code: Option<u8>,
 }
 
 /// Route the verbs that report per-id, and hand the rest to [`run`].
@@ -44,13 +51,13 @@ fn dispatch(args: Vec<String>) -> Result<Report, String> {
 ",
                 env!("CARGO_PKG_VERSION")
             ),
-            ok: true,
+            code: None,
         });
     }
     if split.help {
         return Ok(Report {
             text: help_text(&split.rest),
-            ok: true,
+            code: None,
         });
     }
     let (url, rest) = take_url(&args)?;
@@ -60,7 +67,19 @@ fn dispatch(args: Vec<String>) -> Result<Report, String> {
     if rest.first().map(String::as_str) == Some("current") && is_many(&rest[1..]) {
         return current_many(&url, &rest[1..]);
     }
-    run(args).map(|text| Report { text, ok: true })
+    finish(args).map(|(text, code)| Report { text, code })
+}
+
+/// The text of a finished command. Tests that only read the report use this.
+/// [`dispatch`] keeps the status, including [`deedar::EXIT_UNTRUSTED_SIGNER`].
+#[cfg(test)]
+fn run(args: Vec<String>) -> Result<String, String> {
+    finish(args).map(|(text, _code)| text)
+}
+
+/// A finished command whose status is success.
+fn succeeded(result: Result<String, String>) -> Result<(String, Option<u8>), String> {
+    result.map(|text| (text, None))
 }
 
 /// Whether an `evidence` call names more than one deed; `-` reads ids from
@@ -124,7 +143,7 @@ fn current_many(url: &str, args: &[String]) -> Result<Report, String> {
     }
     text.push_str(&format!("{} of {} current\n", ids.len() - stale, ids.len()));
     Ok(Report {
-        ok: stale == 0,
+        code: (stale != 0).then_some(EXIT_FAILED),
         text,
     })
 }
@@ -175,30 +194,31 @@ fn evidence_many(url: &str, args: &[String]) -> Result<Report, String> {
     }
     text.push_str(&format!("{verified} of {} verified\n", ids.len()));
     Ok(Report {
-        ok: verified == ids.len(),
+        code: (verified != ids.len()).then_some(EXIT_FAILED),
         text,
     })
 }
 
 /// Sign a satchel's manifest, or check the signature on one against the
 /// store's signer list. Without a list, the weaker answer is reported as such.
-fn cmd_vouch(url: &str, args: &[String]) -> Result<String, String> {
+fn cmd_vouch(url: &str, args: &[String]) -> Result<(String, Option<u8>), String> {
     let dir = deedar::store_dir(url).map_err(|e| e.to_string())?;
     match args.first().map(String::as_str) {
         Some("sign") => {
             let path = PathBuf::from(args.get(1).ok_or("vouch sign needs a file")?);
             let out = deedar::vouch::sign(&path).map_err(|e| e.to_string())?;
-            Ok(format!("{}\n", out.display()))
+            Ok((format!("{}\n", out.display()), None))
         }
         Some("check") => {
             let path = PathBuf::from(args.get(1).ok_or("vouch check needs a file")?);
             let policy = deedar::Policy::read(&dir).map_err(|e| e.to_string())?;
             let checked =
                 deedar::vouch::check(&path, &policy.signers).map_err(|e| e.to_string())?;
-            if let Some(line) = checked.warning() {
+            let code = checked.warning().map(|line| {
                 eprintln!("{line}");
-            }
-            Ok(checked.render())
+                deedar::EXIT_UNTRUSTED_SIGNER
+            });
+            Ok((checked.render(), code))
         }
         Some(other) => Err(format!("unknown vouch command {other}")),
         None => Err("vouch takes sign FILE or check FILE".into()),
@@ -209,7 +229,7 @@ fn cmd_vouch(url: &str, args: &[String]) -> Result<String, String> {
 /// the head in the bag. With `--since KEPT`, also that this log is the one
 /// whose head the receiver kept last time, grown, by the bridge the bag
 /// carries. With `--keep FILE`, record this bag's head for next time.
-fn cmd_check(url: &str, args: &[String]) -> Result<String, String> {
+fn cmd_check(url: &str, args: &[String]) -> Result<(String, Option<u8>), String> {
     let mut dir: Option<PathBuf> = None;
     let mut since: Option<PathBuf> = None;
     let mut bridge_at: Option<PathBuf> = None;
@@ -243,9 +263,10 @@ fn cmd_check(url: &str, args: &[String]) -> Result<String, String> {
         .map(|policy| policy.signers)
         .unwrap_or_default();
     let done = deedar::check_handover(&dir, &accept).map_err(|e| e.to_string())?;
-    if let Some(line) = done.warning() {
+    let code = done.warning().map(|line| {
         eprintln!("{line}");
-    }
+        deedar::EXIT_UNTRUSTED_SIGNER
+    });
 
     let mut out = String::new();
     if let Some(path) = since {
@@ -286,7 +307,7 @@ fn cmd_check(url: &str, args: &[String]) -> Result<String, String> {
             ));
         }
     }
-    Ok(out)
+    Ok((out, code))
 }
 
 /// The bridge a sender put in the bag, beside the deeds or at the top.
@@ -455,7 +476,7 @@ fn cmd_log(client: &mut Client, url: &str, args: &[String]) -> Result<String, St
     }
 }
 
-fn run(args: Vec<String>) -> Result<String, String> {
+fn finish(args: Vec<String>) -> Result<(String, Option<u8>), String> {
     let (url, rest) = take_url(&args)?;
     // Before open: open is what creates the directory.
     let created_seat = creating_the_seat_store(&args, &rest);
@@ -463,7 +484,7 @@ fn run(args: Vec<String>) -> Result<String, String> {
     match rest.first().map(String::as_str) {
         Some("host") if rest.get(1).map(String::as_str) == Some("accept") => {
             let layout = client.dir().join("layout");
-            match client.accept_host_signer().map_err(|e| e.to_string())? {
+            succeeded(match client.accept_host_signer().map_err(|e| e.to_string())? {
                 None => Err(
                     "host key: none; set DEEDAR_HOST_SIGNING_KEY or run `ljos onboard` first"
                         .into(),
@@ -476,7 +497,7 @@ fn run(args: Vec<String>) -> Result<String, String> {
                     "host key: {public}, already a signer {} lists\n",
                     layout.display()
                 )),
-            }
+            })
         }
         Some("host") if rest.len() > 1 => Err(format!(
             "host takes `accept` or nothing, not `{}`; `deedar host` says whether the layout lists the key",
@@ -484,7 +505,7 @@ fn run(args: Vec<String>) -> Result<String, String> {
         )),
         Some("host") => {
             let layout = client.dir().join("layout");
-            match (client.signer_public(), client.unaccepted_signer()) {
+            succeeded(match (client.signer_public(), client.unaccepted_signer()) {
                 (None, _) => Ok("host key: none; deeds carry no host signature\n".into()),
                 (Some(public), None) => Ok(format!(
                     "host key: {public}, a signer {} lists\n",
@@ -495,7 +516,7 @@ fn run(args: Vec<String>) -> Result<String, String> {
                      evidence until it carries `signer = {public}`; `deedar host accept` adds it",
                     layout.display()
                 )),
-            }
+            })
         }
         Some("create") => {
             if created_seat {
@@ -507,81 +528,81 @@ fn run(args: Vec<String>) -> Result<String, String> {
                     eprintln!("{}", unaccepted_signer_warning(&public, client.dir()));
                 }
             }
-            made
+            succeeded(made)
         }
         Some("get") => {
             let raw = rest.get(1).ok_or("get needs an id")?;
             let id = resolve_id(&mut client, &url, raw)?;
             let d = client.get(&id).map_err(|e| e.to_string())?;
-            Ok(format_one(&d))
+            succeeded(Ok(format_one(&d)))
         }
-        Some("list") => cmd_list(&mut client, &rest[1..]),
+        Some("list") => succeeded(cmd_list(&mut client, &rest[1..])),
         Some("trail") => {
             let raw = rest.get(1).ok_or("trail needs an id")?;
             let id = resolve_id(&mut client, &url, raw)?;
             let rows = client.trail(&id).map_err(|e| e.to_string())?;
-            Ok(format_list(&rows))
+            succeeded(Ok(format_list(&rows)))
         }
         Some("evidence") => {
             let raw = rest.get(1).ok_or("evidence needs an id")?;
             let id = resolve_id(&mut client, &url, raw)?;
             let ev = client.evidence(&id).map_err(|e| e.to_string())?;
-            Ok(format!(
+            succeeded(Ok(format!(
                 "id={} ok\nproducedBy={} {}\ntime={}\n",
                 ev.deed_id,
                 ev.produced_by.agent_id,
                 ev.produced_by.activity_id.as_deref().unwrap_or("-"),
                 ev.unix_time,
-            ))
+            )))
         }
         Some("delete") => {
             let raw = rest.get(1).ok_or("delete needs an id")?;
             let id = resolve_id(&mut client, &url, raw)?;
             client.delete(&id).map_err(|e| e.to_string())?;
-            Ok(format!("deleted {id}\n"))
+            succeeded(Ok(format!("deleted {id}\n")))
         }
         Some("leave") => {
             let raw = rest.get(1).ok_or("leave needs an id")?;
             let id = resolve_id(&mut client, &url, raw)?;
             let dest = PathBuf::from(rest.get(2).ok_or("leave needs a dest dir")?);
             let out = client.leave(&id, &dest).map_err(|e| e.to_string())?;
-            Ok(format!("{}\n", out.display()))
+            succeeded(Ok(format!("{}\n", out.display())))
         }
         Some("timestamp") => {
             let raw = rest.get(1).ok_or("timestamp needs an id")?;
             let id = resolve_id(&mut client, &url, raw)?;
             let path = client.timestamp(&id).map_err(|e| e.to_string())?;
-            Ok(format!("timestamp {}\n", path.display()))
+            succeeded(Ok(format!("timestamp {}\n", path.display())))
         }
         Some("current") => {
             let raw = rest.get(1).ok_or("current needs an id")?;
             let id = resolve_id(&mut client, &url, raw)?;
-            match client.current(&id) {
+            succeeded(match client.current(&id) {
                 Ok(d) => Ok(format_one(&d)),
                 Err(e) => {
                     let msg = e.to_string();
                     current_note(&msg).ok_or(msg)
                 }
-            }
+            })
         }
-        Some("log") => cmd_log(&mut client, &url, &rest[1..]),
-        Some("export") => cmd_export(&mut client, &url, &rest[1..]),
+        Some("log") => succeeded(cmd_log(&mut client, &url, &rest[1..])),
+        Some("export") => succeeded(cmd_export(&mut client, &url, &rest[1..])),
         Some("import") => {
             if created_seat {
                 say_store_created(client.dir());
             }
-            cmd_import(&mut client, &rest[1..])
+            succeeded(cmd_import(&mut client, &rest[1..]))
         }
         Some("check") => cmd_check(&url, &rest[1..]),
         Some("vouch") => cmd_vouch(&url, &rest[1..]),
         Some("migrate") => {
             client.migrate().map_err(|e| e.to_string())?;
-            Ok("layout=1\n".into())
+            succeeded(Ok("layout=1\n".into()))
         }
-        Some("url") => Ok(format!(
+        Some("url") => succeeded(Ok(format!(
             "{}\n",
             StoreUrl::parse(&url).map_err(|e| e.to_string())?.as_url()
-        )),
+        ))),
         Some(other) => Err(format!("unknown command {other}")),
         None => Err(usage().trim_end().to_string()),
     }
@@ -1444,7 +1465,7 @@ mod url_tests {
 
 #[cfg(test)]
 mod tests {
-    use super::{dispatch, run};
+    use super::{dispatch, run, EXIT_FAILED};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     /// The machine's own signing key, when it has one, would sign deeds
@@ -1479,7 +1500,7 @@ mod tests {
     #[test]
     fn help_does_not_need_a_store() {
         let page = dispatch(vec!["--help".into()]).unwrap();
-        assert!(page.ok);
+        assert!(page.code.is_none());
         assert!(page.text.contains("deedar create --help"), "{}", page.text);
         let create = dispatch(vec!["create".into(), "--help".into()]).unwrap();
         assert!(create.text.contains("--path FILE"), "{}", create.text);
@@ -1623,7 +1644,7 @@ mod tests {
             "deed-quote-second".into(),
         ])
         .expect("evidence over two ids");
-        assert!(both.ok, "{}", both.text);
+        assert!(both.code.is_none(), "{}", both.text);
         assert!(both.text.contains("deed-quote-first ok"), "{}", both.text);
         assert!(both.text.contains("2 of 2 verified"), "{}", both.text);
 
@@ -1638,7 +1659,7 @@ mod tests {
             "deed-quote-second".into(),
         ])
         .expect("evidence over a set holding one bad id");
-        assert!(!mixed.ok, "{}", mixed.text);
+        assert_eq!(mixed.code, Some(EXIT_FAILED), "{}", mixed.text);
         assert!(
             mixed.text.contains("deed-quote-absent FAILED"),
             "{}",
@@ -1691,7 +1712,12 @@ mod tests {
             "deed-quote-first".into(),
         ])
         .expect("current over a set");
-        assert!(!report.ok, "one of them moved: {}", report.text);
+        assert_eq!(
+            report.code,
+            Some(EXIT_FAILED),
+            "one of them moved: {}",
+            report.text
+        );
         assert!(
             report.text.contains("deed-quote-stable current"),
             "{}",
@@ -1735,7 +1761,7 @@ mod tests {
             "deed-quote-alone".into(),
         ])
         .expect("evidence over one id");
-        assert!(one.ok);
+        assert!(one.code.is_none());
         assert!(one.text.contains("id=deed-quote-alone ok"), "{}", one.text);
         assert!(
             !one.text.contains("verified"),

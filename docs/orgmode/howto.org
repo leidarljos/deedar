@@ -221,8 +221,9 @@ The bag's head has to be signed by a key this store's =layout= lists.
 =--allow-unsigned-head= waives a missing signature and a signature by a
 key the layout does not list: deleting =head= makes those the same case.
 A store that says =attestation = required= still imports under that flag,
-and warns. =check= reports a signer the layout does not list, and warns;
-it does not fail the deeds.
+and warns. =check= reports a signer the layout does not list, warns, and
+exits =EXIT_UNTRUSTED_SIGNER=. It does not fail the deeds. A signature
+that does not cover the bytes is still status 1.
 
 * Audit a store
 

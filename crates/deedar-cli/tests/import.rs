@@ -4,6 +4,8 @@
 use std::path::Path;
 use std::process::{Command, Output};
 
+use deedar::EXIT_UNTRUSTED_SIGNER;
+
 fn deedar(home: &Path, signing: &str, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_deedar"))
         .args(args)
@@ -31,6 +33,17 @@ fn fails(home: &Path, signing: &str, args: &[&str]) -> String {
     let out = deedar(home, signing, args);
     assert!(!out.status.success(), "deedar {args:?} passed");
     String::from_utf8_lossy(&out.stderr).into_owned()
+}
+
+/// `check` and `vouch check` finished, and the signer was not accepted.
+fn untrusted(out: &Output) {
+    assert_eq!(
+        out.status.code(),
+        Some(i32::from(EXIT_UNTRUSTED_SIGNER)),
+        "stdout {}\nstderr {}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
 }
 
 fn url(home: &Path, name: &str) -> String {
@@ -209,7 +222,8 @@ fn a_head_signed_by_a_listed_key_needs_no_flag() {
 
 /// `--allow-unsigned-head` takes a signature by a key the layout does not
 /// list. The deed was created with signing off, so there is no host sidecar
-/// for that key to fail afterwards. `check` reports the signer and warns.
+/// for that key to fail afterwards. `check` reports the signer, warns, and
+/// exits `EXIT_UNTRUSTED_SIGNER`.
 #[test]
 fn allow_unsigned_head_takes_an_unlisted_signature() {
     let home = tempfile::tempdir().unwrap();
@@ -249,11 +263,7 @@ fn allow_unsigned_head_takes_an_unlisted_signature() {
     .unwrap();
 
     let checked = deedar(home, "off", &["--url", &receiver, "check", "bag"]);
-    assert!(
-        checked.status.success(),
-        "{}",
-        String::from_utf8_lossy(&checked.stderr)
-    );
+    untrusted(&checked);
     let stdout = String::from_utf8_lossy(&checked.stdout);
     let stderr = String::from_utf8_lossy(&checked.stderr);
     assert!(stdout.contains("not a key this reader accepts"), "{stdout}");
@@ -397,8 +407,9 @@ fn host_accept_on_a_required_store_adds_the_key_and_warns() {
     );
 }
 
-/// `vouch check` reports a key the layout does not list, and warns. With no
-/// list it says so and does not warn.
+/// `vouch check` reports a key the layout does not list, warns, and exits
+/// `EXIT_UNTRUSTED_SIGNER`. With no list it says so, does not warn, and
+/// exits 0. A signature that does not cover the file still exits 1.
 #[test]
 fn vouch_check_reports_an_unlisted_key_and_warns() {
     let home = tempfile::tempdir().unwrap();
@@ -446,16 +457,25 @@ fn vouch_check_reports_an_unlisted_key_and_warns() {
         "off",
         &["--url", &store, "vouch", "check", "manifest-sha256.txt"],
     );
-    assert!(
-        out.status.success(),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
+    untrusted(&out);
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stdout.contains("not a key this reader accepts"), "{stdout}");
     assert!(
         stderr.contains("deedar: warning:") && stderr.contains("not a key this reader accepts"),
         "{stderr}"
+    );
+
+    std::fs::write(home.join("manifest-sha256.txt"), "changed\n").unwrap();
+    let broken = deedar(
+        home,
+        "off",
+        &["--url", &store, "vouch", "check", "manifest-sha256.txt"],
+    );
+    assert_eq!(broken.status.code(), Some(1), "{broken:?}");
+    assert!(
+        !String::from_utf8_lossy(&broken.stderr).contains("deedar: warning:"),
+        "{}",
+        String::from_utf8_lossy(&broken.stderr)
     );
 }

@@ -26,6 +26,14 @@ Verb                                                                            
 ``migrate``                                                                         move a store to the current layout
 =================================================================================== ====================================================================================================================================================================================================================================
 
+Exit codes
+==========
+
+0 is the command did what it was asked.
+1 is the command did not: an unknown accession, a path that is not a store, a signature that does not cover the bytes, and the other refusals.
+2, ``EXIT_UNTRUSTED_SIGNER``, is ``check`` and ``vouch check`` when the check finished and the signer is not one this reader accepts.
+Stdout is the report and stderr is ``deedar: warning:``.
+
 Kinds
 =====
 

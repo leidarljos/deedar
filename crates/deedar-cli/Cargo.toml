@@ -27,4 +27,5 @@ deed.workspace = true
 deedar.workspace = true
 
 [dev-dependencies]
+deedar.workspace = true
 tempfile.workspace = true
