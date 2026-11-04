@@ -363,10 +363,10 @@ fn attestation_required_imports_an_unsigned_head_with_the_flag_and_warns() {
     );
 }
 
-/// `host accept` on a store that demands attestation adds the key and warns.
-/// A second accept, once the key is listed, is quiet.
+/// `host accept` on a store that demands attestation refuses, names the
+/// line to add by hand, and leaves the layout as it was.
 #[test]
-fn host_accept_on_a_required_store_adds_the_key_and_warns() {
+fn host_accept_on_a_required_store_refuses() {
     let home = tempfile::tempdir().unwrap();
     let home = home.path();
     let key_path = home.join("host.key");
@@ -374,37 +374,18 @@ fn host_accept_on_a_required_store_adds_the_key_and_warns() {
     let key = key_path.display().to_string();
     let store = url(home, "store");
     ok(home, "off", &["--url", &store, "list"]);
-    std::fs::write(home.join("store/layout"), "1\nattestation = required\n").unwrap();
+    let layout_path = home.join("store/layout");
+    let layout_text = "1\nattestation = required\n";
+    std::fs::write(&layout_path, layout_text).unwrap();
 
     let out = deedar(home, &key, &["--url", &store, "host", "accept"]);
-    assert!(
-        out.status.success(),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "");
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stdout.contains("added as a signer"), "{stdout}");
-    assert!(
-        stderr.contains("deedar: warning:") && stderr.contains("attestation = required"),
-        "{stderr}"
-    );
-    let layout = std::fs::read_to_string(home.join("store/layout")).unwrap();
-    assert!(layout.contains("attestation = required"), "{layout}");
-    assert!(layout.contains("signer = ed25519:"), "{layout}");
-
-    let again = deedar(home, &key, &["--url", &store, "host", "accept"]);
-    assert!(
-        again.status.success(),
-        "{}",
-        String::from_utf8_lossy(&again.stderr)
-    );
-    assert!(String::from_utf8_lossy(&again.stdout).contains("already a signer"));
-    assert!(
-        !String::from_utf8_lossy(&again.stderr).contains("deedar: warning:"),
-        "{}",
-        String::from_utf8_lossy(&again.stderr)
-    );
+    assert!(stderr.contains("attestation = required"), "{stderr}");
+    assert!(stderr.contains("signer = ed25519:"), "{stderr}");
+    assert!(stderr.contains("by hand"), "{stderr}");
+    assert_eq!(std::fs::read_to_string(&layout_path).unwrap(), layout_text);
 }
 
 /// `vouch check` reports a key the layout does not list, warns, and exits

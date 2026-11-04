@@ -533,11 +533,11 @@ fn accepting_the_host_key_keeps_the_layout_mode() {
     assert!(stray.is_empty(), "{stray:?}");
 }
 
-/// A store that demands attestation still gains the signer `host accept`
-/// was asked to add. The demand stays in the layout. A key already listed
-/// is a no-op and prints nothing further.
+/// A store that demands attestation never gains a signer from a tool. Any
+/// process running as the store's owner could otherwise list a key it holds
+/// and sign whatever it likes with it. A key already listed is a no-op.
 #[test]
-fn a_required_store_gains_a_signer_and_keeps_the_demand() {
+fn a_required_store_gains_no_signer_by_accept() {
     let (_guard, url, parent) = isolate();
     drop(open(&url));
     let listed = signing_key(&parent.join("listed.signing"), 30);
@@ -549,23 +549,14 @@ fn a_required_store_gains_a_signer_and_keeps_the_demand() {
     unsafe {
         std::env::set_var("DEEDAR_HOST_SIGNING_KEY", &key);
     }
-    let (line, changed) = open(&url)
+    let err = open(&url)
         .accept_host_signer()
-        .expect("accept adds the key")
-        .expect("a signing key is set");
-    assert!(changed);
-    assert_eq!(line, format!("ed25519:{public}"));
+        .expect_err("a required store widened");
+    let said = err.to_string();
+    assert!(said.contains("attestation = required"), "{said}");
+    assert!(said.contains(&public), "{said}");
     let layout = deedar::store_dir(&url).unwrap().join("layout");
-    let written = fs::read_to_string(&layout).unwrap();
-    assert!(written.contains("attestation = required"), "{written}");
-    assert!(
-        written.contains(&format!("signer = ed25519:{listed}")),
-        "{written}"
-    );
-    assert!(
-        written.contains(&format!("signer = ed25519:{public}")),
-        "{written}"
-    );
+    assert_eq!(fs::read_to_string(&layout).unwrap(), layout_text);
 
     // SAFETY: ENV is held for the whole sitting.
     unsafe {

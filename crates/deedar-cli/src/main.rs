@@ -618,7 +618,7 @@ fn usage() -> String {
      import takes a satchel directory, and --allow-unsigned-head for a missing or unlisted signature\n\
      check takes a satchel directory, --since KEPT_HEAD, --bridge FILE and --keep FILE; vouch takes sign FILE or check FILE\n\
      host says whether the store's layout lists the host signing key, and exits 1 when it does not\n\
-     host accept adds the host signing key to the layout as a signer, warns when that layout says attestation = required, and leaves every other line\n"
+     host accept adds the host signing key to the layout as a signer, and leaves every other line\n"
         .into()
 }
 

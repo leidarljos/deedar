@@ -4,9 +4,9 @@ A command does the thing it was asked. What the layout says about who may
 sign is a label on the result, printed as `deedar: warning:` on stderr, and
 the report says whether a key was accepted.
 
-- `deedar host accept` adds the host key. A layout that says
-  `attestation = required` keeps that line, gains the signer, and the
-  command warns.
+- `deedar host accept` adds the host key, except when the layout says
+  `attestation = required`. That store gains a signer by hand or not at
+  all. The command refuses and names the line to add.
 - `deedar check` and `deedar vouch check` report a signature by a key the
   layout does not list, warn, and exit `EXIT_UNTRUSTED_SIGNER`. The deeds,
   or the file, still check. A signature that does not cover the bytes

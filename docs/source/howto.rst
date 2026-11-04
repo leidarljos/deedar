@@ -120,9 +120,8 @@ entitled to make them, because whoever can check it can mint it.
 
 The demand is worth what guards ``layout`` and the key. An agent that can
 edit the layout can list a key of its own, and an agent running as the
-key's owner can read the key. ``deedar host accept`` adds a signer to a
-store that says required, and warns; the demand stays in the file.
-``evidence`` still fails a deed whose sidecar is not signed by a listed key.
+key's owner can read the key. ``deedar host accept`` refuses to add a signer
+to a store that says required; add the line by hand.
 
 Retract a deed
 ==============
