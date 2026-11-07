@@ -24,6 +24,6 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
         run: |
           set -euo pipefail
-          for p in rfc9162 deedar-deed deedar deedar-cli deedar-mcp; do
+          for p in rfc9162 rfc9162-tiles deedar-deed deedar deedar-cli deedar-mcp; do
             cargo publish --locked -p "$p"
           done

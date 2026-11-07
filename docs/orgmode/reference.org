@@ -161,7 +161,10 @@ of two below the width. =head= is =size= and =root=, signed when a key is
 set. =prove ID= is the inclusion path; =bridge SIZE= the consistency path
 from an earlier head; =audit= the log against the shelves.
 The tree and both proofs are the =rfc9162= crate; =deedar::log= re-exports
-it and keeps the entry format and the file.
+it and keeps the entry format and the file. =rfc9162-tiles= stores such a
+log as C2SP tlog-tiles (256-hash tiles, 256-entry bundles) with key
+sidecars, a manifest and a signed C2SP checkpoint; a reader checks every
+tile against the root and gets the same proof bytes from tiles.
 
 * Environment
 
@@ -176,6 +179,7 @@ it and keeps the entry format and the file.
 |---+---|
 | =deed= | the deed types and canonical encoding |
 | =rfc9162= | the Merkle tree, inclusion and consistency proofs |
+| =rfc9162-tiles= | tlog-tiles storage of that tree: bundles, tiles, key sidecars, checkpoints |
 | =deedar= | store, log, receipts, signatures, attestation |
 | =deedar-cli= | =deedar= |
 | =deedar-mcp= | the read-only Model Context Protocol (MCP) surface |
