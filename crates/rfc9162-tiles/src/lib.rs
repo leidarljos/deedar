@@ -7,14 +7,18 @@
 //! proofs a reader assembles from tiles are the bytes `rfc9162::inclusion_proof`
 //! and `rfc9162::consistency_proof` give over the flat leaf slice.
 
+pub mod bloom;
 pub mod bundle;
 pub mod error;
+pub mod index;
 pub mod layout;
 pub mod log;
 pub mod store;
 pub mod tree;
 
+pub use bloom::Bloom;
 pub use error::{Error, Result};
+pub use index::{KeyFn, Manifest, Sidecar};
 pub use layout::{Layout, Tile};
 pub use log::{Reader, TreeState, Writer};
 pub use store::{MemoryStore, PosixStore, TileStore};

@@ -2,6 +2,7 @@
 //! reopen, refuses a second writer, and quarantines a torn tail on open.
 
 use rfc9162::leaf_hash;
+use rfc9162_tiles::index::no_keys;
 use rfc9162_tiles::layout::{TREE_STATE, TREE_STATE_LOCK};
 use rfc9162_tiles::{Error, MemoryStore, PosixStore, Reader, TileStore, Writer};
 
@@ -22,17 +23,20 @@ fn a_posix_log_reads_back_after_a_reopen() {
     let dir = tempfile::tempdir().unwrap();
     let store = PosixStore::open(dir.path()).unwrap();
     {
-        let mut writer = Writer::open(store.clone()).unwrap();
+        let mut writer = Writer::open(store.clone(), no_keys()).unwrap();
         assert_eq!(writer.size(), 0);
         assert_eq!(writer.root(), rfc9162::root(&[]));
         assert_eq!(writer.append_batch(entries(0..300)).unwrap(), 0..300);
         assert_eq!(writer.append(&entry(300)).unwrap(), 300);
         assert!(store.exists(TREE_STATE_LOCK).unwrap());
         // A second writer is refused while the first holds the lock.
-        assert!(matches!(Writer::open(store.clone()), Err(Error::Locked(_))));
+        assert!(matches!(
+            Writer::open(store.clone(), no_keys()),
+            Err(Error::Locked(_))
+        ));
     }
     assert!(!store.exists(TREE_STATE_LOCK).unwrap());
-    let mut writer = Writer::open(store.clone()).unwrap();
+    let mut writer = Writer::open(store.clone(), no_keys()).unwrap();
     assert_eq!(writer.size(), 301);
     assert_eq!(writer.root(), rfc9162::root(&leaves(301)));
     assert_eq!(
@@ -42,7 +46,7 @@ fn a_posix_log_reads_back_after_a_reopen() {
     writer.append_batch(entries(301..600)).unwrap();
     drop(writer);
 
-    let reader = Reader::open(store.clone()).unwrap();
+    let reader = Reader::open(store.clone(), no_keys()).unwrap();
     assert_eq!(reader.size(), 600);
     assert_eq!(reader.root(), rfc9162::root(&leaves(600)));
     for i in [0u64, 1, 255, 256, 300, 301, 511, 512, 599] {
@@ -84,7 +88,7 @@ fn a_posix_log_reads_back_after_a_reopen() {
 #[test]
 fn a_torn_tail_is_quarantined_not_adopted() {
     let store = MemoryStore::new();
-    let mut writer = Writer::open(store.clone()).unwrap();
+    let mut writer = Writer::open(store.clone(), no_keys()).unwrap();
     writer.append_batch(entries(0..300)).unwrap();
     let root = writer.root();
     drop(writer);
@@ -100,7 +104,7 @@ fn a_torn_tail_is_quarantined_not_adopted() {
     store.put("tile/index/002", b"junk").unwrap();
     store.put("tile/odd", b"junk").unwrap();
 
-    let mut writer = Writer::open(store.clone()).unwrap();
+    let mut writer = Writer::open(store.clone(), no_keys()).unwrap();
     assert_eq!(writer.size(), 300);
     assert_eq!(writer.root(), root);
     let (moved, dir) = writer.quarantined();
@@ -134,7 +138,7 @@ fn a_torn_tail_is_quarantined_not_adopted() {
     // The log goes on from 300.
     assert_eq!(writer.append(&entry(300)).unwrap(), 300);
     drop(writer);
-    let reader = Reader::open(store.clone()).unwrap();
+    let reader = Reader::open(store.clone(), no_keys()).unwrap();
     assert_eq!(reader.get(300).unwrap(), Some(entry(300)));
     assert_eq!(reader.root(), rfc9162::root(&leaves(301)));
 }
@@ -142,11 +146,11 @@ fn a_torn_tail_is_quarantined_not_adopted() {
 #[test]
 fn tiles_without_a_tree_state_are_all_torn() {
     let store = MemoryStore::new();
-    let mut writer = Writer::open(store.clone()).unwrap();
+    let mut writer = Writer::open(store.clone(), no_keys()).unwrap();
     writer.append_batch(entries(0..10)).unwrap();
     drop(writer);
     store.delete(TREE_STATE).unwrap();
-    let writer = Writer::open(store.clone()).unwrap();
+    let writer = Writer::open(store.clone(), no_keys()).unwrap();
     assert_eq!(writer.size(), 0);
     assert_eq!(writer.quarantined().0.len(), 2);
     assert!(store.list("tile").unwrap().is_empty());
@@ -155,7 +159,7 @@ fn tiles_without_a_tree_state_are_all_torn() {
 #[test]
 fn an_entry_past_65535_bytes_changes_nothing() {
     let store = MemoryStore::new();
-    let mut writer = Writer::open(store.clone()).unwrap();
+    let mut writer = Writer::open(store.clone(), no_keys()).unwrap();
     writer.append_batch(entries(0..3)).unwrap();
     let before = store.list("").unwrap();
     let result = writer.append_batch(vec![entry(3), vec![0u8; 65536]]);
@@ -168,18 +172,18 @@ fn an_entry_past_65535_bytes_changes_nothing() {
 #[test]
 fn a_reader_refuses_an_entry_that_does_not_hash_to_its_leaf() {
     let store = MemoryStore::new();
-    let mut writer = Writer::open(store.clone()).unwrap();
+    let mut writer = Writer::open(store.clone(), no_keys()).unwrap();
     writer.append_batch(entries(0..5)).unwrap();
     drop(writer);
     let mut bytes = store.get("tile/entries/000.p/5").unwrap().unwrap();
     let last = bytes.len() - 1;
     bytes[last] ^= 1;
     store.put("tile/entries/000.p/5", &bytes).unwrap();
-    let reader = Reader::open(store.clone()).unwrap();
+    let reader = Reader::open(store.clone(), no_keys()).unwrap();
     assert!(matches!(reader.get(4), Err(Error::Corrupt { .. })));
     // The writer refuses to adopt it too.
     assert!(matches!(
-        Writer::open(store.clone()),
+        Writer::open(store.clone(), no_keys()),
         Err(Error::Corrupt { .. })
     ));
     assert!(!store.exists(TREE_STATE_LOCK).unwrap());

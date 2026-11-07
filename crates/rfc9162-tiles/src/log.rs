@@ -3,18 +3,22 @@
 //! check them against the tree.
 //!
 //! Write order follows Tessera's POSIX storage: entry bundles, hash tiles,
-//! then `.state/treeState` last, every file whole or not at all. On open the
-//! writer moves anything the tree state does not cover to `.state/torn-<utc>`
-//! and never adopts it silently.
+//! index sidecars, the manifest, then `.state/treeState` last, every file
+//! whole or not at all. On open the writer moves anything the tree state does
+//! not cover to `.state/torn-<utc>` and never adopts it silently, and rebuilds
+//! a sidecar or manifest row a sealed bundle lacks.
 
 use std::ops::Range;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use sha2::{Digest, Sha256};
+
 use crate::bundle::{decode_bundle, encode_bundle};
 use crate::error::{Error, Result};
+use crate::index::{identity, KeyFn, Manifest, Sidecar};
 use crate::layout::{
-    entries_path, parse_entries_path, parse_index_path, Layout, Tile, MAX_ENTRY_LEN, TILE_WIDTH,
-    TREE_STATE, TREE_STATE_LOCK,
+    entries_path, index_path, parse_entries_path, parse_index_path, Layout, Tile, MAX_ENTRY_LEN,
+    TILE_WIDTH, TREE_STATE, TREE_STATE_LOCK,
 };
 use crate::store::TileStore;
 use crate::tree::{encode_tile, Frontier, Hash, TileHashReader};
@@ -78,28 +82,36 @@ impl TreeState {
 /// The one writer of a log. Holds `.state/treeState.lock` from open to drop.
 pub struct Writer<S: TileStore> {
     store: S,
+    keys: KeyFn,
     frontier: Frontier,
     partial: Vec<Vec<u8>>,
+    manifest: Manifest,
     quarantined: Vec<String>,
     torn_dir: Option<String>,
 }
 
 impl<S: TileStore> Writer<S> {
     /// Opens the log on `store`, takes the writer lock, quarantines a torn
-    /// tail and loads the frontier. `Error::Locked` when another writer holds
-    /// the lock; a lock left by a crashed writer has to be removed by hand.
-    pub fn open(store: S) -> Result<Self> {
+    /// tail, loads the frontier and completes the sidecars and manifest of
+    /// every sealed bundle. `keys` derives the lookup keys of an entry from
+    /// its bytes ([`crate::index::no_keys`] for the identity hash alone); a
+    /// reader has to use the same function. `Error::Locked` when another
+    /// writer holds the lock; a lock left by a crashed writer has to be
+    /// removed by hand.
+    pub fn open(store: S, keys: KeyFn) -> Result<Self> {
         let body = format!("{}\n", std::process::id());
         if !store.create_new(TREE_STATE_LOCK, body.as_bytes())? {
             return Err(Error::Locked(TREE_STATE_LOCK.to_string()));
         }
-        match Self::load(&store) {
-            Ok((frontier, partial, quarantined, torn_dir)) => Ok(Self {
+        match Self::load(&store, &keys) {
+            Ok(loaded) => Ok(Self {
                 store,
-                frontier,
-                partial,
-                quarantined,
-                torn_dir,
+                keys,
+                frontier: loaded.frontier,
+                partial: loaded.partial,
+                manifest: loaded.manifest,
+                quarantined: loaded.quarantined,
+                torn_dir: loaded.torn_dir,
             }),
             Err(e) => {
                 let _ = store.delete(TREE_STATE_LOCK);
@@ -108,8 +120,7 @@ impl<S: TileStore> Writer<S> {
         }
     }
 
-    #[allow(clippy::type_complexity)]
-    fn load(store: &S) -> Result<(Frontier, Vec<Vec<u8>>, Vec<String>, Option<String>)> {
+    fn load(store: &S, keys: &KeyFn) -> Result<Loaded> {
         let state = TreeState::read(store)?.unwrap_or(TreeState {
             size: 0,
             root: rfc9162::root(&[]),
@@ -128,7 +139,14 @@ impl<S: TileStore> Writer<S> {
             });
         }
         let partial = read_partial_bundle(store, &frontier)?;
-        Ok((frontier, partial, quarantined, torn_dir))
+        let manifest = repair_index(store, keys, &frontier)?;
+        Ok(Loaded {
+            frontier,
+            partial,
+            manifest,
+            quarantined,
+            torn_dir,
+        })
     }
 
     /// The store the writer writes.
@@ -230,9 +248,27 @@ impl<S: TileStore> Writer<S> {
         Ok(start..end)
     }
 
-    /// Hook for what a sealed bundle gets beside its bytes.
-    fn seal(&mut self, _sealed: &[(u64, Vec<Vec<u8>>)]) -> Result<()> {
-        Ok(())
+    /// Writes the sidecar of each sealed bundle, then the manifest with their
+    /// rows.
+    fn seal(&mut self, sealed: &[(u64, Vec<Vec<u8>>)]) -> Result<()> {
+        if sealed.is_empty() {
+            return Ok(());
+        }
+        for (index, bundle) in sealed {
+            let sidecar = Sidecar::build(bundle, &self.keys);
+            let bytes = sidecar.to_bytes();
+            self.store.put(&index_path(*index), &bytes)?;
+            self.manifest
+                .bundles
+                .push(Manifest::row(*index, &sidecar, &bytes));
+        }
+        self.manifest.write(&self.store)
+    }
+
+    /// The manifest over the sealed bundles.
+    #[must_use]
+    pub fn manifest(&self) -> &Manifest {
+        &self.manifest
     }
 
     fn remove_partials(&self, full_path: &str) -> Result<()> {
@@ -247,6 +283,49 @@ impl<S: TileStore> Drop for Writer<S> {
     fn drop(&mut self) {
         let _ = self.store.delete(TREE_STATE_LOCK);
     }
+}
+
+/// What open loads before the writer exists.
+struct Loaded {
+    frontier: Frontier,
+    partial: Vec<Vec<u8>>,
+    manifest: Manifest,
+    quarantined: Vec<String>,
+    torn_dir: Option<String>,
+}
+
+/// The manifest with a row and a sidecar for every sealed bundle: rows past
+/// the sealed bundles are dropped, missing or differing sidecars rebuilt from
+/// the bundle, and the manifest rewritten when anything changed.
+fn repair_index(store: &impl TileStore, keys: &KeyFn, frontier: &Frontier) -> Result<Manifest> {
+    let full = Layout::new(frontier.size()).full_bundles();
+    let mut manifest = Manifest::read(store)?;
+    let mut changed = false;
+    if manifest.bundles.len() as u64 > full {
+        manifest.bundles.truncate(full as usize);
+        changed = true;
+    }
+    for index in manifest.bundles.len() as u64..full {
+        let path = entries_path(index, TILE_WIDTH as u16);
+        let bytes = store.get(&path)?.ok_or_else(|| Error::Corrupt {
+            path: path.clone(),
+            reason: "missing".to_string(),
+        })?;
+        let entries = decode_bundle(&path, &bytes)?;
+        let sidecar = Sidecar::build(&entries, keys);
+        let bytes = sidecar.to_bytes();
+        if store.get(&index_path(index))?.as_deref() != Some(bytes.as_slice()) {
+            store.put(&index_path(index), &bytes)?;
+        }
+        manifest
+            .bundles
+            .push(Manifest::row(index, &sidecar, &bytes));
+        changed = true;
+    }
+    if changed {
+        manifest.write(store)?;
+    }
+    Ok(manifest)
 }
 
 fn read_partial_bundle(store: &impl TileStore, frontier: &Frontier) -> Result<Vec<Vec<u8>>> {
@@ -364,25 +443,85 @@ fn utc_stamp() -> String {
 /// the checked tiles hold for its index.
 pub struct Reader<S: TileStore> {
     hashes: TileHashReader<S>,
+    keys: KeyFn,
+    manifest: Manifest,
 }
 
 impl<S: TileStore> Reader<S> {
-    /// A reader at the tree state the store holds; the empty tree for a store
-    /// without one.
-    pub fn open(store: S) -> Result<Self> {
+    /// A reader at the tree state the store holds, with the log's key
+    /// function; the empty tree for a store without a state.
+    pub fn open(store: S, keys: KeyFn) -> Result<Self> {
         let state = TreeState::read(&store)?.unwrap_or(TreeState {
             size: 0,
             root: rfc9162::root(&[]),
         });
-        Ok(Self::at(store, state.size, state.root))
+        Self::at(store, state.size, state.root, keys)
     }
 
     /// A reader that trusts `root` to be the root at `size`, which is how a
     /// verified checkpoint opens a log.
-    pub fn at(store: S, size: u64, root: Hash) -> Self {
-        Self {
+    pub fn at(store: S, size: u64, root: Hash, keys: KeyFn) -> Result<Self> {
+        let mut manifest = Manifest::read(&store)?;
+        let full = Layout::new(size).full_bundles();
+        manifest.bundles.truncate(full as usize);
+        Ok(Self {
             hashes: TileHashReader::new(store, size, root),
+            keys,
+            manifest,
+        })
+    }
+
+    /// The manifest rows for the sealed bundles the root covers.
+    #[must_use]
+    pub fn manifest(&self) -> &Manifest {
+        &self.manifest
+    }
+
+    /// Indices of every entry carrying `key`, ascending: through the
+    /// manifest ranges, the filters and the sidecars for sealed bundles, then
+    /// a scan of the unsealed one. A key is an identity hash or a value the
+    /// key function derives; each hit is checked on the entry itself.
+    pub fn find(&self, key: &[u8]) -> Result<Vec<u64>> {
+        let mut found = Vec::new();
+        for row in self.manifest.candidates(key) {
+            let path = index_path(row.index);
+            let bytes = self.store().get(&path)?.ok_or_else(|| Error::Corrupt {
+                path: path.clone(),
+                reason: "missing".to_string(),
+            })?;
+            if rfc9162::hex(&Sha256::digest(&bytes)) != row.sidecar {
+                return Err(Error::Corrupt {
+                    path,
+                    reason: "does not hash to its manifest row".to_string(),
+                });
+            }
+            let sidecar = Sidecar::from_bytes(&path, &bytes)?;
+            let offsets = sidecar.lookup(key);
+            if offsets.is_empty() {
+                continue;
+            }
+            let entries = self.bundle(row.index)?;
+            for offset in offsets {
+                let entry = &entries[usize::from(offset)];
+                if self.carries(entry, key) {
+                    found.push(row.index * TILE_WIDTH + u64::from(offset));
+                }
+            }
         }
+        let layout = Layout::new(self.size());
+        if layout.partial_bundle_width() > 0 {
+            let first = layout.full_bundles() * TILE_WIDTH;
+            for (offset, entry) in self.bundle(layout.full_bundles())?.iter().enumerate() {
+                if self.carries(entry, key) {
+                    found.push(first + offset as u64);
+                }
+            }
+        }
+        Ok(found)
+    }
+
+    fn carries(&self, entry: &[u8], key: &[u8]) -> bool {
+        identity(entry) == key || (self.keys)(entry).iter().any(|k| k == key)
     }
 
     /// The store behind the reader.
