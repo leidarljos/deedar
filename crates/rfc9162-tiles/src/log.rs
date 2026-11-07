@@ -14,11 +14,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use sha2::{Digest, Sha256};
 
 use crate::bundle::{decode_bundle, encode_bundle};
+use crate::checkpoint::{self, Checkpoint, Note, Signer, Verifier};
 use crate::error::{Error, Result};
 use crate::index::{identity, KeyFn, Manifest, Sidecar};
 use crate::layout::{
-    entries_path, index_path, parse_entries_path, parse_index_path, Layout, Tile, MAX_ENTRY_LEN,
-    TILE_WIDTH, TREE_STATE, TREE_STATE_LOCK,
+    entries_path, index_path, parse_entries_path, parse_index_path, Layout, Tile, CHECKPOINT,
+    MAX_ENTRY_LEN, PUBLISH_LOCK, TILE_WIDTH, TREE_STATE, TREE_STATE_LOCK,
 };
 use crate::store::TileStore;
 use crate::tree::{encode_tile, Frontier, Hash, TileHashReader};
@@ -271,6 +272,41 @@ impl<S: TileStore> Writer<S> {
         &self.manifest
     }
 
+    /// Signs the tree state as a C2SP checkpoint under `origin` and writes
+    /// it at `checkpoint`, holding `.state/publish.lock` meanwhile. A
+    /// checkpoint already published for a larger size is never replaced, so
+    /// the signer never signs a checkpoint inconsistent with one it signed.
+    /// Returns the note.
+    pub fn checkpoint(&self, signer: &Signer, origin: &str) -> Result<Note> {
+        let body = format!("{}\n", std::process::id());
+        if !self.store.create_new(PUBLISH_LOCK, body.as_bytes())? {
+            return Err(Error::Locked(PUBLISH_LOCK.to_string()));
+        }
+        let result = self.publish(signer, origin);
+        let _ = self.store.delete(PUBLISH_LOCK);
+        result
+    }
+
+    fn publish(&self, signer: &Signer, origin: &str) -> Result<Note> {
+        if let Some(bytes) = self.store.get(CHECKPOINT)? {
+            let text = String::from_utf8(bytes).map_err(|_| Error::Corrupt {
+                path: CHECKPOINT.to_string(),
+                reason: "not UTF-8".to_string(),
+            })?;
+            let published = Checkpoint::parse(&Note::parse(&text)?.text)?;
+            if published.origin == origin && published.size > self.size() {
+                return Err(Error::OutOfRange(format!(
+                    "a checkpoint for size {} is published, the log is at {}",
+                    published.size,
+                    self.size()
+                )));
+            }
+        }
+        let note = signer.sign(&Checkpoint::new(origin, self.size(), self.root()));
+        self.store.put(CHECKPOINT, note.to_text().as_bytes())?;
+        Ok(note)
+    }
+
     fn remove_partials(&self, full_path: &str) -> Result<()> {
         for path in self.store.list(&format!("{full_path}.p"))? {
             self.store.delete(&path)?;
@@ -469,6 +505,35 @@ impl<S: TileStore> Reader<S> {
             keys,
             manifest,
         })
+    }
+
+    /// A reader at the store's published checkpoint, once a key in `trusted`
+    /// has signed it; the checkpoint's origin has to be `origin`. This is how
+    /// a reader that does not trust the writer's tree state opens a log.
+    pub fn open_checkpoint(
+        store: S,
+        origin: &str,
+        trusted: &[Verifier],
+        keys: KeyFn,
+    ) -> Result<Self> {
+        let bytes = store.get(CHECKPOINT)?.ok_or_else(|| Error::Corrupt {
+            path: CHECKPOINT.to_string(),
+            reason: "missing".to_string(),
+        })?;
+        let text = String::from_utf8(bytes).map_err(|_| Error::Corrupt {
+            path: CHECKPOINT.to_string(),
+            reason: "not UTF-8".to_string(),
+        })?;
+        let note = Note::parse(&text)?;
+        checkpoint::verify(&note, trusted)?;
+        let published = Checkpoint::parse(&note.text)?;
+        if published.origin != origin {
+            return Err(Error::Signature(format!(
+                "checkpoint is for {}, not {origin}",
+                published.origin
+            )));
+        }
+        Self::at(store, published.size, published.root, keys)
     }
 
     /// The manifest rows for the sealed bundles the root covers.

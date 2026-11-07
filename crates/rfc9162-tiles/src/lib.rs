@@ -5,10 +5,14 @@
 //!
 //! The root over the tiles is `rfc9162::root` over the same leaves, and the
 //! proofs a reader assembles from tiles are the bytes `rfc9162::inclusion_proof`
-//! and `rfc9162::consistency_proof` give over the flat leaf slice.
+//! and `rfc9162::consistency_proof` give over the flat leaf slice. The head
+//! is a C2SP checkpoint, an Ed25519 signed note, with witness cosignatures
+//! checked as cosignature/v1.
 
+pub mod base64;
 pub mod bloom;
 pub mod bundle;
+pub mod checkpoint;
 pub mod error;
 pub mod index;
 pub mod layout;
@@ -17,6 +21,7 @@ pub mod store;
 pub mod tree;
 
 pub use bloom::Bloom;
+pub use checkpoint::{Checkpoint, Cosigner, Note, Signer, Verifier};
 pub use error::{Error, Result};
 pub use index::{KeyFn, Manifest, Sidecar};
 pub use layout::{Layout, Tile};
