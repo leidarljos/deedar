@@ -5,8 +5,6 @@ members = [
     "crates/deedar",
     "crates/deedar-cli",
     "crates/deedar-mcp",
-    "crates/rfc9162",
-    "crates/rfc9162-tiles",
 ]
 
 [workspace.package]
@@ -24,9 +22,12 @@ homepage = "https://leidarljos.github.io/deedar/"
 # [[[cog import versions; cog.out(versions.pins()) ]]]
 deed = { package = "deedar-deed", path = "crates/deed", version = "0.6.1" }
 deedar = { path = "crates/deedar", version = "0.6.1" }
-rfc9162 = { path = "crates/rfc9162", version = "0.6.1" }
-rfc9162-tiles = { path = "crates/rfc9162-tiles", version = "0.6.1" }
 # [[[end]]]
+# The Merkle tree and its tiled storage are the rfc9162 repository
+# (https://github.com/leidarljos/rfc9162). rfc9162-tiles comes from
+# that repository until its first crates.io release.
+rfc9162 = "0.6.1"
+rfc9162-tiles = { git = "https://github.com/leidarljos/rfc9162", version = "0.6.1" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
