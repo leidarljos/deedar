@@ -373,6 +373,72 @@ impl<S: TileStore> TileHashReader<S> {
         let right = self.range_root(lo + split, hi)?;
         Ok(rfc9162::node_hash(&left, &right))
     }
+    /// The audit path for the leaf at `index`, RFC 9162 section 2.1.3,
+    /// assembled from tiles: the bytes `rfc9162::inclusion_proof` gives over
+    /// the flat leaf slice. Nothing for an index past the size.
+    pub fn inclusion_proof(&self, index: u64) -> Result<Option<Vec<Hash>>> {
+        if index >= self.size {
+            return Ok(None);
+        }
+        let mut path = Vec::new();
+        self.audit_path(0, self.size, index, &mut path)?;
+        Ok(Some(path))
+    }
+
+    fn audit_path(&self, lo: u64, hi: u64, index: u64, path: &mut Vec<Hash>) -> Result<()> {
+        if hi - lo == 1 {
+            return Ok(());
+        }
+        let split = lo + split_point(hi - lo);
+        if index < split {
+            self.audit_path(lo, split, index, path)?;
+            path.push(self.range_root(split, hi)?);
+        } else {
+            self.audit_path(split, hi, index, path)?;
+            path.push(self.range_root(lo, split)?);
+        }
+        Ok(())
+    }
+
+    /// The consistency proof that the tree of `old` leaves is a prefix of
+    /// this one, RFC 9162 section 2.1.4, assembled from tiles: the bytes
+    /// `rfc9162::consistency_proof` gives over the flat leaf slice. Nothing
+    /// when `old` is zero or past the size.
+    pub fn consistency_proof(&self, old: u64) -> Result<Option<Vec<Hash>>> {
+        if old == 0 || old > self.size {
+            return Ok(None);
+        }
+        let mut path = Vec::new();
+        self.subproof(0, self.size, old, true, &mut path)?;
+        Ok(Some(path))
+    }
+
+    /// The RFC's SUBPROOF over leaves `[lo, hi)`; `known` is whether the
+    /// reader already holds the root of the subtree being described.
+    fn subproof(
+        &self,
+        lo: u64,
+        hi: u64,
+        old: u64,
+        known: bool,
+        path: &mut Vec<Hash>,
+    ) -> Result<()> {
+        if old == hi - lo {
+            if !known {
+                path.push(self.range_root(lo, hi)?);
+            }
+            return Ok(());
+        }
+        let split = split_point(hi - lo);
+        if old <= split {
+            self.subproof(lo, lo + split, old, known, path)?;
+            path.push(self.range_root(lo + split, hi)?);
+        } else {
+            self.subproof(lo + split, hi, old - split, false, path)?;
+            path.push(self.range_root(lo, lo + split)?);
+        }
+        Ok(())
+    }
 }
 
 /// The largest power of two strictly below `width`, where RFC 9162 divides a

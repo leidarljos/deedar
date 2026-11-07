@@ -417,6 +417,18 @@ impl<S: TileStore> Reader<S> {
         Ok(Some(entries[usize::from(offset)].clone()))
     }
 
+    /// The inclusion proof for entry `index`, from checked tiles; the bytes
+    /// `rfc9162::inclusion_proof` gives over the flat leaf slice.
+    pub fn inclusion(&self, index: u64) -> Result<Option<Vec<Hash>>> {
+        self.hashes.inclusion_proof(index)
+    }
+
+    /// The consistency proof from a tree of `old` entries to this one, from
+    /// checked tiles; the bytes `rfc9162::consistency_proof` gives.
+    pub fn consistency(&self, old: u64) -> Result<Option<Vec<Hash>>> {
+        self.hashes.consistency_proof(old)
+    }
+
     /// Every entry of bundle `index`, each checked against its leaf hash.
     pub fn bundle(&self, index: u64) -> Result<Vec<Vec<u8>>> {
         let layout = Layout::new(self.size());
