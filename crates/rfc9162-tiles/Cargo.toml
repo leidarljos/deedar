@@ -1,0 +1,17 @@
+[package]
+name = "rfc9162-tiles"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+description = "Tiled, indexed storage for an RFC 9162 log: tlog-tiles layout, entry bundles, key sidecars, C2SP checkpoints"
+keywords = ["merkle", "transparency", "tlog-tiles", "checkpoint", "log"]
+categories = ["cryptography", "filesystem"]
+
+[dependencies]
+rfc9162.workspace = true
+sha2.workspace = true

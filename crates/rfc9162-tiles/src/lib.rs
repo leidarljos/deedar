@@ -1,0 +1,18 @@
+//! Tiled, indexed storage for an RFC 9162 log, laid out as C2SP tlog-tiles
+//! (<https://c2sp.org/tlog-tiles>): 256-hash tiles, 256-entry bundles, and the
+//! tree [`rfc9162`] hashes. Any tlog-tiles client reads the tree. The index
+//! sidecars beside it are this crate's addition and tlog clients ignore them.
+//!
+//! The root over the tiles is `rfc9162::root` over the same leaves, and the
+//! proofs a reader assembles from tiles are the bytes `rfc9162::inclusion_proof`
+//! and `rfc9162::consistency_proof` give over the flat leaf slice.
+
+pub mod error;
+pub mod layout;
+pub mod store;
+pub mod tree;
+
+pub use error::{Error, Result};
+pub use layout::{Layout, Tile};
+pub use store::{MemoryStore, PosixStore, TileStore};
+pub use tree::{Frontier, Hash, TileHashReader};

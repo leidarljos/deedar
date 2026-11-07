@@ -39,14 +39,16 @@ def pins() -> str:
     the version that crate publishes, or the published package does not
     resolve. ``deed`` is the library package ``deedar-deed`` in
     ``crates/deed``. ``deedar`` is the store crate. ``rfc9162`` is the
-    Merkle log the store crate builds on. The other members depend on these
-    and are not themselves required by path.
+    Merkle log the store crate builds on. ``rfc9162-tiles`` is the tiled
+    storage for that log. The other members depend on these and are not
+    themselves required by path.
     """
     current = version()
     lines = [
         f'deed = {{ package = "deedar-deed", path = "crates/deed", version = "{current}" }}',
         f'deedar = {{ path = "crates/deedar", version = "{current}" }}',
         f'rfc9162 = {{ path = "crates/rfc9162", version = "{current}" }}',
+        f'rfc9162-tiles = {{ path = "crates/rfc9162-tiles", version = "{current}" }}',
     ]
     return "\n".join(lines) + "\n"
 

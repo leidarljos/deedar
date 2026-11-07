@@ -6,6 +6,7 @@ members = [
     "crates/deedar-cli",
     "crates/deedar-mcp",
     "crates/rfc9162",
+    "crates/rfc9162-tiles",
 ]
 
 [workspace.package]
@@ -24,6 +25,7 @@ homepage = "https://leidarljos.github.io/deedar/"
 deed = { package = "deedar-deed", path = "crates/deed", version = "0.6.1" }
 deedar = { path = "crates/deedar", version = "0.6.1" }
 rfc9162 = { path = "crates/rfc9162", version = "0.6.1" }
+rfc9162-tiles = { path = "crates/rfc9162-tiles", version = "0.6.1" }
 # [[[end]]]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
