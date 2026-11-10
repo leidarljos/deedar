@@ -25,6 +25,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.97.1
+          components: rustfmt, clippy
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -40,6 +44,12 @@ jobs:
           node-version: "22"
       # Exit 2 on any finding the .impeccable config does not ignore.
       - run: npx -y impeccable@4.5.2 detect docs/build
+      - name: Copy rustdoc next to the HTML
+        run: |
+          set -euo pipefail
+          rm -rf docs/build/rustdoc
+          mkdir -p docs/build/rustdoc
+          cp -a target/doc/. docs/build/rustdoc/
       - uses: actions/configure-pages@v5
         if: github.event_name != 'pull_request'
         with:

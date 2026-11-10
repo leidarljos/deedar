@@ -4,20 +4,35 @@
   <img src="docs/logo/icon.svg" width="120" height="120" alt="deedar: a receipt pinned through a gold seal">
 </p>
 
-What did this unit of work produce? A deed is the frozen record of one
-product: the bytes by hash, who made them, what they were made from. Every
-deed goes into an append-only Merkle log, so a store can show a deed was
-there before anyone asked and cannot drop one unnoticed. A tracker or a pack
-cites a deed by its accession and never copies the bytes.
+deedar stores the product of one unit of work as a deed: the bytes by
+hash, who produced them, and the deeds they were made from. Each deed
+is appended to a Merkle log. A reader who kept a head can show the deed
+was in that log. A tracker or a pack cites the accession. The bytes
+stay in the store.
 
 Docs: https://leidarljos.github.io/deedar/
 
+## Why
+
+The next unit of work opens the product by accession. A better take is
+a new deed that `--supersedes` the old one. `current` prints the tip;
+over several ids it says which citations moved. The log is RFC 9162
+hashing (doi:10.17487/RFC9162): inclusion receipts travel with an
+export, `log bridge` proves a log grew from a head you kept, and
+`log audit` finds a deed that was logged and is gone.
+
+## Guides
+
 | Page | What it answers |
 |---|---|
+| [Installation](https://leidarljos.github.io/deedar/install.html) | Linux, macOS, and Windows |
 | [Getting started](https://leidarljos.github.io/deedar/getting-started.html) | Freeze a file, prove it, supersede it |
 | [How-to](https://leidarljos.github.io/deedar/howto.html) | Export, check, hand a receipt |
+| [Concepts](https://leidarljos.github.io/deedar/concepts.html) | Bytes, deed, log, bag, citation |
+| [Explanation](https://leidarljos.github.io/deedar/explanation.html) | What a signature covers, and what the log adds |
 | [Reference](https://leidarljos.github.io/deedar/reference.html) | Kinds, accessions, the log |
-| [Explanation](https://leidarljos.github.io/deedar/explanation.html) | Why a citation names a deed |
+| [API reference](https://leidarljos.github.io/deedar/api.html) | `deed` and `deedar`, generated from rustdoc |
+| [Changelog](https://leidarljos.github.io/deedar/changelog.html) | What each version changed |
 
 The seat that cites a deed is documented at https://leidarljos.github.io.
 
@@ -29,7 +44,8 @@ $ export DEEDAR_URL=file://$HOME/.local/share/deedar/store
 ```
 
 `deedar-mcp` is the read-only MCP surface. There is no daemon: each command
-opens the store.
+opens the store. Release archives, crates.io, and a checkout install are
+on the installation page, including `DEEDAR_HOST_SIGNING_KEY`.
 
 ## First minute
 
@@ -73,14 +89,11 @@ the head is unsigned, so every proof above is against a head this bag asserted a
 
 ## What holds
 
-- A deed is never edited. A better take is a new deed that `--supersedes`
+- A deed stays as written. A better take is a new deed that `--supersedes`
   the old one. `current` prints the tip; over several ids it says which
   citations moved.
 - `evidence`, `current` and `export` take one id, several, or `-` from a
   pipe, and exit non-zero on any failure.
-- The log is RFC 9162 hashing (doi:10.17487/RFC9162): inclusion receipts
-  travel with an export, `log bridge` proves a log grew from a head you
-  kept, `log audit` finds a deed that was logged and is gone.
 - A configured host key signs heads, sidecars and satchel manifests. With signing off, nothing is signed. A receiver lists accepted keys in its store's `layout`.
   `deedar host accept` adds this host's own key there, except in a store
   whose layout says `attestation = required`.
@@ -88,7 +101,7 @@ the head is unsigned, so every proof above is against a head this bag asserted a
   account on one machine. Seats and agents under that account share it, and
   `--agent` is what the caller says. See the explanation page for keeping
   the key out of an agent's reach.
-- Bytes and deeds are content addressed; log appends take a file lock, so
+- Bytes and deeds are content addressed. Log appends take a file lock, so
   two processes minting at once write whole lines.
 
 ## Kinds

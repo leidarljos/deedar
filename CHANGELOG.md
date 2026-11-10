@@ -22,12 +22,12 @@ Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
   anything is written, so a frozen, tombstoned or differently logged
   accession, or a source or successor neither side has, writes nothing.
   The head has to be signed by a key the layout lists.
-  `--allow-unsigned-head` takes a head that is not, whether the
-  signature is missing or by some other key. Deleting `head` is that
+  `--allow-unsigned-head` takes a head whose signature is missing or
+  from some other key. Deleting `head` is that
   same case. `attestation = required` refuses both, and `deedar check`
   still refuses a signer it was not given. Importing the same bag
   again writes nothing. A receipt already kept stays against the head
-  it names: a later bag is not refused for carrying a grown head, and
+  it names: a later bag carrying a grown head is kept, and
   a missing head is filled only from that same head. A proof this
   store does not have yet is written with its head together. A link
   that names a deed the bag also carries has to name that deed's
@@ -51,7 +51,7 @@ Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
 - A `sha256:` path is accepted only when the suffix is 64 lowercase
   hex digits. `create`, `export`, `leave` and `evidence` refuse any
   other suffix, so `sha256:../planted` is neither read nor written.
-- `check` and `import` refuse a deed folder whose name is not the
+- `check` and `import` refuse a deed folder whose name differs from the
   accession in its `deed.bin` and `proof.txt`. The head signs each
   folder's links under the folder's name, so another deed's files moved
   into a revision's folder kept the signature, and `current` of the
@@ -74,8 +74,8 @@ Versions follow semver at 0.x: a minor bump is a feature, a patch is a fix.
 - The `sha256:../planted` export test requires that no file the export
   left behind holds the planted bytes, as well as the refusal.
 - When `--allow-unsigned-head` takes a head signed by a key the layout
-  does not list, the import report says that key is not one this store
-  accepts and that the head was taken as unsigned. It said no signer
+  does not list, the import report says that key falls outside the keys
+  this store accepts and that the head was taken as unsigned. It said no signer
   list was given. `Handover` gains `signers_listed`.
 
 ## 0.5.0 (2026-10-26)

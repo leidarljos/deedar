@@ -2,7 +2,8 @@
 //! RFC 9162 (doi:10.17487/RFC9162): leaf `SHA-256(0x00 || entry)`, node
 //! `SHA-256(0x01 || left || right)`. Inclusion proofs catch a dropped deed;
 //! consistency proofs catch a rewritten log. Signatures alone bind neither.
-//! No gossip: a holder showing two consistent logs to two readers is not caught.
+//! Gossip lives outside this file. Two consistent logs shown to two readers
+//! both verify here.
 
 use sha2::{Digest, Sha256};
 
@@ -276,8 +277,8 @@ pub fn verify_consistency(
     last == 0 && hex(&from_old) == old_root && hex(&from_new) == new_root
 }
 
-/// A 32 byte hash from the lower-case hex [`hex`] writes, or nothing when the
-/// text is not that.
+/// A 32 byte hash from the lower-case hex [`hex`] writes. Any other text
+/// yields nothing.
 #[must_use]
 pub fn from_hex(text: &str) -> Option<[u8; 32]> {
     // `from_str_radix` alone also reads `+b` as `0b` and `B` as `b`, so a

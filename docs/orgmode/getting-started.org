@@ -1,11 +1,14 @@
 #+title: Getting started
 #+options: toc:nil num:nil
 
+Install the binary first, on the [[file:install.org][installation]] page.
 Everything below runs in a scratch store and touches nothing else. By the
 end you will have minted a deed, superseded it, packed it with its receipt
-for another machine, and checked it there without the sender's store. The
-transcripts were taken with the clock stopped. Run them yourself and the
-time and the root will differ; the other lines will not.
+for another machine, and checked it there. The receiver's command reads
+the bag. The sender's store stays on the sender. The transcripts were taken
+with the clock stopped. Run them yourself and the time and the root will
+differ; the other lines will not. The parts this session builds are drawn
+on the [[file:concepts.org][concepts]] page.
 
 * 1. Point at a store
 
@@ -122,8 +125,8 @@ file=sha256:49e7b69a7a6720e9928f98f9d095871453e1a3024276f713aeab2cfc0ef2ba07
 # [[[end]]]
 
 A citation of the first deed still resolves. =current= prints the tip, so
-the accession in that answer is the new deed. That is the whole reason the
-tracker cites an accession and not a path.
+the accession in that answer is the new deed. The tracker cites that
+accession. A path names a place on one machine.
 
 * 5. Hand it over with its receipt
 
@@ -176,5 +179,7 @@ log grew from that head, and was not rewritten.
 * Where next
 
 - [[file:howto.org][How-to]]: sign a satchel, take a handover in, audit a store, backfill a log, demand attestation.
+- [[file:concepts.org][Concepts]]: the bytes, the deed, the log, the bag, and the citation.
+- [[file:explanation.org][Explanation]]: what a signature covers, and what the log adds.
 - [[file:reference.org][Reference]]: kinds, verbs, the log, the store layout.
-- [[file:explanation.org][Explanation]]: why signatures alone do not bind a set, and what the log adds.
+- [[file:api.org][API reference]]: the =deed= and =deedar= crates, generated from rustdoc.

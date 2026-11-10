@@ -4,7 +4,7 @@
 * In the seat
 
 This crate is one habitat. The seat that sits on it is
-[[https://leidarljos.github.io][ljos]]. Citing a deed names it; the bytes stay in deedar. The ticket stays open until the tracker closes it.
+[[https://leidarljos.github.io][ljos]]. Citing a deed names it; the bytes stay in deedar. What that citation points at is drawn on the [[file:concepts.org][concepts]] page. The ticket stays open until the tracker closes it.
 
 | Question | Crate | Site |
 |---+---|---|

@@ -53,3 +53,5 @@ python3 docs/scripts/fix_doc_links.py
 # Restore the toctree pandoc drops, and refuse an org line that would turn
 # into an RST footnote and eat the sentence around it.
 python3 docs/scripts/finish_export.py
+python3 docs/scripts/generate_changelog.py
+python3 docs/scripts/generate_api.py

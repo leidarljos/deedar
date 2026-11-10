@@ -4,7 +4,11 @@
 Each section is one task. =DEEDAR_URL= names the store; =--url= overrides
 it for one command. Each transcript was taken in its own empty store with
 the clock stopped, so a root or a signature here is the one those commands
-produce. A run at another time prints a different one.
+produce. A run at another time prints a different one. The
+[[file:install.org][installation]] page builds the binary, and the
+[[file:getting-started.org][tutorial]] mints the first deed. The
+[[file:concepts.org][concepts]] page names the bag, the head, and the receipt
+these tasks pass around.
 
 * Cite deeds from a list
 
@@ -294,7 +298,7 @@ these were logged today.
 
 * Demand attestation
 
-=evidence= fails a deed whose host sidecar is not signed by a key the layout accepts.
+=evidence= fails a deed whose host sidecar lacks a signature from a key the layout accepts.
 =get= still returns the deed.
 In the store's =layout=, with the public key of the sample seed from the signing section:
 
@@ -357,7 +361,7 @@ deedar: missing deed-file-the-parser-patch	deed tombstoned: deed-file-the-parser
 
 The deed is tombstoned, the log entry stays, and =log audit= reports the
 gap. Nothing is erased, so a citation of a deleted deed still reads as
-deleted rather than as never having existed.
+deleted, and the log entry shows the deed was there.
 
 * Serve the store to an agent
 
@@ -399,9 +403,9 @@ A client runs =deedar-mcp= with no arguments:
 }
 #+end_src
 
-Set =DEEDAR_URL= in that client's environment when the store is not the
-seat store. =DEEDAR_HOST_SIGNING_KEY= is the same variable the command line
-reads.
+Set =DEEDAR_URL= in that client's environment for a store you name. The
+seat store is the default while the variable is unset.
+=DEEDAR_HOST_SIGNING_KEY= is the same variable the command line reads.
 
 Each line is one tool the server registers. =reads= leaves every deed as it
 was. =writes= also writes a directory the caller names.
@@ -410,7 +414,7 @@ was. =writes= also writes a directory the caller names.
 - =deedar_current= reads. The deed that supersedes this one, or this one when nothing does. A fork or a cycle is every current deed in accession order, with a note of which, and the call succeeds.
 - =deedar_evidence= reads. Whether the store still holds evidence for a deed, and what it says: who produced it and when.
 - =deedar_export= writes. Write deeds into a directory with the proof they were logged here first, which is what a handover carries.
-- =deedar_get= reads. One deed by accession, or by a `sha256:` of the deed or of one of its product paths.
+- =deedar_get= reads. One deed by accession, or by a =sha256:= of the deed or of one of its product paths.
 - =deedar_list= reads. Deeds the store serves, in accession order. kind and agent match exactly; text is a case-insensitive substring of the name or of a body's excerpt, title, subject, step text or url. Omit every argument for the whole shelf.
 - =deedar_log_audit= reads. Whether the store answers for what it logged, and logged what it serves.
 - =deedar_log_bridge= reads. The record joining a head a reader already holds to this log's own, so they can tell a log that grew from one that was rewritten.

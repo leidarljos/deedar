@@ -1,47 +1,49 @@
 .. raw:: html
 
    <div class="vi-hero">
-     <div class="vi-hero-brand">
-       <img class="vi-hero-mark" src="_static/mark.svg" width="64" height="64" alt="" />
-       <div>
-         <p class="vi-hero-name">deedar</p>
-         <p class="vi-hero-tag">What did this unit of work produce?</p>
-       </div>
-     </div>
-     <p class="vi-hero-tagline">Frozen products with an append-only log, so a citation still resolves next year.</p>
-     <div class="vi-hero-pills">
-       <span>Content addressed</span>
-       <span>RFC 9162 log</span>
-       <span>Ed25519 signed</span>
-     </div>
+     <p class="vi-hero-name">deedar</p>
+     <p class="vi-hero-tagline">deedar stores the product of one unit of work as a deed: the bytes by hash, who produced them, and the deeds they were made from. Each deed is appended to a Merkle log. A reader who kept a head can show the deed was in that log, and a citation names the deed by its accession.</p>
      <div class="vi-hero-actions">
        <a class="vi-btn vi-btn-gold" href="getting-started.html">Get started</a>
-       <a class="vi-btn vi-btn-ghost" href="reference.html">Reference</a>
+       <a class="vi-btn vi-btn-ghost" href="install.html">Installation</a>
      </div>
    </div>
 
-A deed is a frozen record of one product: a file, a patch, a quote, a
-page, a table. It names the bytes by hash, who produced them, and what they
-were made from. Every deed goes into a Merkle log. The store can then show
-a deed was there before anyone asked, and cannot drop one unnoticed by a
-reader who kept a head. A tracker or a pack cites a deed by its
-accession and never copies the bytes.
+This site documents deedar 0.6.1.
 
-Install
-=======
+Why
+===
 
-.. code:: console
+The next unit of work opens that product by accession. A better take is a
+new deed with ``--supersedes``, so the earlier accession still resolves and
+``current`` prints the tip. The log binds the deeds a store has published:
+an inclusion proof places one deed under a head, and a consistency proof
+shows a later head extends an earlier one. The
+:doc:`concepts <concepts>` page draws the parts. The
+:doc:`explanation <explanation>` says what a signature covers and what
+the log adds. The :doc:`changelog <changelog>` records each version.
 
-   $ cargo binstall deedar-cli
-   $ cargo binstall deedar-mcp   # optional
-   $ export DEEDAR_URL=file://$HOME/.local/share/deedar/store
+Guides
+======
+
+.. raw:: html
+
+   <div class="vi-grid">
+     <a class="vi-card" href="install.html"><strong>Installation</strong><span>Linux, macOS, and Windows, from a release archive, cargo binstall, crates.io, or a checkout.</span></a>
+     <a class="vi-card" href="getting-started.html"><strong>Tutorial</strong><span>Mint a deed, supersede it, and check the bag on a second store.</span></a>
+     <a class="vi-card" href="howto.html"><strong>How-to guides</strong><span>Sign a handover, import it, audit a log, backfill, and serve the store.</span></a>
+     <a class="vi-card" href="concepts.html"><strong>Topics</strong><span>The concepts diagram, what the log adds, and the seat this crate sits in.</span></a>
+     <a class="vi-card" href="reference.html"><strong>Reference</strong><span>Verbs, kinds, accessions, the store layout, the log, and the environment.</span></a>
+     <a class="vi-card" href="api.html"><strong>API reference</strong><span>Public items of the deed and deedar crates, generated from rustdoc.</span></a>
+   </div>
 
 First minute
 ============
 
 The block is a fresh store with signing off, recorded with the clock
 stopped. Run it yourself and the time and the root will differ; the other
-lines will not.
+lines will not. The :doc:`tutorial <getting-started>` continues from
+here: supersede the deed, hand it over, and check it.
 
 .. code:: console
 
@@ -64,16 +66,41 @@ lines will not.
    $ deedar log head
    size=1 root=b1799b9f22404b3626b3c43e80f26232922113b997a1e3377bc803ff799f4ee8
 
-The :doc:`tutorial <getting-started>` goes on to supersede the deed,
-hand it to another store with its receipt, and check it there.
+.. toctree::
+   :maxdepth: 1
+   :caption: Install
+   :hidden:
+
+   install
 
 .. toctree::
    :maxdepth: 1
-   :caption: Guides
+   :caption: Tutorials
    :hidden:
 
    getting-started
+
+.. toctree::
+   :maxdepth: 1
+   :caption: How-to guides
+   :hidden:
+
    howto
-   reference
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Topics
+   :hidden:
+
+   concepts
    explanation
    seat
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Reference
+   :hidden:
+
+   reference
+   api
+   changelog

@@ -38,7 +38,7 @@ struct Report {
     code: Option<u8>,
 }
 
-/// Route the verbs that report per-id, and hand the rest to [`run`].
+/// Route the verbs that report per-id, and hand the rest to [`finish`].
 fn dispatch(args: Vec<String>) -> Result<Report, String> {
     // Version and help are answered before the store is resolved, so they
     // work on a machine that has no store yet. They count only in flag

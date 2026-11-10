@@ -10,8 +10,8 @@ _DOCS = Path(__file__).resolve().parent
 _ROOT = _DOCS.parent.parent
 
 project = "deedar"
-copyright = "2026, Rohit Goswami"
-author = "Rohit Goswami"
+copyright = "deedar developers"
+author = "deedar developers"
 # |version| is major.minor. |release| is the full crate version.
 # cog writes both from [workspace.package] in the workspace Cargo.toml.
 # [[[cog import versions; cog.outl(f'release = "{versions.version()}"'); cog.outl(f'version = "{versions.minor()}"') ]]]
@@ -25,7 +25,9 @@ extensions = [
 ]
 
 templates_path = ["_templates"]
-exclude_patterns: list[str] = []
+# Included fragments. Sphinx still includes them; it does not publish them
+# as their own pages, so their headings do not take a second set of labels.
+exclude_patterns = ["_*.rst"]
 
 html_theme = "shibuya"
 html_static_path = ["_static"]
@@ -53,11 +55,15 @@ html_context = {
 # The home page's title is the site name.
 PAGE_TITLES = {
     "index": "deedar",
+    "install": "Installation",
     "getting-started": "Getting started",
     "howto": "How-to",
+    "concepts": "Concepts",
     "reference": "Reference",
     "explanation": "Explanation",
     "seat": "In the seat",
+    "api": "API reference",
+    "changelog": "Changelog",
     "search": "Search",
     "genindex": "Index",
 }
@@ -65,7 +71,12 @@ PAGE_TITLES = {
 # One sentence from the page itself, for the description and the link preview.
 PAGE_DESCRIPTIONS = {
     "index": (
-        "Frozen products with an append-only log, so a citation still resolves next year."
+        "A deed is the frozen product of one unit of work, appended to a Merkle log "
+        "and cited by accession."
+    ),
+    "install": (
+        "Install deedar and deedar-mcp on Linux, macOS, and Windows from a release "
+        "archive, cargo binstall, crates.io, or a checkout."
     ),
     "getting-started": (
         "Mint a deed in a scratch store, supersede it, hand it over with its receipt, "
@@ -75,15 +86,20 @@ PAGE_DESCRIPTIONS = {
         "Sign a handover, keep a head between them, audit a store, backfill a log, "
         "and demand attestation."
     ),
+    "concepts": (
+        "Bytes, deed, log, head, bag, and citation: the parts a deedar store is made of."
+    ),
     "reference": (
         "Verbs, kinds, accessions, the store, the log, and the environment variables."
     ),
     "explanation": (
-        "Why a deed is frozen, what the log adds, and what a signature does and does not prove."
+        "Why a deed is frozen, what the log adds, and what a signature covers."
     ),
     "seat": (
         "This crate is one habitat. Citing a deed names it; the bytes stay in deedar."
     ),
+    "api": "Public items of the deed and deedar crates, generated from rustdoc.",
+    "changelog": "What each version of deedar changed.",
     "search": "Search the deedar documentation.",
     "genindex": "Index of the deedar documentation.",
 }
@@ -91,7 +107,17 @@ PAGE_DESCRIPTIONS = {
 OG_IMAGE = "https://leidarljos.github.io/deedar/_static/og.png"
 
 # Pages whose sections are all h1s. Seat already has one h1, its own title.
-_DEMOTE_H1 = {"index", "getting-started", "howto", "reference", "explanation"}
+_DEMOTE_H1 = {
+    "index",
+    "install",
+    "getting-started",
+    "howto",
+    "concepts",
+    "reference",
+    "explanation",
+    "api",
+    "changelog",
+}
 _HEADERLINK = re.compile(
     r'<a\b[^>]*class="headerlink"[^>]*>.*?</a>',
     re.DOTALL,
@@ -107,10 +133,11 @@ html_theme_options = {
     "open_in_claude": False,
     "github_url": "https://github.com/leidarljos/deedar",
     "nav_links": [
-        {"title": "Get started", "url": "getting-started"},
+        {"title": "Install", "url": "install"},
+        {"title": "Tutorial", "url": "getting-started"},
         {"title": "How-to", "url": "howto"},
+        {"title": "Concepts", "url": "concepts"},
         {"title": "Reference", "url": "reference"},
-        {"title": "Explanation", "url": "explanation"},
         {"title": "Search", "url": "search"},
     ],
 }

@@ -78,6 +78,7 @@ FENCES = {
     "ht-delete": "org",
     "ht-mcp": "org",
     "index": "org",
+    "install-check": "org",
 }
 
 _READY = False
@@ -492,6 +493,15 @@ def howto_mcp() -> str:
         session.close()
 
 
+def install_check() -> str:
+    """``deedar --version`` and ``deedar --help`` from this tree."""
+    session = Session("install-check")
+    try:
+        return session.step("deedar --version") + session.step("deedar --help")
+    finally:
+        session.close()
+
+
 def index() -> str:
     # Relative note.rs, as the first minute has always shown it. The store
     # is a fresh directory, so the root is the one-deed root.
@@ -526,6 +536,7 @@ def build_all() -> dict[str, str]:
     )
     parts["ht-mcp"] = howto_mcp()
     parts["index"] = index()
+    parts["install-check"] = install_check()
     missing = [name for name in FENCES if name not in parts]
     if missing:
         raise SystemExit("samples not built: " + ", ".join(missing))

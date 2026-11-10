@@ -9,7 +9,10 @@
       "build/_static/pygments.css",
       "build/_sphinx_design_static/**",
       "build/_static/copybutton.css",
-      "build/_static/sphinx-design.min.css"
+      "build/_static/sphinx-design.min.css",
+      "build/rustdoc/**",
+      "rustdoc/**",
+      "docs/build/rustdoc/**"
     ],
     "ignoreValues": [
       {

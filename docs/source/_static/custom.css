@@ -373,7 +373,41 @@ body::before {
 @media (max-width: 1100px) { body::before { display: none; } }
 
 /* Landing hero. */
-.vi-hero { padding: 2.2rem 0 0.4rem; }
+.vi-hero { padding: 1.4rem 0 0.2rem; }
+.vi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 0.85rem;
+  margin: 0.4rem 0 1.4rem;
+}
+.vi-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-height: 7.5rem;
+  padding: 0.95rem 1.05rem;
+  border: 1px solid var(--ll-line);
+  border-radius: 8px;
+  background: var(--ll-panel);
+  text-decoration: none !important;
+  color: var(--ll-fg) !important;
+}
+.vi-card strong {
+  font-family: var(--ll-serif);
+  font-weight: 600;
+  font-size: 1.12rem;
+  letter-spacing: -0.02em;
+  color: var(--ll-fg);
+}
+.vi-card span {
+  color: var(--ll-mute);
+  font-size: 0.98rem;
+  line-height: 1.45;
+}
+.vi-card:hover {
+  border-color: var(--ll-accent-soft);
+}
+.vi-card:hover strong { color: var(--ll-accent); }
 .vi-hero-brand { display: flex; align-items: center; gap: 1rem; }
 .vi-hero-mark { flex: none; border-radius: 8px; }
 .vi-hero-name {

@@ -18,32 +18,61 @@ import re
 import sys
 from pathlib import Path
 
-# The pages a site has are the org files it has, index aside, in a fixed order.
+# The pages a site has are the org files it has, index aside, in Diataxis order.
+# A file that is not in a section is still listed, so a new org page is reachable.
 _ORG = Path(__file__).resolve().parents[1] / "orgmode"
-_ORDER = ["getting-started", "howto", "reference", "explanation", "architecture"]
-PAGES = [p for p in _ORDER if (_ORG / f"{p}.org").is_file()] + sorted(
-    q.stem for q in _ORG.glob("*.org") if q.stem not in _ORDER and q.stem != "index"
+_SECTIONS = (
+    ("Install", ["install"]),
+    ("Tutorials", ["getting-started"]),
+    ("How-to guides", ["howto"]),
+    ("Topics", ["concepts", "explanation", "seat"]),
+    ("Reference", ["reference", "api", "changelog"]),
 )
 
-TOCTREE = """
 
-.. toctree::
-   :maxdepth: 1
-   :caption: Guides
-   :hidden:
+def site_sections() -> list[tuple[str, list[str]]]:
+    known = {name for _title, names in _SECTIONS for name in names}
+    sections = []
+    for title, names in _SECTIONS:
+        present = [name for name in names if (_ORG / f"{name}.org").is_file()]
+        if present:
+            sections.append((title, present))
+    extras = sorted(
+        path.stem
+        for path in _ORG.glob("*.org")
+        if path.stem not in known and path.stem != "index"
+    )
+    if extras:
+        sections.append(("More", extras))
+    return sections
 
-""" + "".join(f"   {page}\n" for page in PAGES)
+
+PAGES = [page for _title, pages in site_sections() for page in pages]
+
+
+def _toctree() -> str:
+    blocks = []
+    for title, pages in site_sections():
+        body = "".join(f"   {page}\n" for page in pages)
+        blocks.append(
+            f"\n.. toctree::\n   :maxdepth: 1\n   :caption: {title}\n   :hidden:\n\n{body}"
+        )
+    return "".join(blocks)
+
+
+TOCTREE = _toctree()
 
 _FOOTNOTE_DEF = re.compile(r"^\[\d+\]")
 
 
 def restore_toctree(index: Path) -> None:
+    """Write the section toctrees, replacing any pandoc kept from the org file."""
     text = index.read_text(encoding="utf-8")
-    if ".. toctree::" in text:
-        print("index.rst: toctree present")
-        return
-    index.write_text(text.rstrip("\n") + TOCTREE, encoding="utf-8")
-    print("index.rst: toctree restored")
+    marker = "\n.. toctree::"
+    if marker in text:
+        text = text[: text.index(marker)]
+    index.write_text(text.rstrip() + "\n" + TOCTREE, encoding="utf-8")
+    print("index.rst: toctree written")
 
 
 def bracket_leading_lines(path: Path) -> list[tuple[int, str]]:
