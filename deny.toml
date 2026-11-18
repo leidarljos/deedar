@@ -1,7 +1,10 @@
 # Dependency policy. CI and `just check` run `cargo deny check`.
 
-# The RustSec advisory database is the default. No advisory is ignored.
+# The RustSec advisory database is the default. Ignored advisories carry a review date.
 [advisories]
+ignore = [
+    { id = "RUSTSEC-2026-0543", reason = "chrono, through rmcp 3.9.0 and schemars 1.2.3; every version is affected and no fixed release exists; review on 2027-02-18" },
+]
 
 # `warn` is cargo-deny's default for this lint. The lockfile has two
 # versions each of base64, getrandom, syn and windows-sys, and collapsing
