@@ -1,3 +1,79 @@
+0.7.0 (2026-11-18)
+------------------
+
+Features
+~~~~~~~~
+
+-  A sha256 of a deed is read from the log instead of every frame.
+-  ``deedar list`` and ``deedar_list`` take optional kind, agent and text, and return the matching deeds in accession order.
+-  create, evidence and export stream a product file, so a large file no longer costs its size in memory.
+
+Fixes
+~~~~~
+
+-  A deed file that does not decode no longer fails ``list`` or ``log audit``; audit names it as missing or unreadable.
+-  A read from ``deedar-mcp`` of a missing seat store returns the command line's hint and creates nothing.
+   An export creates that store and names its path, which is the write this server offers.
+-  A receipt or bridge with one byte changed in a path step now fails the check.
+-  A silent timestamp authority no longer hangs ``deedar timestamp``: the command saves the ``.tsq`` and exits 1.
+-  An empty or relative ``HOME`` is ignored when choosing the seat store, as an empty or relative ``XDG_DATA_HOME`` already is.
+-  An excerpt, a name or a step spelled ``--help``, ``-h``, ``--version``, ``-V`` or ``--url`` is stored as that text.
+   ``deedar --help``, ``deedar create --help``, ``deedar -V`` and ``deedar list --url FILE`` are unchanged.
+-  An unknown accession over the Model Context Protocol (MCP) is invalid parameters.
+   The error names ``deedar_list``, or ``deedar_get`` with the one match.
+   A prefix of more than one accession lists at most eight, in byte order.
+-  Four lookup errors now name the input and the next command to run.
+   An ambiguous prefix also lists up to eight matches.
+-  Opening a store from two processes at once no longer reads an empty writer.key.
+-  ``create`` and ``import`` make the seat store on first use and name its path.
+-  ``deedar check`` and ``deedar vouch check`` exit ``EXIT_UNTRUSTED_SIGNER`` when the signer is not one the reader accepts.
+   The report and the warning are still printed.
+   A signature that does not cover the bytes still exits 1.
+-  ``deedar check`` and ``deedar vouch check`` report a key the layout does not list instead of failing.
+   ``deedar import --allow-unsigned-head`` keeps those deeds too, and warns.
+-  ``deedar create --supersedes P`` names the current tip when P already has a successor.
+-  ``deedar current`` on a fork or a cycle prints every tip or member in accession order, with one warning.
+-  ``deedar host accept`` refuses to add a signer when the layout says ``attestation = required``, and names the line to add by hand.
+-  ``deedar-mcp`` opens the same default store as the command line, under ``$XDG_DATA_HOME`` when it is set, and treats an empty ``DEEDAR_URL`` as unset.
+   It used to read an empty store under ``~/.local/share`` that the command line never wrote.
+-  ``deedar_current`` on a fork or a cycle returns every current deed in accession order.
+   A note says which, and the call succeeds.
+-  check and import name the field a receipt or signed head fails on.
+   Each line gives the expected and found values and the file each came from.
+
+Documentation
+~~~~~~~~~~~~~
+
+-  Added paragraphs are one sentence to a line.
+-  Each seat-store fact in the reference now has its own sentence.
+-  The first minute in the index shows the log root the binary prints.
+   The reference no longer says that ``check --keep`` is missing from 0.4.0.
+-  The guide samples are the output of the binary itself.
+   The docs show how to make a v2 revision of a frozen deed.
+-  The how-to lists all ten Model Context Protocol (MCP) tools.
+   It says which read and which write.
+   It shows the ``deedar-mcp`` command a client runs.
+   It had named eight tools and called every one of them read-only.
+-  The reference lists deeds in accession order.
+   Usage and the reference name ``--kind``, ``--agent`` and ``--text``.
+-  The status 2 row names the check, and the report detail sits under the table.
+
+Miscellaneous
+~~~~~~~~~~~~~
+
+-  A round-trip test now covers export and import between stores.
+-  CI and ``just check`` run ``cargo deny check``, so an advisory or a non-crates.io source fails the job.
+   Four unused licence allowances are dropped.
+-  CI installs rustfmt and clippy with the toolchain.
+   So ``cog --check`` and the macOS, licence and release jobs no longer fail when rustup adds them later.
+-  Changelog entries are fragments under ``changelog.d``, and CI fails a draft whose fragment name is not a known type.
+-  Each test gets a scratch store of its own on macOS too, so the large-file tests no longer share one and fail at random.
+-  Every test scratch directory is named by pid and a counter, so no two tests share one on macOS.
+-  The handover bench measures receipts at the criterion default of 5 s, and protocol constants cite their source.
+-  The version is written by hand only in ``Cargo.toml``.
+   The Sphinx release and the internal crate pins are generated from it, and CI fails when a copy drifts.
+-  deedar_list now describes its order as accession order, not oldest first.
+
 0.6.1 (2026-10-31)
 ------------------
 

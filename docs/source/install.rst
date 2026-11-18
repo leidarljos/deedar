@@ -148,7 +148,7 @@ the ``list`` flags.
 .. code:: console
 
    $ deedar --version
-   deedar 0.6.1
+   deedar 0.7.0
    $ deedar --help
    usage: deedar [--url FILE] create|get|list|trail|evidence|delete|leave|timestamp|current|log|export|import|check|vouch|migrate|host
    deedar --help            this page

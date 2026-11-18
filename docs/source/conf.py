@@ -15,8 +15,8 @@ author = "deedar developers"
 # |version| is major.minor. |release| is the full crate version.
 # cog writes both from [workspace.package] in the workspace Cargo.toml.
 # [[[cog import versions; cog.outl(f'release = "{versions.version()}"'); cog.outl(f'version = "{versions.minor()}"') ]]]
-release = "0.6.1"
-version = "0.6"
+release = "0.7.0"
+version = "0.7"
 # [[[end]]]
 
 extensions = [

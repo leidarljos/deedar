@@ -9,7 +9,7 @@
      </div>
    </div>
 
-This site documents deedar 0.6.1.
+This site documents deedar 0.7.0.
 
 Why
 ===
