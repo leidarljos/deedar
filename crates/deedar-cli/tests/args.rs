@@ -51,7 +51,9 @@ fn line(text: &str, expected: &str) {
 const USAGE: &str = "\
 usage: deedar [--url FILE] create|get|list|trail|evidence|delete|leave|timestamp|current|log|export|import|check|vouch|migrate|host|url
 deedar --help            this page
+deedar help              this page
 deedar create --help     kinds and flags, including --path
+deedar help create       kinds and flags, including --path
 evidence, current and export take one id, several ids, or - to read them from stdin
 list takes --kind KIND, --agent ID and --text WORDS
 log takes head, list, audit, backfill, prove ID, or bridge SIZE
@@ -162,6 +164,55 @@ fn a_step_equal_to_version_is_stored() {
         "id=deed-procedure-version kind=procedure name=procedure",
     );
     line(&got, "steps=1");
+}
+
+/// An unknown word names `--help` and does not create a store.
+/// `help` and `help create` are the same pages as the flags.
+#[test]
+fn an_unknown_command_names_help_and_help_prints_the_page() {
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    let seat = home.join(".local/share/deedar/store");
+    let out = deedar(home, &["foo"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(String::from_utf8_lossy(&out.stdout).as_ref(), "");
+    assert_eq!(
+        String::from_utf8(out.stderr).expect("stderr is utf8"),
+        "deedar: unknown command foo; `deedar --help`\n"
+    );
+    assert!(!seat.exists(), "an unknown command created the seat store");
+
+    let named = home.join("named-store");
+    let named_url = format!("file://{}", named.display());
+    let out = deedar(home, &["--url", &named_url, "mcp"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(
+        String::from_utf8(out.stderr).expect("stderr is utf8"),
+        "deedar: unknown command mcp; `deedar --help`\n"
+    );
+    assert!(
+        !named.exists(),
+        "an unknown command created the named store"
+    );
+
+    assert_eq!(ok(home, &["help"]), USAGE);
+    assert_eq!(ok(home, &["help", "create"]), CREATE_HELP);
+    assert!(!seat.exists(), "help created the seat store");
+
+    let url = store_url(home);
+    create_quote(home, &url, "deed-quote-log", &["--excerpt", "x"]);
+    let out = deedar(home, &["--url", &url, "log", "nosuch"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(
+        String::from_utf8(out.stderr).expect("stderr is utf8"),
+        "deedar: unknown log command nosuch; log takes head, list, audit, backfill, prove ID, or bridge SIZE\n"
+    );
+    let out = deedar(home, &["--url", &url, "vouch", "nosuch"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(
+        String::from_utf8(out.stderr).expect("stderr is utf8"),
+        "deedar: unknown vouch command nosuch; vouch takes sign FILE or check FILE\n"
+    );
 }
 
 /// No verb is the usage page, and it does not create a store on the way there.

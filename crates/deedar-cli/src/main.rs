@@ -60,11 +60,25 @@ fn dispatch(args: Vec<String>) -> Result<Report, String> {
             code: None,
         });
     }
-    // No verb is the usage page. Resolving the store first would refuse a
-    // machine that has no store yet, or make a directory for a command
-    // that has nothing to do there.
-    if split.url_error.is_none() && !split.rest.iter().any(|arg| !arg.starts_with('-')) {
-        return Err(usage().trim_end().to_string());
+    // No verb, `help`, and an unknown verb are pages. Resolving the store
+    // first would refuse a machine that has no store yet, or make a
+    // directory for a command that has nothing to do there.
+    if split.url_error.is_none() {
+        if !split.rest.iter().any(|arg| !arg.starts_with('-')) {
+            return Err(usage().trim_end().to_string());
+        }
+        if let Some(verb) = split.rest.first().map(String::as_str) {
+            if verb == "help" {
+                let topic: Vec<String> = split.rest.iter().skip(1).cloned().collect();
+                return Ok(Report {
+                    text: help_text(&topic),
+                    code: None,
+                });
+            }
+            if !is_verb(verb) {
+                return Err(format!("unknown command {verb}; `deedar --help`"));
+            }
+        }
     }
     let (url, rest) = take_url(&args)?;
     if rest.first().map(String::as_str) == Some("evidence") && is_many(&rest[1..]) {
@@ -226,7 +240,9 @@ fn cmd_vouch(url: &str, args: &[String]) -> Result<(String, Option<u8>), String>
             });
             Ok((checked.render(), code))
         }
-        Some(other) => Err(format!("unknown vouch command {other}")),
+        Some(other) => Err(format!(
+            "unknown vouch command {other}; vouch takes sign FILE or check FILE"
+        )),
         None => Err("vouch takes sign FILE or check FILE".into()),
     }
 }
@@ -478,7 +494,10 @@ fn cmd_log(client: &mut Client, url: &str, args: &[String]) -> Result<String, St
                 added.len()
             ))
         }
-        Some(other) => Err(format!("unknown log command {other}")),
+        Some(other) => Err(format!(
+            "unknown log command {other}; \
+             log takes head, list, audit, backfill, prove ID, or bridge SIZE"
+        )),
     }
 }
 
@@ -619,7 +638,7 @@ fn finish(args: Vec<String>) -> Result<(String, Option<u8>), String> {
             "{}\n",
             StoreUrl::parse(&url).map_err(|e| e.to_string())?.as_url()
         ))),
-        Some(other) => Err(format!("unknown command {other}")),
+        Some(other) => Err(format!("unknown command {other}; `deedar --help`")),
         None => Err(usage().trim_end().to_string()),
     }
 }
@@ -627,7 +646,9 @@ fn finish(args: Vec<String>) -> Result<(String, Option<u8>), String> {
 fn usage() -> String {
     "usage: deedar [--url FILE] create|get|list|trail|evidence|delete|leave|timestamp|current|log|export|import|check|vouch|migrate|host|url\n\
      deedar --help            this page\n\
+     deedar help              this page\n\
      deedar create --help     kinds and flags, including --path\n\
+     deedar help create       kinds and flags, including --path\n\
      evidence, current and export take one id, several ids, or - to read them from stdin\n\
      list takes --kind KIND, --agent ID and --text WORDS\n\
      log takes head, list, audit, backfill, prove ID, or bridge SIZE\n\
@@ -638,6 +659,31 @@ fn usage() -> String {
      host accept adds the host signing key to the layout as a signer, and leaves every other line\n\
      url prints the store this command resolved\n"
         .into()
+}
+
+/// A word the command line accepts as a verb. `help` is a page, handled
+/// before the store is opened, so it is not in this list.
+fn is_verb(name: &str) -> bool {
+    matches!(
+        name,
+        "create"
+            | "get"
+            | "list"
+            | "trail"
+            | "evidence"
+            | "delete"
+            | "leave"
+            | "timestamp"
+            | "current"
+            | "log"
+            | "export"
+            | "import"
+            | "check"
+            | "vouch"
+            | "migrate"
+            | "host"
+            | "url"
+    )
 }
 
 /// Help for the verb, the first word that is not a flag.

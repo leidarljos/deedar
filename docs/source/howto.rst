@@ -298,7 +298,7 @@ The server is the ``deedar-mcp`` binary. It speaks on standard input and
 output.
 ``deedar-mcp --help`` and ``deedar-mcp --version`` print and exit.
 With no arguments it waits for a client.
-``deedar mcp`` prints ``unknown command mcp``.
+``deedar mcp`` prints ``unknown command mcp`` and names ``deedar --help``.
 
 With ``DEEDAR_URL`` unset or empty, the server uses the seat store, the same
 path the command line uses: ``$XDG_DATA_HOME/deedar/store``, or

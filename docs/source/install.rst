@@ -156,7 +156,9 @@ the ``list`` flags.
    $ deedar --help
    usage: deedar [--url FILE] create|get|list|trail|evidence|delete|leave|timestamp|current|log|export|import|check|vouch|migrate|host|url
    deedar --help            this page
+   deedar help              this page
    deedar create --help     kinds and flags, including --path
+   deedar help create       kinds and flags, including --path
    evidence, current and export take one id, several ids, or - to read them from stdin
    list takes --kind KIND, --agent ID and --text WORDS
    log takes head, list, audit, backfill, prove ID, or bridge SIZE
