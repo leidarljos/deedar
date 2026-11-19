@@ -565,3 +565,74 @@ fn a_required_store_gains_no_signer_by_accept() {
     let again = open(&url).accept_host_signer().unwrap();
     assert_eq!(again, Some((format!("ed25519:{listed}"), false)));
 }
+
+/// The reference says the variable is a 32-byte seed or a path to one.
+/// A seed in the environment has no NUL byte; a slash is read as a path.
+#[cfg(unix)]
+#[test]
+fn a_32_byte_value_is_the_seed_and_a_missing_path_is_refused() {
+    use std::os::unix::ffi::OsStringExt;
+
+    let (_guard, url, parent) = isolate();
+    // No NUL and no slash: an environment value cannot carry a NUL, and a
+    // slash is a path. 0x11 thirty-two times is a seed.
+    let seed = std::ffi::OsString::from_vec(vec![0x11; 32]);
+    // SAFETY: ENV is held for the whole sitting.
+    unsafe {
+        std::env::set_var("DEEDAR_HOST_SIGNING_KEY", &seed);
+    }
+    let mut client = open(&url);
+    let public = client.signer_public().expect("the seed signs");
+    let file = parent.join("host.key");
+    fs::write(&file, [0x11; 32]).unwrap();
+    let other = parent.join("store-file");
+    fs::create_dir_all(&other).unwrap();
+    let file_url = format!("file://{}", other.display());
+    // SAFETY: ENV is held for the whole sitting.
+    unsafe {
+        std::env::set_var("DEEDAR_HOST_SIGNING_KEY", &file);
+    }
+    let from_file = open(&file_url).signer_public().expect("the file signs");
+    assert_eq!(public, from_file);
+    // SAFETY: ENV is held for the whole sitting.
+    unsafe {
+        std::env::set_var("DEEDAR_HOST_SIGNING_KEY", &seed);
+    }
+    let id = DeedId::parse("deed-quote-host").unwrap();
+    client
+        .create(quote(
+            "deed-quote-host",
+            "inline seed",
+            "https://example.com/host",
+        ))
+        .unwrap();
+    client.evidence(&id).expect("a fresh store lists this key");
+
+    let missing = parent.join("no-such-host.key");
+    // SAFETY: ENV is held for the whole sitting.
+    unsafe {
+        std::env::set_var("DEEDAR_HOST_SIGNING_KEY", &missing);
+    }
+    let err = match Client::open(&url) {
+        Ok(_) => panic!("a missing path signed nothing"),
+        Err(err) => err,
+    };
+    let said = err.to_string();
+    assert!(said.contains(missing.to_str().unwrap()), "{said}");
+    assert!(said.contains("head -c 32 /dev/urandom"), "{said}");
+    assert!(said.contains("DEEDAR_HOST_SIGNING_KEY=off"), "{said}");
+
+    let short = parent.join("short.key");
+    fs::write(&short, b"short").unwrap();
+    // SAFETY: ENV is held for the whole sitting.
+    unsafe {
+        std::env::set_var("DEEDAR_HOST_SIGNING_KEY", &short);
+    }
+    let err = match Client::open(&url) {
+        Ok(_) => panic!("a short file is not a seed"),
+        Err(err) => err,
+    };
+    let said = err.to_string();
+    assert!(said.contains("32-byte seed"), "{said}");
+    assert!(said.contains("head -c 32 /dev/urandom"), "{said}");
+}

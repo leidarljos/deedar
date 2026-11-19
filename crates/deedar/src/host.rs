@@ -70,24 +70,27 @@ pub fn verify(key: &[u8; 32], deed_bytes: &[u8], unix_time: u64, signature: &[u8
         .map_err(|_| Error::Evidence("host keyed hash".into()))
 }
 
-/// Where a host signing key lives, when one is configured.
+/// Where a host signing key lives, when one is configured as a file.
 ///
 /// `DEEDAR_HOST_SIGNING_KEY` names it. Unset, the key at
 /// `$XDG_CONFIG_HOME/deedar/host.key` (`~/.config/deedar/host.key`) is used
 /// when that file exists, so a seat that made one once signs from then on
 /// with nothing set. `DEEDAR_HOST_SIGNING_KEY=off` signs nothing.
+/// A value of 32 bytes that is not a file is the seed itself, and this
+/// returns nothing because there is no path.
 ///
 /// The private half never belongs beside the store: the point of the signature
 /// is that whoever reads the store cannot produce one.
 #[must_use]
 pub fn signing_key_path() -> Option<PathBuf> {
-    if let Some(raw) = env::var_os("DEEDAR_HOST_SIGNING_KEY").filter(|raw| !raw.is_empty()) {
-        if raw == "off" {
-            return None;
+    match env::var_os("DEEDAR_HOST_SIGNING_KEY") {
+        Some(raw) if raw.is_empty() || raw == "off" => None,
+        Some(raw) => {
+            let path = PathBuf::from(&raw);
+            path.is_file().then_some(path)
         }
-        return Some(PathBuf::from(raw));
+        None => default_signing_key_path().filter(|path| path.is_file()),
     }
-    default_signing_key_path().filter(|p| p.is_file())
 }
 
 /// The path the seat's host key is looked for at when nothing names one.
@@ -102,24 +105,87 @@ pub fn default_signing_key_path() -> Option<PathBuf> {
 
 /// Load the 32-byte Ed25519 seed the host signs with, if it is configured.
 ///
-/// RFC 8032 defines that seed as 32 octets.
+/// RFC 8032 defines that seed as 32 octets. `DEEDAR_HOST_SIGNING_KEY` may be
+/// those octets, or a path to a file that contains them. `off` signs nothing.
+/// Unset, [`default_signing_key_path`] is used when that file exists.
 ///
 /// # Errors
 ///
-/// Fails when the file exists and is not a 32-byte seed.
+/// Fails when the named path is not a file of 32 bytes, and the value itself
+/// is not 32 bytes.
 pub fn load_signing_key() -> Result<Option<SigningKey>> {
-    let Some(path) = signing_key_path() else {
-        return Ok(None);
-    };
-    if !path.exists() {
-        return Ok(None);
+    match env::var_os("DEEDAR_HOST_SIGNING_KEY") {
+        Some(raw) if raw.is_empty() => load_default_signing_key(),
+        Some(raw) if raw == "off" => Ok(None),
+        Some(raw) => load_configured_signing_key(&raw),
+        None => load_default_signing_key(),
     }
-    let bytes = fs::read(&path).map_err(|e| Error::Io(e.to_string()))?;
-    let seed: [u8; 32] = bytes
-        .as_slice()
-        .try_into()
-        .map_err(|_| Error::Io("DEEDAR_HOST_SIGNING_KEY must be a 32 byte seed".into()))?;
-    Ok(Some(SigningKey::from_bytes(&seed)))
+}
+
+fn load_default_signing_key() -> Result<Option<SigningKey>> {
+    match default_signing_key_path() {
+        Some(path) if path.is_file() => Ok(Some(read_seed_file(&path)?)),
+        _ => Ok(None),
+    }
+}
+
+fn load_configured_signing_key(raw: &std::ffi::OsStr) -> Result<Option<SigningKey>> {
+    let path = PathBuf::from(raw);
+    if path.is_file() {
+        // `signing_key_path` is the file this variable names.
+        let path = signing_key_path().unwrap_or(path);
+        return Ok(Some(read_seed_file(&path)?));
+    }
+    // A slash is a path. A random seed can contain one too: that seed goes
+    // in a file, because a missing path must not be read as the seed.
+    if !looks_like_path(raw) {
+        if let Some(seed) = seed_bytes(raw) {
+            return Ok(Some(SigningKey::from_bytes(&seed)));
+        }
+    }
+    let shown = path.display();
+    if looks_like_path(raw) || path.exists() {
+        return Err(Error::Io(format!(
+            "DEEDAR_HOST_SIGNING_KEY names {shown}, which is not a file; \
+             write 32 bytes there (`head -c 32 /dev/urandom > {shown}`) or set DEEDAR_HOST_SIGNING_KEY=off"
+        )));
+    }
+    Err(Error::Io(format!(
+        "DEEDAR_HOST_SIGNING_KEY names {shown}, which is not a file and is not a 32-byte seed; \
+         write 32 bytes to a file (`head -c 32 /dev/urandom > host.key`) and set DEEDAR_HOST_SIGNING_KEY to that path, \
+         or set DEEDAR_HOST_SIGNING_KEY=off"
+    )))
+}
+
+/// `/` or `\` means the value is a path, including a 32-byte one.
+fn looks_like_path(raw: &std::ffi::OsStr) -> bool {
+    let bytes = raw.as_encoded_bytes();
+    bytes.contains(&b'/') || bytes.contains(&b'\\')
+}
+
+/// The value is a seed when it is exactly 32 bytes and no file has that name.
+fn seed_bytes(raw: &std::ffi::OsStr) -> Option<[u8; 32]> {
+    let bytes = raw.as_encoded_bytes();
+    if bytes.len() != 32 {
+        return None;
+    }
+    let mut seed = [0u8; 32];
+    seed.copy_from_slice(bytes);
+    Some(seed)
+}
+
+fn read_seed_file(path: &Path) -> Result<SigningKey> {
+    let bytes = fs::read(path).map_err(|e| Error::Io(e.to_string()))?;
+    let seed: [u8; 32] = bytes.as_slice().try_into().map_err(|_| {
+        Error::Io(format!(
+            "DEEDAR_HOST_SIGNING_KEY must be a 32-byte seed; {} is {} bytes. \
+             Write one with `head -c 32 /dev/urandom > {}`",
+            path.display(),
+            bytes.len(),
+            path.display()
+        ))
+    })?;
+    Ok(SigningKey::from_bytes(&seed))
 }
 
 /// What a sidecar file holds.

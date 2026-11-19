@@ -180,7 +180,7 @@ from an earlier head; =audit= the log against the shelves.
 | Variable | Meaning |
 |---+---|
 | =DEEDAR_URL= | the store, as =file://PATH=. =--url= overrides it for one command |
-| =DEEDAR_HOST_SIGNING_KEY= | a 32-byte Ed25519 seed, or a path to one; signs heads, sidecars and manifests. Unset, =$XDG_CONFIG_HOME/deedar/host.key= is used when it exists, or =~/.config/deedar/host.key= when =XDG_CONFIG_HOME= is unset. =off= signs nothing |
+| =DEEDAR_HOST_SIGNING_KEY= | a 32-byte Ed25519 seed, or a path to one; signs heads, sidecars and manifests. Unset, =$XDG_CONFIG_HOME/deedar/host.key= is used when it exists, or =~/.config/deedar/host.key= when =XDG_CONFIG_HOME= is unset. =off= signs nothing. A path that is not a file is refused |
 | =DEEDAR_HOST_KEY= | a 32-byte keyed-hash key for the host sidecar. Unset, the file is ={store}/../host.key= |
 | =DEEDAR_TSA= | URL of an RFC 3161 timestamp authority. =timestamp= writes a =.tsr= when the authority answers, and a =.tsq= when the variable is unset or the authority times out |
 

@@ -10,7 +10,9 @@ The documentation samples also compile a small C library with ``cc`` or
 
 Set ``DEEDAR_URL`` to ``file://`` plus an absolute path before the first
 command that reads a store. ``DEEDAR_HOST_SIGNING_KEY`` names a 32-byte
-Ed25519 seed, or ``off`` to sign nothing. The
+Ed25519 seed, or a path to a file of those bytes, or ``off`` to sign nothing.
+A path that is not a file is refused, and the message names the command that writes one.
+The
 :doc:`reference <reference>` lists ``DEEDAR_HOST_KEY``, ``DEEDAR_TSA``,
 and the ``XDG`` paths. The :doc:`tutorial <getting-started>` is the
 first session.

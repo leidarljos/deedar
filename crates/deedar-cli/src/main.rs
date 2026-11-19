@@ -206,7 +206,7 @@ fn cmd_vouch(url: &str, args: &[String]) -> Result<(String, Option<u8>), String>
     match args.first().map(String::as_str) {
         Some("sign") => {
             let path = PathBuf::from(args.get(1).ok_or("vouch sign needs a file")?);
-            let out = deedar::vouch::sign(&path).map_err(|e| e.to_string())?;
+            let out = deedar::vouch::sign(&path).map_err(|e| show_store_err(&e))?;
             Ok((format!("{}\n", out.display()), None))
         }
         Some("check") => {
@@ -848,11 +848,23 @@ fn not_a_store(dir: &Path) -> String {
     )
 }
 
+/// A key problem is about the variable the seat set, not about the store.
+fn show_store_err(err: &impl std::fmt::Display) -> String {
+    let text = err.to_string();
+    if let Some(rest) = text.strip_prefix("store io: ") {
+        if rest.contains("DEEDAR_HOST_SIGNING_KEY") {
+            return rest.to_string();
+        }
+    }
+    text
+}
+
 fn explain_open(url: &str, err: &deed::Error) -> String {
     match err {
         deed::Error::InvalidUrl(raw) => format!(
             "{raw} is not a store path; `export DEEDAR_URL=file://PATH` or `deedar --url file://PATH`"
         ),
+        deed::Error::Io(msg) if msg.contains("DEEDAR_HOST_SIGNING_KEY") => msg.clone(),
         deed::Error::Io(msg) if msg.contains("Not a directory") => deedar::store_dir(url)
             .map(|dir| not_a_store(&dir))
             .unwrap_or_else(|_| {
