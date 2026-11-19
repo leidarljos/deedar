@@ -92,7 +92,9 @@ release archive for the running target. This run is cargo-binstall
 
 ``--root`` chooses the prefix. Omit it and binstall uses its default.
 ``deedar-mcp`` speaks the protocol on standard input, so running it with
-no client closes the connection. The :doc:`how-to <howto>` shows
+no client closes the connection.
+``deedar-mcp --help`` and ``deedar-mcp --version`` print and exit.
+The :doc:`how-to <howto>` shows
 the server line and the client entry.
 
 crates.io

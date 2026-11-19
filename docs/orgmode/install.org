@@ -91,7 +91,9 @@ deedar 0.6.1
 
 =--root= chooses the prefix. Omit it and binstall uses its default.
 =deedar-mcp= speaks the protocol on standard input, so running it with
-no client closes the connection. The [[file:howto.org][how-to]] shows
+no client closes the connection.
+=deedar-mcp --help= and =deedar-mcp --version= print and exit.
+The [[file:howto.org][how-to]] shows
 the server line and the client entry.
 
 * crates.io
