@@ -60,6 +60,7 @@ log takes head, list, audit, backfill, prove ID, or bridge SIZE
 import takes a satchel directory, and --allow-unsigned-head for a missing or unlisted signature
 check takes a satchel directory, --since KEPT_HEAD, --bridge FILE and --keep FILE; vouch takes sign FILE or check FILE
 leave takes an id and a destination directory
+timestamp writes a .tsr when DEEDAR_TSA answers, and names the .tsq when that variable is unset
 host says whether the store's layout lists the host signing key, and exits 1 when it does not
 host accept adds the host signing key to the layout as a signer, and leaves every other line
 url prints the store this command resolved

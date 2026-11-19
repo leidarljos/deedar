@@ -607,7 +607,19 @@ fn finish(args: Vec<String>) -> Result<(String, Option<u8>), String> {
             let raw = rest.get(1).ok_or("timestamp needs an id")?;
             let id = resolve_id(&mut client, &url, raw)?;
             let path = client.timestamp(&id).map_err(|e| e.to_string())?;
-            succeeded(Ok(format!("timestamp {}\n", path.display())))
+            // A `.tsq` on the success path is the query saved because no
+            // authority was configured. A timeout is an error and already
+            // names the file.
+            let line = if path.extension().is_some_and(|ext| ext == "tsq") {
+                format!(
+                    "timestamp {}; DEEDAR_TSA is unset, so this file is the query. \
+                     Set DEEDAR_TSA to an RFC 3161 URL to write a .tsr\n",
+                    path.display()
+                )
+            } else {
+                format!("timestamp {}\n", path.display())
+            };
+            succeeded(Ok(line))
         }
         Some("current") => {
             let raw = rest.get(1).ok_or("current needs an id")?;
@@ -655,6 +667,7 @@ fn usage() -> String {
      import takes a satchel directory, and --allow-unsigned-head for a missing or unlisted signature\n\
      check takes a satchel directory, --since KEPT_HEAD, --bridge FILE and --keep FILE; vouch takes sign FILE or check FILE\n\
      leave takes an id and a destination directory\n\
+     timestamp writes a .tsr when DEEDAR_TSA answers, and names the .tsq when that variable is unset\n\
      host says whether the store's layout lists the host signing key, and exits 1 when it does not\n\
      host accept adds the host signing key to the layout as a signer, and leaves every other line\n\
      url prints the store this command resolved\n"

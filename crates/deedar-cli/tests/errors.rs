@@ -22,6 +22,7 @@ fn deedar_xdg(home: &Path, xdg: &Path, args: &[&str]) -> Output {
         .env("DEEDAR_HOST_SIGNING_KEY", "off")
         .env_remove("DEEDAR_HOST_KEY")
         .env_remove("DEEDAR_URL")
+        .env_remove("DEEDAR_TSA")
         .current_dir(home)
         .output()
         .expect("deedar runs")
@@ -575,6 +576,33 @@ fn host_accept_with_no_key_names_how_to_write_one() {
         !String::from_utf8_lossy(&out.stderr).contains("ljos"),
         "{}",
         String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+/// No authority is configured, so the command saves the query and says how
+/// to ask for a token.
+#[test]
+fn timestamp_without_a_tsa_names_the_query_and_the_variable() {
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    let url = store_url(home);
+    quote(home, &url, "deed-quote-survey");
+    let out = deedar(home, &["--url", &url, "timestamp", "deed-quote-survey"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&out.stderr).as_ref(), "");
+    let tsq = home.join("store/deeds/deed-quote-survey.tsq");
+    assert!(tsq.is_file(), "{}", tsq.display());
+    assert_eq!(
+        String::from_utf8(out.stdout).expect("stdout is utf8"),
+        format!(
+            "timestamp {}; DEEDAR_TSA is unset, so this file is the query. \
+             Set DEEDAR_TSA to an RFC 3161 URL to write a .tsr\n",
+            tsq.display()
+        )
     );
 }
 
