@@ -105,14 +105,27 @@ pub fn default_signing_key_path() -> Option<PathBuf> {
 
 /// Load the 32-byte Ed25519 seed the host signs with, if it is configured.
 ///
-/// RFC 8032 defines that seed as 32 octets. `DEEDAR_HOST_SIGNING_KEY` may be
-/// those octets, or a path to a file that contains them. `off` signs nothing.
+/// RFC 8032 defines that seed as 32 octets. `DEEDAR_HOST_SIGNING_KEY` is read
+/// by the first of these rules that fits:
+///
+/// 1. `off` signs nothing, and an empty value is unset.
+/// 2. A value that names a file is that file, which has to be the 32 bytes.
+/// 3. `seed:` then 32 bytes is that seed, whatever the bytes are, `/` and `\`
+///    included.
+/// 4. `hex:` then 64 hex digits is that seed.
+/// 5. A bare value of exactly 32 bytes with no `/` and no `\` is that seed.
+///
+/// Anything else is a path: one that exists and is not a file, or one that is
+/// not there, is refused. A seed that contains `/` or `\` therefore has to be
+/// written with `seed:` or `hex:`, because it cannot be told from a path that
+/// is missing.
+///
 /// Unset, [`default_signing_key_path`] is used when that file exists.
 ///
 /// # Errors
 ///
-/// Fails when the named path is not a file of 32 bytes, and the value itself
-/// is not 32 bytes.
+/// Fails when the named path is not a file of 32 bytes, when `seed:` or `hex:`
+/// does not carry a seed, and when the value is none of the forms above.
 pub fn load_signing_key() -> Result<Option<SigningKey>> {
     match env::var_os("DEEDAR_HOST_SIGNING_KEY") {
         Some(raw) if raw.is_empty() => load_default_signing_key(),
@@ -136,8 +149,12 @@ fn load_configured_signing_key(raw: &std::ffi::OsStr) -> Result<Option<SigningKe
         let path = signing_key_path().unwrap_or(path);
         return Ok(Some(read_seed_file(&path)?));
     }
-    // A slash is a path. A random seed can contain one too: that seed goes
-    // in a file, because a missing path must not be read as the seed.
+    if let Some(seed) = tagged_seed(raw)? {
+        return Ok(Some(SigningKey::from_bytes(&seed)));
+    }
+    // A bare value with a separator is a path, even at 32 bytes: a missing
+    // path must not be read as the seed. `seed:` and `hex:` are how a seed
+    // that contains a separator is written.
     if !looks_like_path(raw) {
         if let Some(seed) = seed_bytes(raw) {
             return Ok(Some(SigningKey::from_bytes(&seed)));
@@ -145,8 +162,13 @@ fn load_configured_signing_key(raw: &std::ffi::OsStr) -> Result<Option<SigningKe
     }
     let shown = path.display();
     if looks_like_path(raw) || path.exists() {
+        let seed_form = if raw.as_encoded_bytes().len() == 32 {
+            "; if those 32 bytes are the seed, write it `seed:` then the bytes, or `hex:` then 64 hex digits"
+        } else {
+            ""
+        };
         return Err(Error::Io(format!(
-            "DEEDAR_HOST_SIGNING_KEY names {shown}, which is not a file; \
+            "DEEDAR_HOST_SIGNING_KEY names {shown}, which is not a file{seed_form}; \
              write 32 bytes there (`head -c 32 /dev/urandom > {shown}`) or set DEEDAR_HOST_SIGNING_KEY=off"
         )));
     }
@@ -157,7 +179,36 @@ fn load_configured_signing_key(raw: &std::ffi::OsStr) -> Result<Option<SigningKe
     )))
 }
 
-/// `/` or `\` means the value is a path, including a 32-byte one.
+/// The `seed:` and `hex:` forms. `None` when the value has neither prefix.
+fn tagged_seed(raw: &std::ffi::OsStr) -> Result<Option<[u8; 32]>> {
+    let bytes = raw.as_encoded_bytes();
+    if let Some(rest) = bytes.strip_prefix(b"seed:") {
+        let seed: [u8; 32] = rest.try_into().map_err(|_| {
+            Error::Io(format!(
+                "DEEDAR_HOST_SIGNING_KEY=seed: takes exactly 32 bytes, and this is {}; \
+                 `hex:` and 64 hex digits write the same seed",
+                rest.len()
+            ))
+        })?;
+        return Ok(Some(seed));
+    }
+    if let Some(rest) = bytes.strip_prefix(b"hex:") {
+        let seed = std::str::from_utf8(rest)
+            .ok()
+            .and_then(crate::attest::from_hex)
+            .ok_or_else(|| {
+                Error::Io(
+                    "DEEDAR_HOST_SIGNING_KEY=hex: takes exactly 64 hex digits, \
+                     the 32 bytes of the seed"
+                        .into(),
+                )
+            })?;
+        return Ok(Some(seed));
+    }
+    Ok(None)
+}
+
+/// `/` or `\` means a bare value is a path, including a 32-byte one.
 fn looks_like_path(raw: &std::ffi::OsStr) -> bool {
     let bytes = raw.as_encoded_bytes();
     bytes.contains(&b'/') || bytes.contains(&b'\\')

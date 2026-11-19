@@ -187,9 +187,31 @@ from an earlier head; =audit= the log against the shelves.
 | Variable | Meaning |
 |---+---|
 | =DEEDAR_URL= | the store, as =file://PATH=. =--url= overrides it for one command |
-| =DEEDAR_HOST_SIGNING_KEY= | a 32-byte Ed25519 seed, or a path to one; signs heads, sidecars and manifests. Unset, =$XDG_CONFIG_HOME/deedar/host.key= is used when it exists, or =~/.config/deedar/host.key= when =XDG_CONFIG_HOME= is unset. =off= signs nothing. A path that is not a file is refused |
+| =DEEDAR_HOST_SIGNING_KEY= | a 32-byte Ed25519 seed, or a path to one; signs heads, sidecars and manifests. The forms are listed under the table. Unset, =$XDG_CONFIG_HOME/deedar/host.key= is used when it exists, or =~/.config/deedar/host.key= when =XDG_CONFIG_HOME= is unset. =off= signs nothing. A path that is not a file is refused |
 | =DEEDAR_HOST_KEY= | a 32-byte keyed-hash key for the host sidecar. Unset, the file is ={store}/../host.key= |
 | =DEEDAR_TSA= | URL of an RFC 3161 timestamp authority. =timestamp= writes a =.tsr= when the authority answers, and a =.tsq= when the variable is unset or the authority times out |
+
+** The signing key variable
+
+=DEEDAR_HOST_SIGNING_KEY= is read by the first of these that fits:
+
+| Value | Meaning |
+|---+---|
+| =off= | sign nothing. An empty value is the same as unset |
+| a path to a file | the 32 bytes in that file |
+| =seed:= then 32 bytes | that seed, whatever the bytes are, including =/= and =\= |
+| =hex:= then 64 hex digits | that seed |
+| exactly 32 bytes, with no =/= and no =\= | that seed |
+
+Anything else is a path, and a path that is not a file is refused.
+A seed that has =/= or =\= in it therefore has to be written with =seed:= or =hex:=, because bare it cannot be told from a path that is missing.
+The refusal for a bare 32-byte value that has one says so and names both forms.
+A value that is not 32 bytes is never a bare seed.
+=hex:= suits a shell, which cannot pass a NUL byte in a variable:
+
+#+begin_src bash
+export DEEDAR_HOST_SIGNING_KEY=hex:$(head -c 32 /dev/urandom | xxd -p -c 64)
+#+end_src
 
 * Crates
 

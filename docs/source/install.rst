@@ -14,7 +14,7 @@ Ed25519 seed, or a path to a file of those bytes, or ``off`` to sign nothing.
 A path that is not a file is refused, and the message names the command that writes one.
 The
 :doc:`reference <reference>` lists ``DEEDAR_HOST_KEY``, ``DEEDAR_TSA``,
-and the ``XDG`` paths. The :doc:`tutorial <getting-started>` is the
+and the ``XDG`` paths, and says how a seed is told from a path. The :doc:`tutorial <getting-started>` is the
 first session.
 
 Linux

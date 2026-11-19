@@ -399,6 +399,50 @@ fn a_file_path_is_not_a_store_and_exits_1() {
     );
 }
 
+/// A bare value of 32 bytes with a separator is a path, whether it is a
+/// missing file or a seed, so the refusal names the forms that write a seed.
+#[cfg(unix)]
+#[test]
+fn a_bare_32_byte_value_with_a_separator_is_refused_and_names_the_seed_forms() {
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    let url = store_url(home);
+    let bare = "/tmp/a/b/c/d/e/f/g/h/i/j/k/l/m/n";
+    assert_eq!(bare.len(), 32);
+    let run = |value: &str| {
+        Command::new(env!("CARGO_BIN_EXE_deedar"))
+            .args([
+                "--url", &url, "create", "file", "--path", "x", "--agent", "you",
+            ])
+            .env("HOME", home)
+            .env("XDG_CONFIG_HOME", home.join(".config"))
+            .env("XDG_DATA_HOME", home.join(".local/share"))
+            .env("DEEDAR_HOST_SIGNING_KEY", value)
+            .env_remove("DEEDAR_HOST_KEY")
+            .env_remove("DEEDAR_URL")
+            .current_dir(home)
+            .output()
+            .expect("deedar runs")
+    };
+    let out = run(bare);
+    assert_eq!(out.status.code(), Some(1));
+    let said = String::from_utf8(out.stderr).expect("stderr is utf8");
+    assert_eq!(said.lines().count(), 1, "{said}");
+    assert!(
+        said.contains(&format!("names {bare}, which is not a file")),
+        "{said}"
+    );
+    assert!(said.contains("`seed:` then the bytes"), "{said}");
+    assert!(said.contains("`hex:` then 64 hex digits"), "{said}");
+
+    let seed = run(&format!("seed:{bare}"));
+    assert!(
+        !String::from_utf8_lossy(&seed.stderr).contains("which is not a file"),
+        "{}",
+        String::from_utf8_lossy(&seed.stderr)
+    );
+}
+
 /// A 32-byte value is the seed. A path that is not there names the file
 /// and the command that writes one, and does not say `store io`.
 #[cfg(unix)]
@@ -409,7 +453,7 @@ fn a_missing_signing_key_path_names_the_file_and_exits_1() {
     let home = tempfile::tempdir().unwrap();
     let home = home.path();
     let url = store_url(home);
-    let missing = home.join("no-such-host.key");
+    let missing = home.join("absent.key");
     let out = Command::new(env!("CARGO_BIN_EXE_deedar"))
         .args([
             "--url", &url, "create", "file", "--path", "x", "--agent", "you",

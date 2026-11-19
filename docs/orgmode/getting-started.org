@@ -172,7 +172,8 @@ the head is unsigned, so every proof above is against a head this bag asserted a
 # [[[end]]]
 
 On the sender, =head -c 32 /dev/urandom > host.key= and =export DEEDAR_HOST_SIGNING_KEY=host.key= sign the head and the manifest.
-A value of 32 bytes with no slash is that seed directly.
+A value of 32 bytes with no =/= or =\= is that seed directly.
+The reference lists the =seed:= and =hex:= forms, for a seed that has one of those characters in it.
 =deedar host= prints =ed25519:<hex>=.
 On the receiver, add a line =signer = ed25519:<hex>= to that store's =layout=.
 =deedar host accept= adds the key this machine signs with.
