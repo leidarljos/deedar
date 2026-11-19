@@ -641,16 +641,35 @@ fn help_text(args: &[String]) -> String {
 
 fn create_help() -> String {
     "deedar create KIND --agent WHO [flags]\n\
-     kinds: file set quote patch maildraft clip page form table procedure event\n\
+     kinds: file set quote patch mailDraft clip page form table procedure event\n\
      create file wants --path FILE and --agent WHO\n\
      create set wants --member PATH (repeatable) and --agent WHO\n\
-     --name NAME     defaults to the kind\n\
+     create quote wants --excerpt TEXT and --src-url URL\n\
+     create patch wants --tree TREE and --diff PATH\n\
+     create mailDraft wants --message-id <local@domain>, --subject TEXT and --path FILE\n\
+     create clip wants --clip-src PATH and --path FILE\n\
+     create page wants --page-url URL and --snapshot FILE\n\
+     create form wants --blank NAME, --field name=value and --path FILE\n\
+     create table wants --measure name=value\n\
+     create procedure wants --step TEXT\n\
+     create event wants --title or --name, --when WHEN, --where WHERE and --who WHO\n\
+     --name NAME     defaults to the kind, or to --title for an event\n\
      --path FILE     the bytes for kind file (not --field path=)\n\
      --supersedes ID the deed this one revises\n\
      the same create again prints the deed it froze and exits 0; other bytes\n\
      under the same name are refused: revise with --name NAME-v2 --supersedes ID\n\
      the last stdout line is accession=ID: cite that ID, not the file= line\n"
         .into()
+}
+
+/// An unknown kind token, the tokens that work, and the page that lists flags.
+fn kind_error(raw: &str) -> String {
+    let kinds = Kind::all()
+        .iter()
+        .map(Kind::token)
+        .collect::<Vec<_>>()
+        .join(" ");
+    format!("invalid kind: {raw}; kinds: {kinds}; `deedar create --help`")
 }
 
 /// `--help`, `-h`, `--version`, `-V`, and the import switch
@@ -1022,7 +1041,11 @@ fn cmd_create(client: &mut Client, args: &[String]) -> Result<String, String> {
         return Err("create file wants --path FILE".into());
     }
     if name.is_empty() {
-        name = kind.clone();
+        name = if kind == "event" && !title.is_empty() {
+            title.clone()
+        } else {
+            kind.clone()
+        };
     }
     if edition.is_empty() && !urls.is_empty() {
         edition = urls[0].clone();
@@ -1030,7 +1053,7 @@ fn cmd_create(client: &mut Client, args: &[String]) -> Result<String, String> {
     if range_end == 0 && !excerpt.is_empty() {
         range_end = excerpt.len() as u64;
     }
-    let kind = Kind::parse(kind).map_err(|e| e.to_string())?;
+    let kind = Kind::parse(kind).map_err(|_| kind_error(kind))?;
     let body = match kind {
         Kind::File => Body::File {
             path,
@@ -1277,7 +1300,7 @@ fn cmd_list(client: &mut Client, args: &[String]) -> Result<String, String> {
         match args[i].as_str() {
             "--kind" => {
                 let raw = list_value(args, &mut i, "--kind")?;
-                kind = Some(Kind::parse(&raw).map_err(|e| e.to_string())?);
+                kind = Some(Kind::parse(&raw).map_err(|_| kind_error(&raw))?);
             }
             "--agent" => agent = Some(list_value(args, &mut i, "--agent")?),
             "--text" => text = Some(list_value(args, &mut i, "--text")?),

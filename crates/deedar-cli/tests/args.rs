@@ -63,10 +63,19 @@ host accept adds the host signing key to the layout as a signer, and leaves ever
 
 const CREATE_HELP: &str = "\
 deedar create KIND --agent WHO [flags]
-kinds: file set quote patch maildraft clip page form table procedure event
+kinds: file set quote patch mailDraft clip page form table procedure event
 create file wants --path FILE and --agent WHO
 create set wants --member PATH (repeatable) and --agent WHO
---name NAME     defaults to the kind
+create quote wants --excerpt TEXT and --src-url URL
+create patch wants --tree TREE and --diff PATH
+create mailDraft wants --message-id <local@domain>, --subject TEXT and --path FILE
+create clip wants --clip-src PATH and --path FILE
+create page wants --page-url URL and --snapshot FILE
+create form wants --blank NAME, --field name=value and --path FILE
+create table wants --measure name=value
+create procedure wants --step TEXT
+create event wants --title or --name, --when WHEN, --where WHERE and --who WHO
+--name NAME     defaults to the kind, or to --title for an event
 --path FILE     the bytes for kind file (not --field path=)
 --supersedes ID the deed this one revises
 the same create again prints the deed it froze and exits 0; other bytes
@@ -193,4 +202,56 @@ fn list_url_after_the_verb_selects_that_store() {
     line(&listed, "excerpt=kept in this store");
     let empty = ok(home, &["list", "--url", &other]);
     assert_eq!(empty, "");
+}
+
+/// `create --help` used to spell the kind `maildraft`, which `create` refuses.
+#[test]
+fn create_help_spells_mail_draft_and_an_unknown_kind_lists_the_tokens() {
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    let page = ok(home, &["create", "--help"]);
+    assert!(page.contains("mailDraft"), "{page}");
+    assert!(!page.contains("maildraft"), "{page}");
+    let url = store_url(home);
+    let out = deedar(
+        home,
+        &["--url", &url, "create", "maildraft", "--agent", "you"],
+    );
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(String::from_utf8_lossy(&out.stdout).as_ref(), "");
+    let err = String::from_utf8(out.stderr).expect("stderr is utf8");
+    assert!(err.contains("invalid kind: maildraft"), "{err}");
+    assert!(err.contains("mailDraft"), "{err}");
+    assert!(err.contains("`deedar create --help`"), "{err}");
+    let listed = deedar(home, &["--url", &url, "list", "--kind", "File"]);
+    assert_eq!(listed.status.code(), Some(1));
+    let err = String::from_utf8(listed.stderr).expect("stderr is utf8");
+    assert!(err.contains("invalid kind: File"), "{err}");
+    assert!(err.contains("mailDraft"), "{err}");
+}
+
+/// The reference lists `--title` for an event. That text is the deed name
+/// when `--name` was omitted.
+#[test]
+fn an_event_title_is_the_deed_name() {
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    let url = store_url(home);
+    let made = ok(
+        home,
+        &[
+            "--url", &url, "create", "event", "--title", "launch", "--when", "now", "--where",
+            "here", "--who", "me", "--agent", "you",
+        ],
+    );
+    assert!(made.contains("name=launch"), "{made}");
+    line(&made, "accession=deed-event-launch");
+    let named = ok(
+        home,
+        &[
+            "--url", &url, "create", "event", "--name", "kept", "--title", "ignored", "--when",
+            "now", "--where", "here", "--who", "me", "--agent", "you",
+        ],
+    );
+    assert!(named.contains("name=kept"), "{named}");
 }

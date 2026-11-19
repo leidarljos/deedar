@@ -56,7 +56,8 @@ Kinds
 =====
 
 ``file``, ``set``, ``quote``, ``patch``, ``mailDraft``, ``clip``, ``page``, ``form``,
-``table``, ``procedure``, ``event``. The flags a kind reads:
+``table``, ``procedure``, ``event``. ``deedar create --help`` lists these flags.
+The flags a kind reads:
 
 ============= ===========================================================================
 Kind          Flags
