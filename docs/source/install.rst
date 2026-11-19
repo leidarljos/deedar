@@ -112,7 +112,7 @@ text, which can differ from this tree's, including the ``list`` flags.
 .. code:: console
 
    $ deedar --version
-   deedar 0.7.0
+   deedar 0.7.1
    $ deedar --help
    usage: deedar [--url FILE] create|get|list|trail|evidence|delete|leave|timestamp|current|log|export|import|check|vouch|migrate|host|url
    deedar --help            this page
