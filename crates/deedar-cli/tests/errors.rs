@@ -22,6 +22,7 @@ fn deedar_xdg(home: &Path, xdg: &Path, args: &[&str]) -> Output {
         .env("DEEDAR_HOST_SIGNING_KEY", "off")
         .env_remove("DEEDAR_HOST_KEY")
         .env_remove("DEEDAR_URL")
+        .env_remove("DEEDAR_TSA")
         .current_dir(home)
         .output()
         .expect("deedar runs")
@@ -395,6 +396,257 @@ fn a_file_path_is_not_a_store_and_exits_1() {
             "deedar: {} is not a store; `export DEEDAR_URL=file://PATH` or `deedar --url file://PATH`\n",
             file.display()
         ),
+    );
+}
+
+/// A bare value of 32 bytes with a separator is a path, whether it is a
+/// missing file or a seed, so the refusal names the forms that write a seed.
+#[cfg(unix)]
+#[test]
+fn a_bare_32_byte_value_with_a_separator_is_refused_and_names_the_seed_forms() {
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    let url = store_url(home);
+    let bare = "/tmp/a/b/c/d/e/f/g/h/i/j/k/l/m/n";
+    assert_eq!(bare.len(), 32);
+    let run = |value: &str| {
+        Command::new(env!("CARGO_BIN_EXE_deedar"))
+            .args([
+                "--url", &url, "create", "file", "--path", "x", "--agent", "you",
+            ])
+            .env("HOME", home)
+            .env("XDG_CONFIG_HOME", home.join(".config"))
+            .env("XDG_DATA_HOME", home.join(".local/share"))
+            .env("DEEDAR_HOST_SIGNING_KEY", value)
+            .env_remove("DEEDAR_HOST_KEY")
+            .env_remove("DEEDAR_URL")
+            .current_dir(home)
+            .output()
+            .expect("deedar runs")
+    };
+    let out = run(bare);
+    assert_eq!(out.status.code(), Some(1));
+    let said = String::from_utf8(out.stderr).expect("stderr is utf8");
+    assert_eq!(said.lines().count(), 1, "{said}");
+    assert!(
+        said.contains(&format!("names {bare}, which is not a file")),
+        "{said}"
+    );
+    assert!(said.contains("`seed:` then the bytes"), "{said}");
+    assert!(said.contains("`hex:` then 64 hex digits"), "{said}");
+
+    let seed = run(&format!("seed:{bare}"));
+    assert!(
+        !String::from_utf8_lossy(&seed.stderr).contains("which is not a file"),
+        "{}",
+        String::from_utf8_lossy(&seed.stderr)
+    );
+}
+
+/// A 32-byte value is the seed. A path that is not there names the file
+/// and the command that writes one, and does not say `store io`.
+#[cfg(unix)]
+#[test]
+fn a_missing_signing_key_path_names_the_file_and_exits_1() {
+    use std::os::unix::ffi::OsStringExt;
+
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    let url = store_url(home);
+    let missing = home.join("absent.key");
+    let out = Command::new(env!("CARGO_BIN_EXE_deedar"))
+        .args([
+            "--url", &url, "create", "file", "--path", "x", "--agent", "you",
+        ])
+        .env("HOME", home)
+        .env("XDG_CONFIG_HOME", home.join(".config"))
+        .env("XDG_DATA_HOME", home.join(".local/share"))
+        .env("DEEDAR_HOST_SIGNING_KEY", &missing)
+        .env_remove("DEEDAR_HOST_KEY")
+        .env_remove("DEEDAR_URL")
+        .current_dir(home)
+        .output()
+        .expect("deedar runs");
+    refused(
+        &out,
+        &format!(
+            "deedar: DEEDAR_HOST_SIGNING_KEY names {}, which is not a file; \
+             write 32 bytes there (`head -c 32 /dev/urandom > {}`) or set DEEDAR_HOST_SIGNING_KEY=off\n",
+            missing.display(),
+            missing.display()
+        ),
+    );
+
+    let seed = std::ffi::OsString::from_vec(vec![0x11; 32]);
+    let out = Command::new(env!("CARGO_BIN_EXE_deedar"))
+        .args([
+            "--url",
+            &url,
+            "create",
+            "quote",
+            "--excerpt",
+            "seed",
+            "--src-url",
+            "https://example.invalid/edition",
+            "--agent",
+            "you",
+        ])
+        .env("HOME", home)
+        .env("XDG_CONFIG_HOME", home.join(".config"))
+        .env("XDG_DATA_HOME", home.join(".local/share"))
+        .env("DEEDAR_HOST_SIGNING_KEY", seed)
+        .env_remove("DEEDAR_HOST_KEY")
+        .env_remove("DEEDAR_URL")
+        .current_dir(home)
+        .output()
+        .expect("deedar runs");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let host = Command::new(env!("CARGO_BIN_EXE_deedar"))
+        .args(["--url", &url, "host"])
+        .env("HOME", home)
+        .env("XDG_CONFIG_HOME", home.join(".config"))
+        .env("XDG_DATA_HOME", home.join(".local/share"))
+        .env(
+            "DEEDAR_HOST_SIGNING_KEY",
+            std::ffi::OsString::from_vec(vec![0x11; 32]),
+        )
+        .env_remove("DEEDAR_HOST_KEY")
+        .env_remove("DEEDAR_URL")
+        .current_dir(home)
+        .output()
+        .expect("deedar runs");
+    assert!(
+        host.status.success(),
+        "{}",
+        String::from_utf8_lossy(&host.stderr)
+    );
+    let said = String::from_utf8(host.stdout).expect("stdout is utf8");
+    let file = home.join("seed.key");
+    std::fs::write(&file, [0x11; 32]).unwrap();
+    let from_file = Command::new(env!("CARGO_BIN_EXE_deedar"))
+        .args(["--url", &url, "host"])
+        .env("HOME", home)
+        .env("XDG_CONFIG_HOME", home.join(".config"))
+        .env("XDG_DATA_HOME", home.join(".local/share"))
+        .env("DEEDAR_HOST_SIGNING_KEY", &file)
+        .env_remove("DEEDAR_HOST_KEY")
+        .env_remove("DEEDAR_URL")
+        .current_dir(home)
+        .output()
+        .expect("deedar runs");
+    assert!(
+        from_file.status.success(),
+        "{}",
+        String::from_utf8_lossy(&from_file.stderr)
+    );
+    let file_said = String::from_utf8(from_file.stdout).expect("stdout is utf8");
+    let key = file_said
+        .split_whitespace()
+        .find(|word| word.starts_with("ed25519:"))
+        .expect("public key")
+        .trim_end_matches(',');
+    assert!(said.contains(key), "{said}");
+}
+
+/// No host key, and no `ljos` command in this checkout. The refusal names
+/// the bytes to write.
+/// A create that is short a flag names that flag, and a missing file names `--path`.
+#[test]
+fn create_names_the_flag_it_still_needs() {
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    let url = store_url(home);
+    let cases = [
+        (
+            vec!["--url", &url, "create", "file", "--path"],
+            "deedar: --path needs a value\n",
+        ),
+        (
+            vec!["--url", &url, "create", "--agent", "you"],
+            "deedar: create needs a kind before the flags; `deedar create --help`\n",
+        ),
+        (
+            vec!["--url", &url, "create", "quote", "--agent", "you"],
+            "deedar: create quote wants --excerpt TEXT and --src-url URL; `deedar create --help`\n",
+        ),
+        (
+            vec!["--url", &url, "create", "mailDraft", "--agent", "you"],
+            "deedar: create mailDraft wants --message-id <local@domain>, --subject TEXT and --path FILE; `deedar create --help`\n",
+        ),
+    ];
+    for (args, stderr) in cases {
+        let out = deedar(home, &args);
+        refused(&out, stderr);
+    }
+    let missing = home.join("no-such-note.rs");
+    let out = deedar(
+        home,
+        &[
+            "--url",
+            &url,
+            "create",
+            "file",
+            "--path",
+            missing.to_str().unwrap(),
+            "--agent",
+            "you",
+        ],
+    );
+    refused(
+        &out,
+        &format!(
+            "deedar: {} is not a file; --path needs a regular file\n",
+            missing.display()
+        ),
+    );
+}
+
+#[test]
+fn host_accept_with_no_key_names_how_to_write_one() {
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    let url = store_url(home);
+    let out = deedar(home, &["--url", &url, "host", "accept"]);
+    refused(
+        &out,
+        "deedar: host key: none; set DEEDAR_HOST_SIGNING_KEY to a 32-byte seed, \
+         or to a file of those bytes (`head -c 32 /dev/urandom > host.key`)\n",
+    );
+    assert!(
+        !String::from_utf8_lossy(&out.stderr).contains("ljos"),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+/// No authority is configured, so the command saves the query and says how
+/// to ask for a token.
+#[test]
+fn timestamp_without_a_tsa_names_the_query_and_the_variable() {
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    let url = store_url(home);
+    quote(home, &url, "deed-quote-survey");
+    let out = deedar(home, &["--url", &url, "timestamp", "deed-quote-survey"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&out.stderr).as_ref(), "");
+    let tsq = home.join("store/deeds/deed-quote-survey.tsq");
+    assert!(tsq.is_file(), "{}", tsq.display());
+    assert_eq!(
+        String::from_utf8(out.stdout).expect("stdout is utf8"),
+        format!(
+            "timestamp {}; DEEDAR_TSA is unset, so this file is the query. \
+             Set DEEDAR_TSA to an RFC 3161 URL to write a .tsr\n",
+            tsq.display()
+        )
     );
 }
 

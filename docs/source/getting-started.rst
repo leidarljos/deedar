@@ -10,14 +10,16 @@ on the :doc:`concepts <concepts>` page.
 1. Point at a store
 ===================
 
-A store is a directory. It is created on first write. With no deeds,
-``list`` prints nothing.
+A store is a directory. The first ``create`` or ``import`` makes it, and a
+read does not. Until then, ``list`` prints one line on standard error that
+there is no store yet and how to make one, and nothing else.
 
 .. code:: console
 
    $ export DEEDAR_URL=file:///tmp/deeds
    $ export DEEDAR_HOST_SIGNING_KEY=off
    $ deedar list
+   deedar: no store at /tmp/deeds yet; `deedar create --help` shows how to make the first deed, and create makes the store
 
 2. Mint a deed
 ==============
@@ -112,12 +114,16 @@ The receiver needs no store and no network.
    1 deeds proven against a log of 2 entries, root d4d103452fb3ae6627162c8bc78f4169a47a31e825866693b548874ff5e59eca
    the head is unsigned, so every proof above is against a head this bag asserted about itself
 
-Set ``DEEDAR_HOST_SIGNING_KEY`` on the sender to a 32-byte seed and the head
-and the manifest come signed; add the verifying key to the receiver's
-``layout`` and the last line reads ``(accepted)``. On the next handover from the
-same sender, record the head with ``deedar check /tmp/bag --keep head.txt``;
-on the next handover ``deedar check /tmp/bag2 --since head.txt`` also shows the
-log grew from that head, and was not rewritten.
+On the sender, ``head -c 32 /dev/urandom > host.key`` and ``export DEEDAR_HOST_SIGNING_KEY=host.key`` sign the head and the manifest.
+A value of 32 bytes with no ``/`` or ``\`` is that seed directly.
+The reference lists the ``seed:`` and ``hex:`` forms, for a seed that has one of those characters in it.
+``deedar host`` prints ``ed25519:<hex>``.
+On the receiver, add a line ``signer = ed25519:<hex>`` to that store's ``layout``.
+``deedar host accept`` adds the key this machine signs with.
+That is the sender's key when it is run on the sender.
+With the receiver's ``signer`` line, the last line of ``deedar check`` reads ``(accepted)``.
+On the next handover from the same sender, record the head with ``deedar check /tmp/bag --keep head.txt``.
+On the next handover ``deedar check /tmp/bag2 --since head.txt`` also shows the log grew from that head, and was not rewritten.
 
 Where next
 ==========

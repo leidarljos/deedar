@@ -9,7 +9,11 @@ Command line
 ``deedar [--url FILE] VERB ...``.
 The store is ``--url``, else ``DEEDAR_URL``, else the seat's own store under the user's data directory (``$XDG_DATA_HOME/deedar/store``).
 ``create`` and ``import`` make that store on the first write, and print ``deedar: created the store at PATH`` on stderr.
-A read names the missing path and stops.
+A read makes no store.
+With no URL set and no seat store, it names the seat path and stops.
+At a ``--url`` or ``DEEDAR_URL`` path with no store, ``list`` prints ``deedar: no store at PATH yet`` and how to create one on stderr, prints nothing else, and exits 0.
+Every other read prints the same line and exits 1.
+``url``, ``check`` and ``vouch`` need no store.
 
 =================================================================================== ===============================================================================================================================================================================================================================================================
 Verb                                                                                Does
@@ -21,17 +25,18 @@ Verb                                                                            
 ``evidence ID... | -``                                                              the bytes are intact; one line each; non-zero on any failure
 ``current ID... | -``                                                               the tip of each supersede chain; non-zero when any citation is stale or missing
 ``delete ID``                                                                       tombstone
-``leave ID``                                                                        a left-behind marker for a deed that moved store
-``timestamp ID``                                                                    a timestamp token over the deed
+``leave ID DIR``                                                                    a left-behind marker for a deed that moved store, written under DIR
+``timestamp ID``                                                                    a timestamp token over the deed. With ``DEEDAR_TSA`` unset the line names the query file and how to set the variable
 ``export --into DIR ID... | -``                                                     deed, bytes, evidence, receipt (and signed head) into a satchel
 ``import DIR [--allow-unsigned-head]``                                              check a satchel and hold its deeds here with the receipt fields they travelled with; nothing is written unless every deed can be held, ``--allow-unsigned-head`` waives a missing or unlisted signature, and ``attestation = required`` warns and still imports
 ``check DIR [--since KEPT] [--bridge FILE] [--keep FILE]``                          every receipt against the head in the bag; with ``--since``, that the bag's bridge (``bridge.txt``) grows the head you kept into this one; ``--keep`` records this head for next time
-``log head | list | audit | backfill | prove ID | bridge SIZE``                     the append-only log
+``log head | list | audit | backfill | prove ID | bridge SIZE``                     the append-only log. ``head`` is a command to name: a bare ``deedar log`` prints that list on stderr, reads no store, and exits 2
 ``vouch sign FILE | check FILE``                                                    a detached Ed25519 signature beside a file
 ``migrate``                                                                         move a store to the current layout
 ``host``                                                                            whether the store's layout lists the host signing key; exits 1 when it does not
-``host accept``                                                                     add the host signing key to the layout as a signer, and leave every other line. Refuses when the layout says ``attestation = required``
+``host accept``                                                                     add the host signing key to the layout as a signer, and leave every other line. Refuses when the layout says ``attestation = required``. With no key, the refusal names the command that writes one.
 ``url``                                                                             print the store URL this command resolved: ``--url``, else ``DEEDAR_URL``, else the seat store when that directory is already there
+``help``                                                                            this page; ``help VERB`` and ``VERB --help`` are the page for that verb, each with its own arguments and exit status. ``deedar help`` does not open a store
 =================================================================================== ===============================================================================================================================================================================================================================================================
 
 Exit codes
@@ -45,7 +50,7 @@ Exit codes
 | 1    | the command stopped short of what it was asked. An unknown accession, an ambiguous prefix, an unset ``DEEDAR_URL``, and a path outside a store are this code, and so is every other refusal, including ``host`` when the layout does not list the signing key. ``evidence`` and ``current`` over several accessions exit 1 when any line failed. A refusal prints one stderr line, ``deedar:`` and   |
 |      | the reason, naming the input and the next command. An ambiguous prefix also lists the matching accessions, in byte order, up to the bound that line states                                                                                                                                                                                                                                           |
 +------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-| 2    | ``check`` and ``vouch check`` finished, and the signer falls outside the accepted set                                                                                                                                                                                                                                                                                                                |
+| 2    | ``check`` and ``vouch check`` finished, and the signer falls outside the accepted set. A bare ``log`` is also 2: it printed its usage and read nothing                                                                                                                                                                                                                                               |
 +------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
 
 The constant is ``EXIT_UNTRUSTED_SIGNER``.
@@ -56,7 +61,9 @@ Kinds
 =====
 
 ``file``, ``set``, ``quote``, ``patch``, ``mailDraft``, ``clip``, ``page``, ``form``,
-``table``, ``procedure``, ``event``. The flags a kind reads:
+``table``, ``procedure``, ``event``. ``deedar create --help`` lists these flags.
+A missing flag is named on stderr.
+The flags a kind reads:
 
 ============= ===========================================================================
 Kind          Flags
@@ -191,14 +198,39 @@ from an earlier head; ``audit`` the log against the shelves.
 Environment
 ===========
 
-=========================== ============================================================================================================================================================================================================================================
+=========================== ========================================================================================================================================================================================================================================================================================================================
 Variable                    Meaning
-=========================== ============================================================================================================================================================================================================================================
+=========================== ========================================================================================================================================================================================================================================================================================================================
 ``DEEDAR_URL``              the store, as ``file://PATH``. ``--url`` overrides it for one command
-``DEEDAR_HOST_SIGNING_KEY`` a 32-byte Ed25519 seed, or a path to one; signs heads, sidecars and manifests. Unset, ``$XDG_CONFIG_HOME/deedar/host.key`` is used when it exists, or ``~/.config/deedar/host.key`` when ``XDG_CONFIG_HOME`` is unset. ``off`` signs nothing
+``DEEDAR_HOST_SIGNING_KEY`` a 32-byte Ed25519 seed, or a path to one; signs heads, sidecars and manifests. The forms are listed under the table. Unset, ``$XDG_CONFIG_HOME/deedar/host.key`` is used when it exists, or ``~/.config/deedar/host.key`` when ``XDG_CONFIG_HOME`` is unset. ``off`` signs nothing. A path that is not a file is refused
 ``DEEDAR_HOST_KEY``         a 32-byte keyed-hash key for the host sidecar. Unset, the file is ``{store}/../host.key``
 ``DEEDAR_TSA``              URL of an RFC 3161 timestamp authority. ``timestamp`` writes a ``.tsr`` when the authority answers, and a ``.tsq`` when the variable is unset or the authority times out
-=========================== ============================================================================================================================================================================================================================================
+=========================== ========================================================================================================================================================================================================================================================================================================================
+
+The signing key variable
+------------------------
+
+``DEEDAR_HOST_SIGNING_KEY`` is read by the first of these that fits:
+
+============================================ ============================================================
+Value                                        Meaning
+============================================ ============================================================
+``off``                                      sign nothing. An empty value is the same as unset
+a path to a file                             the 32 bytes in that file
+``seed:`` then 32 bytes                      that seed, whatever the bytes are, including ``/`` and ``\``
+``hex:`` then 64 hex digits                  that seed
+exactly 32 bytes, with no ``/`` and no ``\`` that seed
+============================================ ============================================================
+
+Anything else is a path, and a path that is not a file is refused.
+A seed that has ``/`` or ``\`` in it therefore has to be written with ``seed:`` or ``hex:``, because bare it cannot be told from a path that is missing.
+The refusal for a bare 32-byte value that has one says so and names both forms.
+A value that is not 32 bytes is never a bare seed.
+``hex:`` suits a shell, which cannot pass a NUL byte in a variable:
+
+.. code:: bash
+
+   export DEEDAR_HOST_SIGNING_KEY=hex:$(head -c 32 /dev/urandom | xxd -p -c 64)
 
 Crates
 ======

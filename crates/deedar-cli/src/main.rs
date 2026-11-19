@@ -27,6 +27,15 @@ fn main() -> ExitCode {
 /// which is a check that did finish on a signer the reader does not accept.
 const EXIT_FAILED: u8 = 1;
 
+/// A command line that names a verb and leaves out what it has to be given,
+/// where the answer is the verb's usage and no store was read. Also the code
+/// of [`deedar::EXIT_UNTRUSTED_SIGNER`], which only `check` and `vouch check`
+/// return.
+const EXIT_USAGE: u8 = 2;
+
+/// What `log` takes, in the words usage and every refusal use.
+const LOG_TAKES: &str = "log takes head, list, audit, backfill, prove ID, or bridge SIZE";
+
 /// What a verb produced: text to print, and the status when it is not success.
 ///
 /// `code` is `None` for success. `Some(EXIT_FAILED)` is a command that did
@@ -60,7 +69,51 @@ fn dispatch(args: Vec<String>) -> Result<Report, String> {
             code: None,
         });
     }
+    // No verb, `help`, and an unknown verb are pages. Resolving the store
+    // first would refuse a machine that has no store yet, or make a
+    // directory for a command that has nothing to do there.
+    if split.url_error.is_none() {
+        if !split.rest.iter().any(|arg| !arg.starts_with('-')) {
+            return Err(usage().trim_end().to_string());
+        }
+        if let Some(verb) = split.rest.first().map(String::as_str) {
+            if verb == "help" {
+                let topic: Vec<String> = split.rest.iter().skip(1).cloned().collect();
+                return Ok(Report {
+                    text: help_text(&topic),
+                    code: None,
+                });
+            }
+            if !is_verb(verb) {
+                return Err(format!("unknown command {verb}; `deedar --help`"));
+            }
+            if verb == "log" && split.rest.len() == 1 {
+                eprintln!("deedar: {}", log_needs_a_command());
+                return Ok(Report {
+                    text: String::new(),
+                    code: Some(EXIT_USAGE),
+                });
+            }
+        }
+    }
     let (url, rest) = take_url(&args)?;
+    if let Some(dir) = no_store_yet(&url, &rest) {
+        let note = format!(
+            "no store at {} yet; `deedar create --help` shows how to make the first deed, \
+             and create makes the store",
+            dir.display()
+        );
+        // An empty list is the answer for a store with no deeds; every other
+        // read needs a deed that is not there.
+        if rest.first().map(String::as_str) == Some("list") {
+            eprintln!("deedar: {note}");
+            return Ok(Report {
+                text: String::new(),
+                code: None,
+            });
+        }
+        return Err(note);
+    }
     if rest.first().map(String::as_str) == Some("evidence") && is_many(&rest[1..]) {
         return evidence_many(&url, &rest[1..]);
     }
@@ -206,7 +259,7 @@ fn cmd_vouch(url: &str, args: &[String]) -> Result<(String, Option<u8>), String>
     match args.first().map(String::as_str) {
         Some("sign") => {
             let path = PathBuf::from(args.get(1).ok_or("vouch sign needs a file")?);
-            let out = deedar::vouch::sign(&path).map_err(|e| e.to_string())?;
+            let out = deedar::vouch::sign(&path).map_err(|e| show_store_err(&e))?;
             Ok((format!("{}\n", out.display()), None))
         }
         Some("check") => {
@@ -220,7 +273,9 @@ fn cmd_vouch(url: &str, args: &[String]) -> Result<(String, Option<u8>), String>
             });
             Ok((checked.render(), code))
         }
-        Some(other) => Err(format!("unknown vouch command {other}")),
+        Some(other) => Err(format!(
+            "unknown vouch command {other}; vouch takes sign FILE or check FILE"
+        )),
         None => Err("vouch takes sign FILE or check FILE".into()),
     }
 }
@@ -398,7 +453,8 @@ fn cmd_import(client: &mut Client, args: &[String]) -> Result<String, String> {
 /// kept head to this one, `audit` of the log against the shelves.
 fn cmd_log(client: &mut Client, url: &str, args: &[String]) -> Result<String, String> {
     match args.first().map(String::as_str) {
-        Some("head") | None => {
+        None => Err(log_needs_a_command()),
+        Some("head") => {
             // Signed when this store holds a key, because the head is the one
             // thing a reader keeps between visits and an unsigned one is two
             // numbers they were handed.
@@ -472,12 +528,35 @@ fn cmd_log(client: &mut Client, url: &str, args: &[String]) -> Result<String, St
                 added.len()
             ))
         }
-        Some(other) => Err(format!("unknown log command {other}")),
+        Some(other) => Err(format!("unknown log command {other}; {LOG_TAKES}")),
     }
 }
 
+/// `deedar log` alone. Which of its commands was meant is not a guess to make
+/// for the seat: `head` is one of six, and `backfill` writes.
+fn log_needs_a_command() -> String {
+    format!("log needs a command; {LOG_TAKES}; `deedar log --help`")
+}
+
 fn finish(args: Vec<String>) -> Result<(String, Option<u8>), String> {
+    let split = split_argv(&args);
+    if let Some(err) = split.url_error {
+        return Err(err.to_string());
+    }
+    // A missing verb is the usage page. Opening the store first would make
+    // a directory for a command that has nothing to do there.
+    if !split.rest.iter().any(|arg| !arg.starts_with('-')) {
+        return Err(usage().trim_end().to_string());
+    }
     let (url, rest) = take_url(&args)?;
+    // `url` names the store this command resolved and has nothing to read in
+    // it, so it does not open it: opening makes a store that is not there.
+    if rest.first().map(String::as_str) == Some("url") {
+        return succeeded(Ok(format!(
+            "{}\n",
+            StoreUrl::parse(&url).map_err(|e| e.to_string())?.as_url()
+        )));
+    }
     // Before open: open is what creates the directory.
     let created_seat = creating_the_seat_store(&args, &rest);
     let mut client = open_client(&url)?;
@@ -486,7 +565,8 @@ fn finish(args: Vec<String>) -> Result<(String, Option<u8>), String> {
             let layout = client.dir().join("layout");
             succeeded(match client.accept_host_signer().map_err(|e| e.to_string())? {
                 None => Err(
-                    "host key: none; set DEEDAR_HOST_SIGNING_KEY or run `ljos onboard` first"
+                    "host key: none; set DEEDAR_HOST_SIGNING_KEY to a 32-byte seed, \
+                     or to a file of those bytes (`head -c 32 /dev/urandom > host.key`)"
                         .into(),
                 ),
                 Some((public, true)) => Ok(format!(
@@ -572,7 +652,19 @@ fn finish(args: Vec<String>) -> Result<(String, Option<u8>), String> {
             let raw = rest.get(1).ok_or("timestamp needs an id")?;
             let id = resolve_id(&mut client, &url, raw)?;
             let path = client.timestamp(&id).map_err(|e| e.to_string())?;
-            succeeded(Ok(format!("timestamp {}\n", path.display())))
+            // A `.tsq` on the success path is the query saved because no
+            // authority was configured. A timeout is an error and already
+            // names the file.
+            let line = if path.extension().is_some_and(|ext| ext == "tsq") {
+                format!(
+                    "timestamp {}; DEEDAR_TSA is unset, so this file is the query. \
+                     Set DEEDAR_TSA to an RFC 3161 URL to write a .tsr\n",
+                    path.display()
+                )
+            } else {
+                format!("timestamp {}\n", path.display())
+            };
+            succeeded(Ok(line))
         }
         Some("current") => {
             let raw = rest.get(1).ok_or("current needs an id")?;
@@ -603,23 +695,53 @@ fn finish(args: Vec<String>) -> Result<(String, Option<u8>), String> {
             "{}\n",
             StoreUrl::parse(&url).map_err(|e| e.to_string())?.as_url()
         ))),
-        Some(other) => Err(format!("unknown command {other}")),
+        Some(other) => Err(format!("unknown command {other}; `deedar --help`")),
         None => Err(usage().trim_end().to_string()),
     }
 }
 
 fn usage() -> String {
-    "usage: deedar [--url FILE] create|get|list|trail|evidence|delete|leave|timestamp|current|log|export|import|check|vouch|migrate|host\n\
+    "usage: deedar [--url FILE] create|get|list|trail|evidence|delete|leave|timestamp|current|log|export|import|check|vouch|migrate|host|url\n\
      deedar --help            this page\n\
-     deedar create --help     kinds and flags, including --path\n\
+     deedar help              this page\n\
+     deedar VERB --help       the page for one verb, with its flags\n\
+     deedar help VERB         the same page\n\
      evidence, current and export take one id, several ids, or - to read them from stdin\n\
      list takes --kind KIND, --agent ID and --text WORDS\n\
      log takes head, list, audit, backfill, prove ID, or bridge SIZE\n\
      import takes a satchel directory, and --allow-unsigned-head for a missing or unlisted signature\n\
      check takes a satchel directory, --since KEPT_HEAD, --bridge FILE and --keep FILE; vouch takes sign FILE or check FILE\n\
+     leave takes an id and a destination directory\n\
+     timestamp writes a .tsr when DEEDAR_TSA answers, and names the .tsq when that variable is unset\n\
      host says whether the store's layout lists the host signing key, and exits 1 when it does not\n\
-     host accept adds the host signing key to the layout as a signer, and leaves every other line\n"
+     host accept adds the host signing key to the layout as a signer, and leaves every other line\n\
+     url prints the store this command resolved\n"
         .into()
+}
+
+/// A word the command line accepts as a verb. `help` is a page, handled
+/// before the store is opened, so it is not in this list.
+fn is_verb(name: &str) -> bool {
+    matches!(
+        name,
+        "create"
+            | "get"
+            | "list"
+            | "trail"
+            | "evidence"
+            | "delete"
+            | "leave"
+            | "timestamp"
+            | "current"
+            | "log"
+            | "export"
+            | "import"
+            | "check"
+            | "vouch"
+            | "migrate"
+            | "host"
+            | "url"
+    )
 }
 
 /// Help for the verb, the first word that is not a flag.
@@ -634,22 +756,165 @@ fn help_text(args: &[String]) -> String {
         .find(|a| !a.starts_with('-'));
     match verb {
         Some("create") => create_help(),
-        _ => usage(),
+        Some(name) => verb_help(name).map_or_else(usage, str::to_string),
+        None => usage(),
     }
+}
+
+/// The page for one verb other than `create`, which has the longer
+/// [`create_help`]. Each names the arguments, what is printed, and the exit
+/// status when it is not 0.
+fn verb_help(verb: &str) -> Option<&'static str> {
+    Some(match verb {
+        "get" => {
+            "deedar get ID\n\
+             prints one deed, flattened, one field a line\n\
+             ID is an accession, or a prefix of one that names a single deed\n\
+             an unknown or ambiguous ID exits 1 and, for a prefix, lists the matches\n"
+        }
+        "list" => {
+            "deedar list [--kind KIND] [--agent ID] [--text WORDS]\n\
+             prints every deed in accession order, one block each\n\
+             a flag narrows the list; the flags given all have to match\n\
+             a store with no deeds prints nothing\n"
+        }
+        "trail" => {
+            "deedar trail ID\n\
+             prints the deed and every input it was made from\n"
+        }
+        "evidence" => {
+            "deedar evidence ID...\n\
+             deedar evidence -\n\
+             checks that the bytes of each deed are intact, and that a host sidecar, when\n\
+             there is one, is signed by a key the layout lists\n\
+             one ID prints id, producedBy and time\n\
+             several IDs, or - to read them from stdin, print a line each and `N of M verified`\n\
+             any line that failed exits 1\n"
+        }
+        "delete" => {
+            "deedar delete ID\n\
+             tombstones the deed\n"
+        }
+        "leave" => {
+            "deedar leave ID DIR\n\
+             writes a left-behind marker for a deed that moved store, under DIR\n\
+             prints the path of the marker\n"
+        }
+        "timestamp" => {
+            "deedar timestamp ID\n\
+             writes a .tsr, a timestamp token over the deed, when DEEDAR_TSA is an\n\
+             RFC 3161 URL that answers\n\
+             with DEEDAR_TSA unset it writes the .tsq query and says so\n"
+        }
+        "current" => {
+            "deedar current ID...\n\
+             deedar current -\n\
+             follows each deed to the tip of its supersede chain\n\
+             one ID prints the tip deed\n\
+             several IDs, or - to read them from stdin, print a line each, `SUPERSEDED by ID`\n\
+             for a stale one, and `N of M current`; a stale or missing deed exits 1\n\
+             a fork or a cycle in the chain prints the ids on stdout and warns on stderr\n"
+        }
+        "log" => {
+            "deedar log head\n\
+             deedar log list\n\
+             deedar log audit\n\
+             deedar log backfill\n\
+             deedar log prove ID\n\
+             deedar log bridge SIZE\n\
+             head prints the size and root of the append-only log, signed when the host signs\n\
+             list prints one entry a line: index, deed, digest, time\n\
+             audit checks the log against the shelves, and exits 1 when they differ\n\
+             backfill logs the deeds already on the shelves that the log lacks\n\
+             prove ID prints the receipt that exports write beside a deed\n\
+             bridge SIZE prints what joins a head of that size to this one\n\
+             a bare `deedar log` is refused: it prints this list on stderr and exits 2\n"
+        }
+        "export" => {
+            "deedar export --into DIR ID...\n\
+             deedar export --into DIR -\n\
+             writes each deed with its bytes, evidence and receipt into DIR, and the\n\
+             signed head when the host signs\n\
+             prints `exported N deeds, M files`; an ID that cannot be exported is\n\
+             listed on stderr and the command exits 1\n"
+        }
+        "import" => {
+            "deedar import DIR [--allow-unsigned-head]\n\
+             checks the satchel in DIR, then adds its deeds to this store with the\n\
+             receipt fields they travelled with\n\
+             nothing is written unless every deed can be taken\n\
+             a head that is unsigned, or signed by a key the layout does not list, is not\n\
+             imported\n\
+             --allow-unsigned-head takes it; when the layout says `attestation = required`\n\
+             the deeds are still kept, and the command warns\n"
+        }
+        "check" => {
+            "deedar check DIR [--since KEPT_HEAD] [--bridge FILE] [--keep FILE]\n\
+             checks every receipt in the satchel in DIR against the head it carries\n\
+             needs no store; the signer list is read from the store when there is one\n\
+             --since FILE asks that the bag's log grew from the head kept in FILE, by\n\
+             the bridge in the bag or the one --bridge names\n\
+             --keep FILE records this bag's head for the next --since\n\
+             a signature by a key the layout does not list warns and exits 2\n\
+             a signature that does not cover the bytes exits 1\n"
+        }
+        "vouch" => {
+            "deedar vouch sign FILE\n\
+             deedar vouch check FILE\n\
+             sign writes a detached Ed25519 signature beside FILE and prints its path\n\
+             check verifies that signature against the signers the layout lists\n\
+             a signer the layout does not list warns and exits 2\n"
+        }
+        "migrate" => {
+            "deedar migrate\n\
+             moves the store to the current layout and prints `layout=1`\n"
+        }
+        "host" => {
+            "deedar host\n\
+             deedar host accept\n\
+             host says whether the layout lists the host signing key, and exits 1 when it does not\n\
+             host accept adds the key to the layout as a signer and leaves every other line\n\
+             accept refuses when the layout says `attestation = required`, and names the line to add\n"
+        }
+        "url" => {
+            "deedar url\n\
+             prints the store this command resolved: --url, else DEEDAR_URL, else the seat store\n"
+        }
+        _ => return None,
+    })
 }
 
 fn create_help() -> String {
     "deedar create KIND --agent WHO [flags]\n\
-     kinds: file set quote patch maildraft clip page form table procedure event\n\
+     kinds: file set quote patch mailDraft clip page form table procedure event\n\
      create file wants --path FILE and --agent WHO\n\
      create set wants --member PATH (repeatable) and --agent WHO\n\
-     --name NAME     defaults to the kind\n\
+     create quote wants --excerpt TEXT and --src-url URL\n\
+     create patch wants --tree TREE and --diff PATH\n\
+     create mailDraft wants --message-id <local@domain>, --subject TEXT and --path FILE\n\
+     create clip wants --clip-src PATH and --path FILE\n\
+     create page wants --page-url URL and --snapshot FILE\n\
+     create form wants --blank NAME, --field name=value and --path FILE\n\
+     create table wants --measure name=value\n\
+     create procedure wants --step TEXT\n\
+     create event wants --title or --name, --when WHEN, --where WHERE and --who WHO\n\
+     --name NAME     defaults to the kind, or to --title for an event\n\
      --path FILE     the bytes for kind file (not --field path=)\n\
      --supersedes ID the deed this one revises\n\
      the same create again prints the deed it froze and exits 0; other bytes\n\
      under the same name are refused: revise with --name NAME-v2 --supersedes ID\n\
      the last stdout line is accession=ID: cite that ID, not the file= line\n"
         .into()
+}
+
+/// An unknown kind token, the tokens that work, and the page that lists flags.
+fn kind_error(raw: &str) -> String {
+    let kinds = Kind::all()
+        .iter()
+        .map(Kind::token)
+        .collect::<Vec<_>>()
+        .join(" ");
+    format!("invalid kind: {raw}; kinds: {kinds}; `deedar create --help`")
 }
 
 /// `--help`, `-h`, `--version`, `-V`, and the import switch
@@ -785,6 +1050,23 @@ fn may_make_missing_seat(dir: &Path, rest: &[String]) -> bool {
     !dir.exists() && makes_the_seat_store(rest)
 }
 
+/// The directory a read named that is not there. `Client::open` makes a
+/// missing store, so a read that opened it would leave one behind.
+///
+/// `create`, `import` and `host accept` write and make the store. `check`,
+/// `vouch` and `url` do not open one. A path blocked by a file is left to
+/// [`open_client`], which names it.
+fn no_store_yet(url: &str, rest: &[String]) -> Option<PathBuf> {
+    let verb = rest.first().map(String::as_str)?;
+    let makes_it = matches!(verb, "create" | "import")
+        || (verb == "host" && rest.get(1).map(String::as_str) == Some("accept"));
+    if makes_it || matches!(verb, "check" | "vouch" | "url") {
+        return None;
+    }
+    let dir = deedar::store_dir(url).ok()?;
+    (!dir.exists() && !blocked_by_a_file(&dir)).then_some(dir)
+}
+
 /// The writes that open the seat store on first use.
 ///
 /// The seat store is one fixed path, not the working directory, so making
@@ -848,11 +1130,23 @@ fn not_a_store(dir: &Path) -> String {
     )
 }
 
+/// A key problem is about the variable the seat set, not about the store.
+fn show_store_err(err: &impl std::fmt::Display) -> String {
+    let text = err.to_string();
+    if let Some(rest) = text.strip_prefix("store io: ") {
+        if rest.contains("DEEDAR_HOST_SIGNING_KEY") {
+            return rest.to_string();
+        }
+    }
+    text
+}
+
 fn explain_open(url: &str, err: &deed::Error) -> String {
     match err {
         deed::Error::InvalidUrl(raw) => format!(
             "{raw} is not a store path; `export DEEDAR_URL=file://PATH` or `deedar --url file://PATH`"
         ),
+        deed::Error::Io(msg) if msg.contains("DEEDAR_HOST_SIGNING_KEY") => msg.clone(),
         deed::Error::Io(msg) if msg.contains("Not a directory") => deedar::store_dir(url)
             .map(|dir| not_a_store(&dir))
             .unwrap_or_else(|_| {
@@ -900,7 +1194,12 @@ fn unaccepted_signer_warning(public: &str, store: &std::path::Path) -> String {
 }
 
 fn cmd_create(client: &mut Client, args: &[String]) -> Result<String, String> {
-    let kind = args.first().ok_or("create needs a kind")?;
+    let kind = args
+        .first()
+        .ok_or("create needs a kind; `deedar create --help`")?;
+    if kind.starts_with('-') {
+        return Err("create needs a kind before the flags; `deedar create --help`".into());
+    }
     let mut name = String::new();
     let mut id = None;
     let mut excerpt = String::new();
@@ -998,18 +1297,49 @@ fn cmd_create(client: &mut Client, args: &[String]) -> Result<String, String> {
             "--supersedes" => {
                 supersedes = Some(DeedId::parse(&need(args, &mut i)?).map_err(|e| e.to_string())?)
             }
-            other => return Err(format!("unknown create flag {other}")),
+            other => {
+                return Err(format!(
+                    "unknown create flag {other}; `deedar create --help`"
+                ))
+            }
         }
         i += 1;
     }
     if agent.is_empty() {
-        return Err("create wants --agent WHO".into());
+        return Err("create wants --agent WHO; `deedar create --help`".into());
     }
     if kind == "file" && path.as_os_str().is_empty() {
-        return Err("create file wants --path FILE".into());
+        return Err("create file wants --path FILE; `deedar create --help`".into());
+    }
+    if let Some(hint) = missing_kind_flags(KindGaps {
+        kind,
+        path: &path,
+        members: &members,
+        excerpt: &excerpt,
+        urls: &urls,
+        tree: &tree,
+        diffs: &diffs,
+        message_id: &message_id,
+        subject: &subject,
+        clip_sources: &clip_sources,
+        page_url: &page_url,
+        snapshot: &snapshot,
+        blank: &blank,
+        fields: &fields,
+        measures: &measures,
+        steps: &steps,
+        when: &when,
+        where_: &where_,
+        who: &who,
+    }) {
+        return Err(hint.into());
     }
     if name.is_empty() {
-        name = kind.clone();
+        name = if kind == "event" && !title.is_empty() {
+            title.clone()
+        } else {
+            kind.clone()
+        };
     }
     if edition.is_empty() && !urls.is_empty() {
         edition = urls[0].clone();
@@ -1017,7 +1347,7 @@ fn cmd_create(client: &mut Client, args: &[String]) -> Result<String, String> {
     if range_end == 0 && !excerpt.is_empty() {
         range_end = excerpt.len() as u64;
     }
-    let kind = Kind::parse(kind).map_err(|e| e.to_string())?;
+    let kind = Kind::parse(kind).map_err(|_| kind_error(kind))?;
     let body = match kind {
         Kind::File => Body::File {
             path,
@@ -1048,7 +1378,8 @@ fn cmd_create(client: &mut Client, args: &[String]) -> Result<String, String> {
             },
         },
         Kind::MailDraft => Body::MailDraft {
-            message_id: MailMessageId::parse(&message_id).map_err(|e| e.to_string())?,
+            message_id: MailMessageId::parse(&message_id)
+                .map_err(|e| format!("{e}; --message-id wants <local@domain>"))?,
             in_reply_to: in_reply_to
                 .as_deref()
                 .map(MailMessageId::parse)
@@ -1089,7 +1420,7 @@ fn cmd_create(client: &mut Client, args: &[String]) -> Result<String, String> {
         body,
         supersedes,
     });
-    let (deed, _) = created.map_err(|e| frozen_hint(client, &e, &asked, prior.as_ref()))?;
+    let (deed, _) = created.map_err(|e| explain_create(client, &e, &asked, prior.as_ref()))?;
     // The last line is always the accession to cite: the kind lines above
     // end in a path or a digest, which no citation accepts.
     Ok(format!("{}accession={}\n", format_one(&deed), deed.id))
@@ -1102,6 +1433,117 @@ fn cmd_create(client: &mut Client, args: &[String]) -> Result<String, String> {
 /// When this create already passed `--supersedes P` and the freeze names
 /// P, P has a successor. The hint names the tip `current` walks to.
 /// A fork or a cycle has no single tip, so the line lists those accessions.
+/// A create failure, with the flag to pass when the line would otherwise
+/// name an internal check.
+fn explain_create(
+    client: &mut Client,
+    e: &deed::Error,
+    name: &str,
+    supersedes: Option<&DeedId>,
+) -> String {
+    let text = e.to_string();
+    if let Some(rest) = text.strip_prefix("store io: ") {
+        if let Some(path) = rest.strip_suffix(" is not a file") {
+            return format!("{path} is not a file; --path needs a regular file");
+        }
+    }
+    if let Some(rest) = text.strip_prefix("invalid url: ") {
+        return format!(
+            "invalid url: {rest}; --page-url and --src-url want http://, https:// or file://"
+        );
+    }
+    frozen_hint(client, e, name, supersedes)
+}
+
+/// Values `create` has parsed, so a missing one can be named before the body check.
+struct KindGaps<'a> {
+    kind: &'a str,
+    path: &'a Path,
+    members: &'a [PathBuf],
+    excerpt: &'a str,
+    urls: &'a [String],
+    tree: &'a str,
+    diffs: &'a [PathBuf],
+    message_id: &'a str,
+    subject: &'a str,
+    clip_sources: &'a [PathBuf],
+    page_url: &'a str,
+    snapshot: &'a Path,
+    blank: &'a str,
+    fields: &'a [FormField],
+    measures: &'a [Measure],
+    steps: &'a [Step],
+    when: &'a str,
+    where_: &'a str,
+    who: &'a str,
+}
+
+/// The flags a kind still needs, named the way `deedar create --help` names them.
+fn missing_kind_flags(gaps: KindGaps<'_>) -> Option<&'static str> {
+    let KindGaps {
+        kind,
+        path,
+        members,
+        excerpt,
+        urls,
+        tree,
+        diffs,
+        message_id,
+        subject,
+        clip_sources,
+        page_url,
+        snapshot,
+        blank,
+        fields,
+        measures,
+        steps,
+        when,
+        where_,
+        who,
+    } = gaps;
+    match kind {
+        "quote" if excerpt.trim().is_empty() || urls.is_empty() => {
+            Some("create quote wants --excerpt TEXT and --src-url URL; `deedar create --help`")
+        }
+        "mailDraft"
+            if message_id.is_empty() || subject.trim().is_empty() || path.as_os_str().is_empty() =>
+        {
+            Some(
+                "create mailDraft wants --message-id <local@domain>, --subject TEXT and --path FILE; `deedar create --help`",
+            )
+        }
+        "patch" if tree.trim().is_empty() || diffs.is_empty() => {
+            Some("create patch wants --tree TREE and --diff PATH; `deedar create --help`")
+        }
+        "set" if members.is_empty() => {
+            Some("create set wants --member PATH; `deedar create --help`")
+        }
+        "clip" if clip_sources.is_empty() || path.as_os_str().is_empty() => {
+            Some("create clip wants --clip-src PATH and --path FILE; `deedar create --help`")
+        }
+        "page" if page_url.is_empty() || snapshot.as_os_str().is_empty() => {
+            Some("create page wants --page-url URL and --snapshot FILE; `deedar create --help`")
+        }
+        "form" if blank.trim().is_empty() || fields.is_empty() || path.as_os_str().is_empty() => {
+            Some(
+                "create form wants --blank NAME, --field name=value and --path FILE; `deedar create --help`",
+            )
+        }
+        "table" if measures.is_empty() => {
+            Some("create table wants --measure name=value; `deedar create --help`")
+        }
+        "procedure" if steps.is_empty() => {
+            Some("create procedure wants --step TEXT; `deedar create --help`")
+        }
+        "event" if when.trim().is_empty() || where_.trim().is_empty() || who.trim().is_empty() => {
+            Some(
+                "create event wants --when WHEN, --where WHERE and --who WHO; `deedar create --help`",
+            )
+        }
+        _ => None,
+    }
+}
+
 fn frozen_hint(
     client: &mut Client,
     e: &deed::Error,
@@ -1150,7 +1592,10 @@ fn revised_by(client: &mut Client, prior: &DeedId) -> Option<String> {
 }
 
 fn need(args: &[String], i: &mut usize) -> Result<String, String> {
-    let v = args.get(*i + 1).ok_or("flag needs a value")?;
+    let flag = &args[*i];
+    let v = args
+        .get(*i + 1)
+        .ok_or_else(|| format!("{flag} needs a value"))?;
     *i += 1;
     Ok(v.clone())
 }
@@ -1264,7 +1709,7 @@ fn cmd_list(client: &mut Client, args: &[String]) -> Result<String, String> {
         match args[i].as_str() {
             "--kind" => {
                 let raw = list_value(args, &mut i, "--kind")?;
-                kind = Some(Kind::parse(&raw).map_err(|e| e.to_string())?);
+                kind = Some(Kind::parse(&raw).map_err(|_| kind_error(&raw))?);
             }
             "--agent" => agent = Some(list_value(args, &mut i, "--agent")?),
             "--text" => text = Some(list_value(args, &mut i, "--text")?),
@@ -1501,7 +1946,7 @@ mod tests {
     fn help_does_not_need_a_store() {
         let page = dispatch(vec!["--help".into()]).unwrap();
         assert!(page.code.is_none());
-        assert!(page.text.contains("deedar create --help"), "{}", page.text);
+        assert!(page.text.contains("deedar VERB --help"), "{}", page.text);
         let create = dispatch(vec!["create".into(), "--help".into()]).unwrap();
         assert!(create.text.contains("--path FILE"), "{}", create.text);
         let file = dispatch(vec!["create".into(), "file".into(), "--help".into()]).unwrap();

@@ -49,24 +49,38 @@ fn line(text: &str, expected: &str) {
 }
 
 const USAGE: &str = "\
-usage: deedar [--url FILE] create|get|list|trail|evidence|delete|leave|timestamp|current|log|export|import|check|vouch|migrate|host
+usage: deedar [--url FILE] create|get|list|trail|evidence|delete|leave|timestamp|current|log|export|import|check|vouch|migrate|host|url
 deedar --help            this page
-deedar create --help     kinds and flags, including --path
+deedar help              this page
+deedar VERB --help       the page for one verb, with its flags
+deedar help VERB         the same page
 evidence, current and export take one id, several ids, or - to read them from stdin
 list takes --kind KIND, --agent ID and --text WORDS
 log takes head, list, audit, backfill, prove ID, or bridge SIZE
 import takes a satchel directory, and --allow-unsigned-head for a missing or unlisted signature
 check takes a satchel directory, --since KEPT_HEAD, --bridge FILE and --keep FILE; vouch takes sign FILE or check FILE
+leave takes an id and a destination directory
+timestamp writes a .tsr when DEEDAR_TSA answers, and names the .tsq when that variable is unset
 host says whether the store's layout lists the host signing key, and exits 1 when it does not
 host accept adds the host signing key to the layout as a signer, and leaves every other line
+url prints the store this command resolved
 ";
 
 const CREATE_HELP: &str = "\
 deedar create KIND --agent WHO [flags]
-kinds: file set quote patch maildraft clip page form table procedure event
+kinds: file set quote patch mailDraft clip page form table procedure event
 create file wants --path FILE and --agent WHO
 create set wants --member PATH (repeatable) and --agent WHO
---name NAME     defaults to the kind
+create quote wants --excerpt TEXT and --src-url URL
+create patch wants --tree TREE and --diff PATH
+create mailDraft wants --message-id <local@domain>, --subject TEXT and --path FILE
+create clip wants --clip-src PATH and --path FILE
+create page wants --page-url URL and --snapshot FILE
+create form wants --blank NAME, --field name=value and --path FILE
+create table wants --measure name=value
+create procedure wants --step TEXT
+create event wants --title or --name, --when WHEN, --where WHERE and --who WHO
+--name NAME     defaults to the kind, or to --title for an event
 --path FILE     the bytes for kind file (not --field path=)
 --supersedes ID the deed this one revises
 the same create again prints the deed it froze and exits 0; other bytes
@@ -153,6 +167,83 @@ fn a_step_equal_to_version_is_stored() {
     line(&got, "steps=1");
 }
 
+/// An unknown word names `--help` and does not create a store.
+/// `help` and `help create` are the same pages as the flags.
+#[test]
+fn an_unknown_command_names_help_and_help_prints_the_page() {
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    let seat = home.join(".local/share/deedar/store");
+    let out = deedar(home, &["foo"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(String::from_utf8_lossy(&out.stdout).as_ref(), "");
+    assert_eq!(
+        String::from_utf8(out.stderr).expect("stderr is utf8"),
+        "deedar: unknown command foo; `deedar --help`\n"
+    );
+    assert!(!seat.exists(), "an unknown command created the seat store");
+
+    let named = home.join("named-store");
+    let named_url = format!("file://{}", named.display());
+    let out = deedar(home, &["--url", &named_url, "mcp"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(
+        String::from_utf8(out.stderr).expect("stderr is utf8"),
+        "deedar: unknown command mcp; `deedar --help`\n"
+    );
+    assert!(
+        !named.exists(),
+        "an unknown command created the named store"
+    );
+
+    assert_eq!(ok(home, &["help"]), USAGE);
+    assert_eq!(ok(home, &["help", "create"]), CREATE_HELP);
+    assert!(!seat.exists(), "help created the seat store");
+
+    let url = store_url(home);
+    create_quote(home, &url, "deed-quote-log", &["--excerpt", "x"]);
+    let out = deedar(home, &["--url", &url, "log", "nosuch"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(
+        String::from_utf8(out.stderr).expect("stderr is utf8"),
+        "deedar: unknown log command nosuch; log takes head, list, audit, backfill, prove ID, or bridge SIZE\n"
+    );
+    let out = deedar(home, &["--url", &url, "vouch", "nosuch"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(
+        String::from_utf8(out.stderr).expect("stderr is utf8"),
+        "deedar: unknown vouch command nosuch; vouch takes sign FILE or check FILE\n"
+    );
+}
+
+/// No verb is the usage page, and it does not create a store on the way there.
+#[test]
+fn no_verb_prints_usage_and_does_not_make_a_store() {
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    let seat = home.join(".local/share/deedar/store");
+    let out = deedar(home, &[]);
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(String::from_utf8_lossy(&out.stdout).as_ref(), "");
+    let err = String::from_utf8(out.stderr).expect("stderr is utf8");
+    assert!(err.starts_with("deedar: usage: deedar"), "{err}");
+    assert!(
+        err.contains("leave takes an id and a destination directory"),
+        "{err}"
+    );
+    assert!(
+        err.contains("url prints the store this command resolved"),
+        "{err}"
+    );
+    assert!(!seat.exists(), "usage created the seat store");
+
+    let named = home.join("named-store");
+    let url = format!("file://{}", named.display());
+    let out = deedar(home, &["--url", &url]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(!named.exists(), "usage created the named store");
+}
+
 #[test]
 fn usage_names_the_list_filters() {
     let home = tempfile::tempdir().unwrap();
@@ -176,6 +267,112 @@ fn help_and_version_print_the_same_pages() {
     assert_eq!(ok(home, &["--version"]), version);
 }
 
+const VERBS: [&str; 16] = [
+    "create",
+    "get",
+    "list",
+    "trail",
+    "evidence",
+    "delete",
+    "leave",
+    "timestamp",
+    "current",
+    "log",
+    "export",
+    "import",
+    "check",
+    "vouch",
+    "migrate",
+    "host",
+];
+
+/// Every verb has its own page, `--help` and `help VERB` print the same one,
+/// and neither opens a store.
+#[test]
+fn each_verb_prints_its_own_help() {
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    let seat = home.join(".local/share/deedar/store");
+    let mut pages = Vec::new();
+    for verb in VERBS.into_iter().chain(["url"]) {
+        let page = ok(home, &[verb, "--help"]);
+        assert_ne!(page, USAGE, "{verb} --help is the top-level page");
+        assert!(
+            page.starts_with(&format!("deedar {verb}")),
+            "{verb} --help does not start with its own line:\n{page}"
+        );
+        assert_eq!(ok(home, &["help", verb]), page, "help {verb}");
+        assert_eq!(ok(home, &[verb, "-h"]), page, "{verb} -h");
+        assert!(!pages.contains(&page), "{verb} repeats another page");
+        pages.push(page);
+    }
+    assert!(!seat.exists(), "a help page created the seat store");
+}
+
+#[test]
+fn verb_pages_name_what_the_verb_takes() {
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    line(
+        &ok(home, &["list", "--help"]),
+        "deedar list [--kind KIND] [--agent ID] [--text WORDS]",
+    );
+    line(
+        &ok(home, &["export", "--help"]),
+        "deedar export --into DIR ID...",
+    );
+    line(
+        &ok(home, &["import", "--help"]),
+        "deedar import DIR [--allow-unsigned-head]",
+    );
+    line(
+        &ok(home, &["check", "--help"]),
+        "deedar check DIR [--since KEPT_HEAD] [--bridge FILE] [--keep FILE]",
+    );
+    line(&ok(home, &["leave", "--help"]), "deedar leave ID DIR");
+    let log = ok(home, &["log", "--help"]);
+    for word in [
+        "head",
+        "list",
+        "audit",
+        "backfill",
+        "prove ID",
+        "bridge SIZE",
+    ] {
+        assert!(log.contains(&format!("deedar log {word}")), "{log}");
+    }
+}
+
+/// A bare `log` used to print the head and exit 0. No page or doc says it
+/// does, and `head` is one of six commands, so it is a usage error: stderr,
+/// exit 2, nothing on stdout, and no store made for it.
+#[test]
+fn a_bare_log_prints_the_log_usage_and_exits_2() {
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    let url = store_url(home);
+    create_quote(home, &url, "deed-quote-bare-log", &["--excerpt", "x"]);
+    let head = ok(home, &["--url", &url, "log", "head"]);
+    assert!(head.starts_with("size=1 root="), "{head}");
+
+    let usage = "deedar: log needs a command; \
+        log takes head, list, audit, backfill, prove ID, or bridge SIZE; `deedar log --help`\n";
+    for args in [
+        vec!["--url", url.as_str(), "log"],
+        vec!["log", "--url", url.as_str()],
+    ] {
+        let out = deedar(home, &args);
+        assert_eq!(out.status.code(), Some(2), "{args:?}");
+        assert_eq!(String::from_utf8_lossy(&out.stdout).as_ref(), "");
+        assert_eq!(String::from_utf8_lossy(&out.stderr).as_ref(), usage);
+    }
+
+    let elsewhere = format!("file://{}", home.join("not-made").display());
+    let out = deedar(home, &["--url", &elsewhere, "log"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(!home.join("not-made").exists(), "log made a store");
+}
+
 #[test]
 fn list_url_after_the_verb_selects_that_store() {
     let home = tempfile::tempdir().unwrap();
@@ -191,6 +388,165 @@ fn list_url_after_the_verb_selects_that_store() {
     let listed = ok(home, &["list", "--url", &url]);
     assert!(listed.contains("deed-quote-listed"), "{listed}");
     line(&listed, "excerpt=kept in this store");
-    let empty = ok(home, &["list", "--url", &other]);
-    assert_eq!(empty, "");
+    let out = deedar(home, &["list", "--url", &other]);
+    assert!(out.status.success());
+    assert_eq!(String::from_utf8_lossy(&out.stdout).as_ref(), "");
+}
+
+fn no_store_note(path: &Path) -> String {
+    format!(
+        "deedar: no store at {} yet; `deedar create --help` shows how to make the first deed, \
+         and create makes the store\n",
+        path.display()
+    )
+}
+
+/// `list` at a path with no store used to make the store and print nothing.
+/// It leaves the path alone, prints the note on stderr, and exits 0 with an
+/// empty list. The first `create` makes the store, and then `list` is quiet.
+#[test]
+fn list_at_a_new_path_says_there_is_no_store_and_makes_none() {
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    let at = home.join("fresh");
+    let url = format!("file://{}", at.display());
+    for args in [
+        vec!["--url", url.as_str(), "list"],
+        vec!["list", "--url", url.as_str()],
+    ] {
+        let out = deedar(home, &args);
+        assert_eq!(out.status.code(), Some(0), "{args:?}");
+        assert_eq!(String::from_utf8_lossy(&out.stdout).as_ref(), "");
+        assert_eq!(
+            String::from_utf8_lossy(&out.stderr).as_ref(),
+            no_store_note(&at)
+        );
+        assert!(!at.exists(), "{args:?} made the store");
+    }
+
+    let mut envs = Command::new(env!("CARGO_BIN_EXE_deedar"));
+    let out = envs
+        .args(["list"])
+        .env("HOME", home)
+        .env("XDG_DATA_HOME", home.join(".local/share"))
+        .env("DEEDAR_HOST_SIGNING_KEY", "off")
+        .env("DEEDAR_URL", &url)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    assert_eq!(
+        String::from_utf8_lossy(&out.stderr).as_ref(),
+        no_store_note(&at)
+    );
+    assert!(!at.exists(), "DEEDAR_URL made the store");
+
+    create_quote(home, &url, "deed-quote-first", &["--excerpt", "x"]);
+    assert!(at.is_dir(), "create did not make the store");
+    let listed = deedar(home, &["--url", &url, "list"]);
+    assert!(listed.status.success());
+    assert!(String::from_utf8_lossy(&listed.stdout).contains("deed-quote-first"));
+    assert_eq!(String::from_utf8_lossy(&listed.stderr).as_ref(), "");
+}
+
+/// A read that needs a deed refuses with the same line, exit 1, and no store.
+/// `url` only prints, so it needs none; `check` and `vouch` never open one.
+#[test]
+fn the_other_reads_refuse_a_missing_store_and_make_none() {
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    let at = home.join("fresh");
+    let url = format!("file://{}", at.display());
+    let cases: [&[&str]; 9] = [
+        &["get", "deed-quote-x"],
+        &["trail", "deed-quote-x"],
+        &["evidence", "deed-quote-x"],
+        &["evidence", "deed-quote-x", "deed-quote-y"],
+        &["current", "deed-quote-x", "deed-quote-y"],
+        &["log", "head"],
+        &["log", "audit"],
+        &["host"],
+        &["migrate"],
+    ];
+    for case in cases {
+        let mut args = vec!["--url", url.as_str()];
+        args.extend_from_slice(case);
+        let out = deedar(home, &args);
+        assert_eq!(out.status.code(), Some(1), "{case:?}");
+        assert_eq!(String::from_utf8_lossy(&out.stdout).as_ref(), "");
+        assert_eq!(
+            String::from_utf8_lossy(&out.stderr).as_ref(),
+            no_store_note(&at),
+            "{case:?}"
+        );
+        assert!(!at.exists(), "{case:?} made the store");
+    }
+    assert_eq!(ok(home, &["--url", &url, "url"]), format!("{url}\n"));
+    assert!(!at.exists(), "url made the store");
+}
+
+/// The writes still make the store: `create`, `import` and `host accept`.
+#[test]
+fn host_accept_still_makes_a_store() {
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    let at = home.join("fresh");
+    let url = format!("file://{}", at.display());
+    let out = deedar(home, &["--url", &url, "host", "accept"]);
+    assert!(
+        at.is_dir(),
+        "host accept made no store: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+/// `create --help` used to spell the kind `maildraft`, which `create` refuses.
+#[test]
+fn create_help_spells_mail_draft_and_an_unknown_kind_lists_the_tokens() {
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    let page = ok(home, &["create", "--help"]);
+    assert!(page.contains("mailDraft"), "{page}");
+    assert!(!page.contains("maildraft"), "{page}");
+    let url = store_url(home);
+    let out = deedar(
+        home,
+        &["--url", &url, "create", "maildraft", "--agent", "you"],
+    );
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(String::from_utf8_lossy(&out.stdout).as_ref(), "");
+    let err = String::from_utf8(out.stderr).expect("stderr is utf8");
+    assert!(err.contains("invalid kind: maildraft"), "{err}");
+    assert!(err.contains("mailDraft"), "{err}");
+    assert!(err.contains("`deedar create --help`"), "{err}");
+    let listed = deedar(home, &["--url", &url, "list", "--kind", "File"]);
+    assert_eq!(listed.status.code(), Some(1));
+    let err = String::from_utf8(listed.stderr).expect("stderr is utf8");
+    assert!(err.contains("invalid kind: File"), "{err}");
+    assert!(err.contains("mailDraft"), "{err}");
+}
+
+/// The reference lists `--title` for an event. That text is the deed name
+/// when `--name` was omitted.
+#[test]
+fn an_event_title_is_the_deed_name() {
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    let url = store_url(home);
+    let made = ok(
+        home,
+        &[
+            "--url", &url, "create", "event", "--title", "launch", "--when", "now", "--where",
+            "here", "--who", "me", "--agent", "you",
+        ],
+    );
+    assert!(made.contains("name=launch"), "{made}");
+    line(&made, "accession=deed-event-launch");
+    let named = ok(
+        home,
+        &[
+            "--url", &url, "create", "event", "--name", "kept", "--title", "ignored", "--when",
+            "now", "--where", "here", "--who", "me", "--agent", "you",
+        ],
+    );
+    assert!(named.contains("name=kept"), "{named}");
 }
