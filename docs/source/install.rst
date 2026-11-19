@@ -3,7 +3,7 @@ Protocol server. Each command opens the store named by ``--url``, else
 ``DEEDAR_URL``, else the seat store at ``$XDG_DATA_HOME/deedar/store`` or
 ``~/.local/share/deedar/store``. There is no daemon.
 
-The checkout pins Rust 1.97.1 in ``rust-toolchain.toml``. A release archive
+The checkout pins its Rust channel in ``rust-toolchain.toml``. A release archive
 already contains the binaries. Building from source uses that channel.
 The documentation samples also compile a small C library with ``cc`` or
 ``gcc``, used only to pin the clock while the pages are generated.
@@ -20,40 +20,39 @@ first session.
 Linux
 =====
 
-The v0.6.1 release publishes
-``deedar-v0.6.1-x86_64-unknown-linux-gnu.tar.gz`` and
-``deedar-v0.6.1-aarch64-unknown-linux-gnu.tar.gz``, each with a
-``.sha256`` sidecar. The transcript below is the x86\ :sub:`64` archive, checked
-and listed, then ``deedar --version``. The aarch64 archive has the same
-layout with its own target triple in the name.
+Each release publishes one archive per target, named
+``deedar-vVERSION-TARGET.tar.gz``, with a ``.sha256`` sidecar beside it. On
+Linux the targets are ``x86_64-unknown-linux-gnu`` and
+``aarch64-unknown-linux-gnu``. VERSION is a tag on the
+`releases page <https://github.com/leidarljos/deedar/releases>`__, without
+the leading ``v``. This page names no release, so it cannot fall behind one:
+replace ``X.Y.Z`` below with a version that page lists.
 
 .. code:: console
 
-   $ curl -fsSL -o deedar-v0.6.1-x86_64-unknown-linux-gnu.tar.gz https://github.com/leidarljos/deedar/releases/download/v0.6.1/deedar-v0.6.1-x86_64-unknown-linux-gnu.tar.gz
-   $ curl -fsSL -o deedar-v0.6.1-x86_64-unknown-linux-gnu.tar.gz.sha256 https://github.com/leidarljos/deedar/releases/download/v0.6.1/deedar-v0.6.1-x86_64-unknown-linux-gnu.tar.gz.sha256
-   $ sha256sum -c deedar-v0.6.1-x86_64-unknown-linux-gnu.tar.gz.sha256
-   deedar-v0.6.1-x86_64-unknown-linux-gnu.tar.gz: OK
-   $ tar tzf deedar-v0.6.1-x86_64-unknown-linux-gnu.tar.gz
-   deedar-v0.6.1-x86_64-unknown-linux-gnu/
-   deedar-v0.6.1-x86_64-unknown-linux-gnu/LICENSE
-   deedar-v0.6.1-x86_64-unknown-linux-gnu/README.md
-   deedar-v0.6.1-x86_64-unknown-linux-gnu/deedar-mcp
-   deedar-v0.6.1-x86_64-unknown-linux-gnu/deedar
-   deedar-v0.6.1-x86_64-unknown-linux-gnu/CHANGELOG.md
-   $ ./deedar-v0.6.1-x86_64-unknown-linux-gnu/deedar --version
-   deedar 0.6.1
+   $ VERSION=X.Y.Z
+   $ TARGET=x86_64-unknown-linux-gnu
+   $ NAME=deedar-v$VERSION-$TARGET
+   $ BASE=https://github.com/leidarljos/deedar/releases/download/v$VERSION
+   $ curl -fsSLO $BASE/$NAME.tar.gz
+   $ curl -fsSLO $BASE/$NAME.tar.gz.sha256
+   $ sha256sum -c $NAME.tar.gz.sha256
+   $ tar xzf $NAME.tar.gz
+   $ ./$NAME/deedar --version
+
+``sha256sum -c`` prints the archive name and ``OK``. The archive unpacks to a
+directory of the same name as the archive, holding ``deedar``,
+``deedar-mcp``, the README, the changelog, and the license. ``deedar
+--version`` prints ``deedar`` and the version you chose.
 
 macOS
 =====
 
-The same release publishes
-``deedar-v0.6.1-aarch64-apple-darwin.tar.gz`` and
-``deedar-v0.6.1-x86_64-apple-darwin.tar.gz``, again with ``.sha256``
-sidecars. The directory inside uses that target triple and holds
-``deedar``, ``deedar-mcp``, the README, the changelog, and the license.
-``sha256sum -c`` on macOS is ``shasum -a 256 -c``. The crates.io and
-checkout commands below are the ones to run when an archive is the
-wrong target.
+The same release publishes ``aarch64-apple-darwin`` and
+``x86_64-apple-darwin`` archives, again with ``.sha256`` sidecars. Set
+``TARGET`` to one of them and run the commands above, with ``shasum -a 256
+-c`` in place of ``sha256sum -c``. The crates.io and checkout commands below
+are the ones to run when an archive is the wrong target.
 
 Windows
 =======
@@ -65,32 +64,15 @@ cargo binstall
 ==============
 
 ``cargo binstall`` reads ``[package.metadata.binstall]`` and downloads the
-release archive for the running target. This run is cargo-binstall
-1.26.2 on x86\ :sub:`64` Linux, with the prefix ``/tmp/deedar-binstall2``. The
-``Done in`` lines are that run.
+release archive for the running target. It prints the package and
+version it fetched, and where it put each binary.
 
-.. code:: console
+.. code:: bash
 
-   $ cargo binstall -V
-   1.26.2
-   $ cargo binstall --no-confirm --root /tmp/deedar-binstall2 deedar-cli
-   cargo-binstall:  INFO resolve: Resolving package: 'deedar-cli'
-   cargo-binstall:  WARN The package deedar-cli v0.6.1 (x86_64-unknown-linux-gnu) has been downloaded from github.com
-   cargo-binstall:  INFO This will install the following binaries:
-   cargo-binstall:  INFO   - deedar => /tmp/deedar-binstall2/bin/deedar
-   cargo-binstall:  INFO Installing binaries...
-   cargo-binstall:  INFO Done in 2.128478814s
-   $ cargo binstall --no-confirm --root /tmp/deedar-binstall2 deedar-mcp
-   cargo-binstall:  INFO resolve: Resolving package: 'deedar-mcp'
-   cargo-binstall:  WARN The package deedar-mcp v0.6.1 (x86_64-unknown-linux-gnu) has been downloaded from github.com
-   cargo-binstall:  INFO This will install the following binaries:
-   cargo-binstall:  INFO   - deedar-mcp => /tmp/deedar-binstall2/bin/deedar-mcp
-   cargo-binstall:  INFO Installing binaries...
-   cargo-binstall:  INFO Done in 1.900891635s
-   $ /tmp/deedar-binstall2/bin/deedar --version
-   deedar 0.6.1
+   cargo binstall --no-confirm deedar-cli
+   cargo binstall --no-confirm deedar-mcp
 
-``--root`` chooses the prefix. Omit it and binstall uses its default.
+``--root DIR`` chooses the prefix. Omit it and binstall uses its default.
 ``deedar-mcp`` speaks the protocol on standard input, so running it with
 no client closes the connection.
 ``deedar-mcp --help`` and ``deedar-mcp --version`` print and exit.
@@ -100,54 +82,31 @@ the server line and the client entry.
 crates.io
 =========
 
-Both packages are published. This run used a prefix so the install
-stayed off the default Cargo bin directory. Omit ``--root`` to use that
-default. Compiling printed one line per dependency, then:
-
-::
-
-   Installing /tmp/deedar-from-crates/bin/deedar
-    Installed package `deedar-cli v0.6.1` (executable `deedar`)
-   Installing deedar-mcp v0.6.1
-   Installing /tmp/deedar-from-crates/bin/deedar-mcp
-    Installed package `deedar-mcp v0.6.1` (executable `deedar-mcp`)
-      Summary Successfully installed deedar-cli, deedar-mcp!
-
-Run it as:
+Both packages are published. Cargo compiles each dependency, then prints
+the package and version it installed. Omit ``--root`` to use the default
+Cargo bin directory.
 
 .. code:: bash
 
-   cargo install --locked --root /tmp/deedar-from-crates deedar-cli deedar-mcp
-
-``/tmp/deedar-from-crates/bin/deedar --version`` printed ``deedar 0.6.1``.
+   cargo install --locked deedar-cli deedar-mcp
 
 From a checkout
 ===============
 
-From this tree the same two packages install with ``--path``. The run
-used ``--root /tmp/deedar-from-path`` and finished:
-
-::
-
-   Installed package `deedar-cli v0.6.1 (/agent/repos/deedar/crates/deedar-cli)` (executable `deedar`)
-   Installed package `deedar-mcp v0.6.1 (/agent/repos/deedar/crates/deedar-mcp)` (executable `deedar-mcp`)
+From this tree the same two packages install with ``--path``. Cargo warns
+when the prefix's ``bin`` directory is not on ``PATH``.
 
 .. code:: bash
 
-   cargo install --locked --path crates/deedar-cli --root /tmp/deedar-from-path
-   cargo install --locked --path crates/deedar-mcp --root /tmp/deedar-from-path
-
-The path inside the package line is the checkout Cargo compiled.
-``/tmp/deedar-from-path/bin/deedar --version`` printed ``deedar 0.6.1``.
-Cargo also warns that the prefix's ``bin`` directory has to be on ``PATH``.
+   cargo install --locked --path crates/deedar-cli
+   cargo install --locked --path crates/deedar-mcp
 
 What the binary prints
 ======================
 
 The block is ``deedar --version`` and ``deedar --help`` from a build of
-this tree. The published v0.6.1 archive reports the same version. Its
-help text is the release's; this help text is the tree's, including
-the ``list`` flags.
+this tree. A release archive prints its own version and its own help
+text, which can differ from this tree's, including the ``list`` flags.
 
 .. code:: console
 

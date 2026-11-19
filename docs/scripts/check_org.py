@@ -7,6 +7,10 @@ column zero therefore renders as a stray list and splits the paragraph
 around it, and neither the exporter nor sphinx complains: the result is
 valid, just wrong. One of those shipped.
 
+The install page names no release. A version typed there is a copy that
+falls behind the next tag, so any dotted version outside a cog block, whose
+text the binary and Cargo.toml write, is refused.
+
 And the explanation page says every numbered reference has a row in the
 audit table and that each was resolved before it was pasted. That claim
 is only worth something if the numbering itself holds together, so the
@@ -23,6 +27,8 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 ORG = ROOT / "docs" / "orgmode"
 NUMBERED = re.compile(r"^(\d+)\.\s")
 CITED = re.compile(r"\[(\d+)\]")
+VERSION_LIKE = re.compile(r"\d+\.\d+\.\d+")
+VERSION_FREE = ("install.org",)
 
 
 def stray_list_items(text: str, references_at: int | None) -> list[tuple[int, str]]:
@@ -61,6 +67,20 @@ def bibliography_problems(text: str, references_at: int) -> list[str]:
     return problems
 
 
+def typed_versions(text: str) -> list[tuple[int, str]]:
+    """Dotted versions on lines that no cog block generated."""
+    out = []
+    generated = False
+    for lineno, line in enumerate(text.split("\n"), 1):
+        if "[[[cog" in line:
+            generated = True
+        elif "[[[end]]]" in line:
+            generated = False
+        elif not generated and VERSION_LIKE.search(line):
+            out.append((lineno, line))
+    return out
+
+
 def main() -> int:
     findings: list[str] = []
     for path in sorted(ORG.glob("*.org")):
@@ -71,6 +91,12 @@ def main() -> int:
                 f"{path.relative_to(ROOT)}:{lineno}: a wrapped line starts a numbered "
                 f"list: {line.strip()[:60]!r}"
             )
+        if path.name in VERSION_FREE:
+            for lineno, line in typed_versions(text):
+                findings.append(
+                    f"{path.relative_to(ROOT)}:{lineno}: a version is typed here, "
+                    f"and the next release leaves it behind: {line.strip()[:60]!r}"
+                )
         if at is not None:
             for problem in bibliography_problems(text, at):
                 findings.append(f"{path.relative_to(ROOT)}: {problem}")
