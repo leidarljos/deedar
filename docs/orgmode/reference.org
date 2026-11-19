@@ -50,6 +50,7 @@ A signature that does not cover the bytes is still 1.
 
 =file=, =set=, =quote=, =patch=, =mailDraft=, =clip=, =page=, =form=,
 =table=, =procedure=, =event=. =deedar create --help= lists these flags.
+A missing flag is named on stderr.
 The flags a kind reads:
 
 | Kind | Flags |

@@ -57,6 +57,7 @@ Kinds
 
 ``file``, ``set``, ``quote``, ``patch``, ``mailDraft``, ``clip``, ``page``, ``form``,
 ``table``, ``procedure``, ``event``. ``deedar create --help`` lists these flags.
+A missing flag is named on stderr.
 The flags a kind reads:
 
 ============= ===========================================================================

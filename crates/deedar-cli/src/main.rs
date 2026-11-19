@@ -932,7 +932,12 @@ fn unaccepted_signer_warning(public: &str, store: &std::path::Path) -> String {
 }
 
 fn cmd_create(client: &mut Client, args: &[String]) -> Result<String, String> {
-    let kind = args.first().ok_or("create needs a kind")?;
+    let kind = args
+        .first()
+        .ok_or("create needs a kind; `deedar create --help`")?;
+    if kind.starts_with('-') {
+        return Err("create needs a kind before the flags; `deedar create --help`".into());
+    }
     let mut name = String::new();
     let mut id = None;
     let mut excerpt = String::new();
@@ -1030,15 +1035,42 @@ fn cmd_create(client: &mut Client, args: &[String]) -> Result<String, String> {
             "--supersedes" => {
                 supersedes = Some(DeedId::parse(&need(args, &mut i)?).map_err(|e| e.to_string())?)
             }
-            other => return Err(format!("unknown create flag {other}")),
+            other => {
+                return Err(format!(
+                    "unknown create flag {other}; `deedar create --help`"
+                ))
+            }
         }
         i += 1;
     }
     if agent.is_empty() {
-        return Err("create wants --agent WHO".into());
+        return Err("create wants --agent WHO; `deedar create --help`".into());
     }
     if kind == "file" && path.as_os_str().is_empty() {
-        return Err("create file wants --path FILE".into());
+        return Err("create file wants --path FILE; `deedar create --help`".into());
+    }
+    if let Some(hint) = missing_kind_flags(KindGaps {
+        kind,
+        path: &path,
+        members: &members,
+        excerpt: &excerpt,
+        urls: &urls,
+        tree: &tree,
+        diffs: &diffs,
+        message_id: &message_id,
+        subject: &subject,
+        clip_sources: &clip_sources,
+        page_url: &page_url,
+        snapshot: &snapshot,
+        blank: &blank,
+        fields: &fields,
+        measures: &measures,
+        steps: &steps,
+        when: &when,
+        where_: &where_,
+        who: &who,
+    }) {
+        return Err(hint.into());
     }
     if name.is_empty() {
         name = if kind == "event" && !title.is_empty() {
@@ -1084,7 +1116,8 @@ fn cmd_create(client: &mut Client, args: &[String]) -> Result<String, String> {
             },
         },
         Kind::MailDraft => Body::MailDraft {
-            message_id: MailMessageId::parse(&message_id).map_err(|e| e.to_string())?,
+            message_id: MailMessageId::parse(&message_id)
+                .map_err(|e| format!("{e}; --message-id wants <local@domain>"))?,
             in_reply_to: in_reply_to
                 .as_deref()
                 .map(MailMessageId::parse)
@@ -1125,7 +1158,7 @@ fn cmd_create(client: &mut Client, args: &[String]) -> Result<String, String> {
         body,
         supersedes,
     });
-    let (deed, _) = created.map_err(|e| frozen_hint(client, &e, &asked, prior.as_ref()))?;
+    let (deed, _) = created.map_err(|e| explain_create(client, &e, &asked, prior.as_ref()))?;
     // The last line is always the accession to cite: the kind lines above
     // end in a path or a digest, which no citation accepts.
     Ok(format!("{}accession={}\n", format_one(&deed), deed.id))
@@ -1138,6 +1171,117 @@ fn cmd_create(client: &mut Client, args: &[String]) -> Result<String, String> {
 /// When this create already passed `--supersedes P` and the freeze names
 /// P, P has a successor. The hint names the tip `current` walks to.
 /// A fork or a cycle has no single tip, so the line lists those accessions.
+/// A create failure, with the flag to pass when the line would otherwise
+/// name an internal check.
+fn explain_create(
+    client: &mut Client,
+    e: &deed::Error,
+    name: &str,
+    supersedes: Option<&DeedId>,
+) -> String {
+    let text = e.to_string();
+    if let Some(rest) = text.strip_prefix("store io: ") {
+        if let Some(path) = rest.strip_suffix(" is not a file") {
+            return format!("{path} is not a file; --path needs a regular file");
+        }
+    }
+    if let Some(rest) = text.strip_prefix("invalid url: ") {
+        return format!(
+            "invalid url: {rest}; --page-url and --src-url want http://, https:// or file://"
+        );
+    }
+    frozen_hint(client, e, name, supersedes)
+}
+
+/// Values `create` has parsed, so a missing one can be named before the body check.
+struct KindGaps<'a> {
+    kind: &'a str,
+    path: &'a Path,
+    members: &'a [PathBuf],
+    excerpt: &'a str,
+    urls: &'a [String],
+    tree: &'a str,
+    diffs: &'a [PathBuf],
+    message_id: &'a str,
+    subject: &'a str,
+    clip_sources: &'a [PathBuf],
+    page_url: &'a str,
+    snapshot: &'a Path,
+    blank: &'a str,
+    fields: &'a [FormField],
+    measures: &'a [Measure],
+    steps: &'a [Step],
+    when: &'a str,
+    where_: &'a str,
+    who: &'a str,
+}
+
+/// The flags a kind still needs, named the way `deedar create --help` names them.
+fn missing_kind_flags(gaps: KindGaps<'_>) -> Option<&'static str> {
+    let KindGaps {
+        kind,
+        path,
+        members,
+        excerpt,
+        urls,
+        tree,
+        diffs,
+        message_id,
+        subject,
+        clip_sources,
+        page_url,
+        snapshot,
+        blank,
+        fields,
+        measures,
+        steps,
+        when,
+        where_,
+        who,
+    } = gaps;
+    match kind {
+        "quote" if excerpt.trim().is_empty() || urls.is_empty() => {
+            Some("create quote wants --excerpt TEXT and --src-url URL; `deedar create --help`")
+        }
+        "mailDraft"
+            if message_id.is_empty() || subject.trim().is_empty() || path.as_os_str().is_empty() =>
+        {
+            Some(
+                "create mailDraft wants --message-id <local@domain>, --subject TEXT and --path FILE; `deedar create --help`",
+            )
+        }
+        "patch" if tree.trim().is_empty() || diffs.is_empty() => {
+            Some("create patch wants --tree TREE and --diff PATH; `deedar create --help`")
+        }
+        "set" if members.is_empty() => {
+            Some("create set wants --member PATH; `deedar create --help`")
+        }
+        "clip" if clip_sources.is_empty() || path.as_os_str().is_empty() => {
+            Some("create clip wants --clip-src PATH and --path FILE; `deedar create --help`")
+        }
+        "page" if page_url.is_empty() || snapshot.as_os_str().is_empty() => {
+            Some("create page wants --page-url URL and --snapshot FILE; `deedar create --help`")
+        }
+        "form" if blank.trim().is_empty() || fields.is_empty() || path.as_os_str().is_empty() => {
+            Some(
+                "create form wants --blank NAME, --field name=value and --path FILE; `deedar create --help`",
+            )
+        }
+        "table" if measures.is_empty() => {
+            Some("create table wants --measure name=value; `deedar create --help`")
+        }
+        "procedure" if steps.is_empty() => {
+            Some("create procedure wants --step TEXT; `deedar create --help`")
+        }
+        "event" if when.trim().is_empty() || where_.trim().is_empty() || who.trim().is_empty() => {
+            Some(
+                "create event wants --when WHEN, --where WHERE and --who WHO; `deedar create --help`",
+            )
+        }
+        _ => None,
+    }
+}
+
 fn frozen_hint(
     client: &mut Client,
     e: &deed::Error,
@@ -1186,7 +1330,10 @@ fn revised_by(client: &mut Client, prior: &DeedId) -> Option<String> {
 }
 
 fn need(args: &[String], i: &mut usize) -> Result<String, String> {
-    let v = args.get(*i + 1).ok_or("flag needs a value")?;
+    let flag = &args[*i];
+    let v = args
+        .get(*i + 1)
+        .ok_or_else(|| format!("{flag} needs a value"))?;
     *i += 1;
     Ok(v.clone())
 }

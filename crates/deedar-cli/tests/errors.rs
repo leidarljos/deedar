@@ -509,6 +509,57 @@ fn a_missing_signing_key_path_names_the_file_and_exits_1() {
 
 /// No host key, and no `ljos` command in this checkout. The refusal names
 /// the bytes to write.
+/// A create that is short a flag names that flag, and a missing file names `--path`.
+#[test]
+fn create_names_the_flag_it_still_needs() {
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    let url = store_url(home);
+    let cases = [
+        (
+            vec!["--url", &url, "create", "file", "--path"],
+            "deedar: --path needs a value\n",
+        ),
+        (
+            vec!["--url", &url, "create", "--agent", "you"],
+            "deedar: create needs a kind before the flags; `deedar create --help`\n",
+        ),
+        (
+            vec!["--url", &url, "create", "quote", "--agent", "you"],
+            "deedar: create quote wants --excerpt TEXT and --src-url URL; `deedar create --help`\n",
+        ),
+        (
+            vec!["--url", &url, "create", "mailDraft", "--agent", "you"],
+            "deedar: create mailDraft wants --message-id <local@domain>, --subject TEXT and --path FILE; `deedar create --help`\n",
+        ),
+    ];
+    for (args, stderr) in cases {
+        let out = deedar(home, &args);
+        refused(&out, stderr);
+    }
+    let missing = home.join("no-such-note.rs");
+    let out = deedar(
+        home,
+        &[
+            "--url",
+            &url,
+            "create",
+            "file",
+            "--path",
+            missing.to_str().unwrap(),
+            "--agent",
+            "you",
+        ],
+    );
+    refused(
+        &out,
+        &format!(
+            "deedar: {} is not a file; --path needs a regular file\n",
+            missing.display()
+        ),
+    );
+}
+
 #[test]
 fn host_accept_with_no_key_names_how_to_write_one() {
     let home = tempfile::tempdir().unwrap();
