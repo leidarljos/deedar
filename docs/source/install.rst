@@ -73,8 +73,9 @@ version it fetched, and where it put each binary.
    cargo binstall --no-confirm deedar-mcp
 
 ``--root DIR`` chooses the prefix. Omit it and binstall uses its default.
-``deedar-mcp`` speaks the protocol on standard input, so running it with
-no client closes the connection.
+``deedar-mcp`` speaks the protocol on standard input and needs a client
+there. With none, it prints that it expects an MCP client on standard
+input and exits 1.
 ``deedar-mcp --help`` and ``deedar-mcp --version`` print and exit.
 The :doc:`how-to <howto>` shows
 the server line and the client entry.

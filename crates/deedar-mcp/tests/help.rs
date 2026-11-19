@@ -44,3 +44,23 @@ fn help_and_version_print_and_an_argument_is_refused() {
     );
     assert!(!err.contains("initialize"));
 }
+
+/// With no client on standard input the server says what it expects, on one
+/// line, and exits 1 instead of ending on a protocol error.
+#[test]
+fn standard_input_with_no_client_names_what_the_server_expects() {
+    let out = Command::new(env!("CARGO_BIN_EXE_deedar-mcp"))
+        .env("DEEDAR_HOST_SIGNING_KEY", "off")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("deedar-mcp runs");
+    assert_eq!(out.status.code(), Some(1));
+    assert!(out.stdout.is_empty());
+    let err = String::from_utf8(out.stderr).expect("stderr is utf8");
+    assert_eq!(
+        err,
+        "deedar-mcp: expects an MCP client on standard input, \
+         and it closed before one sent initialize; `deedar-mcp --help`\n"
+    );
+    assert!(!err.contains("connection closed"), "{err}");
+}
