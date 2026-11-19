@@ -31,7 +31,7 @@ A read names the missing path and stops.
 | =vouch sign FILE \vert check FILE= | a detached Ed25519 signature beside a file |
 | =migrate= | move a store to the current layout |
 | =host= | whether the store's layout lists the host signing key; exits 1 when it does not |
-| =host accept= | add the host signing key to the layout as a signer, and leave every other line. Refuses when the layout says =attestation = required= |
+| =host accept= | add the host signing key to the layout as a signer, and leave every other line. Refuses when the layout says =attestation = required=. With no key, the refusal names the command that writes one. |
 | =url= | print the store URL this command resolved: =--url=, else =DEEDAR_URL=, else the seat store when that directory is already there |
 
 * Exit codes

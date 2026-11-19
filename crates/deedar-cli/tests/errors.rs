@@ -507,6 +507,26 @@ fn a_missing_signing_key_path_names_the_file_and_exits_1() {
     assert!(said.contains(key), "{said}");
 }
 
+/// No host key, and no `ljos` command in this checkout. The refusal names
+/// the bytes to write.
+#[test]
+fn host_accept_with_no_key_names_how_to_write_one() {
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    let url = store_url(home);
+    let out = deedar(home, &["--url", &url, "host", "accept"]);
+    refused(
+        &out,
+        "deedar: host key: none; set DEEDAR_HOST_SIGNING_KEY to a 32-byte seed, \
+         or to a file of those bytes (`head -c 32 /dev/urandom > host.key`)\n",
+    );
+    assert!(
+        !String::from_utf8_lossy(&out.stderr).contains("ljos"),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
 #[test]
 fn a_url_that_is_not_a_path_names_the_input_and_exits_1() {
     let home = tempfile::tempdir().unwrap();

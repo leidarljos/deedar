@@ -486,7 +486,8 @@ fn finish(args: Vec<String>) -> Result<(String, Option<u8>), String> {
             let layout = client.dir().join("layout");
             succeeded(match client.accept_host_signer().map_err(|e| e.to_string())? {
                 None => Err(
-                    "host key: none; set DEEDAR_HOST_SIGNING_KEY or run `ljos onboard` first"
+                    "host key: none; set DEEDAR_HOST_SIGNING_KEY to a 32-byte seed, \
+                     or to a file of those bytes (`head -c 32 /dev/urandom > host.key`)"
                         .into(),
                 ),
                 Some((public, true)) => Ok(format!(
