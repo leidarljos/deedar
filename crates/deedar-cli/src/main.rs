@@ -60,6 +60,12 @@ fn dispatch(args: Vec<String>) -> Result<Report, String> {
             code: None,
         });
     }
+    // No verb is the usage page. Resolving the store first would refuse a
+    // machine that has no store yet, or make a directory for a command
+    // that has nothing to do there.
+    if split.url_error.is_none() && !split.rest.iter().any(|arg| !arg.starts_with('-')) {
+        return Err(usage().trim_end().to_string());
+    }
     let (url, rest) = take_url(&args)?;
     if rest.first().map(String::as_str) == Some("evidence") && is_many(&rest[1..]) {
         return evidence_many(&url, &rest[1..]);
@@ -477,6 +483,15 @@ fn cmd_log(client: &mut Client, url: &str, args: &[String]) -> Result<String, St
 }
 
 fn finish(args: Vec<String>) -> Result<(String, Option<u8>), String> {
+    let split = split_argv(&args);
+    if let Some(err) = split.url_error {
+        return Err(err.to_string());
+    }
+    // A missing verb is the usage page. Opening the store first would make
+    // a directory for a command that has nothing to do there.
+    if !split.rest.iter().any(|arg| !arg.starts_with('-')) {
+        return Err(usage().trim_end().to_string());
+    }
     let (url, rest) = take_url(&args)?;
     // Before open: open is what creates the directory.
     let created_seat = creating_the_seat_store(&args, &rest);
@@ -610,7 +625,7 @@ fn finish(args: Vec<String>) -> Result<(String, Option<u8>), String> {
 }
 
 fn usage() -> String {
-    "usage: deedar [--url FILE] create|get|list|trail|evidence|delete|leave|timestamp|current|log|export|import|check|vouch|migrate|host\n\
+    "usage: deedar [--url FILE] create|get|list|trail|evidence|delete|leave|timestamp|current|log|export|import|check|vouch|migrate|host|url\n\
      deedar --help            this page\n\
      deedar create --help     kinds and flags, including --path\n\
      evidence, current and export take one id, several ids, or - to read them from stdin\n\
@@ -618,8 +633,10 @@ fn usage() -> String {
      log takes head, list, audit, backfill, prove ID, or bridge SIZE\n\
      import takes a satchel directory, and --allow-unsigned-head for a missing or unlisted signature\n\
      check takes a satchel directory, --since KEPT_HEAD, --bridge FILE and --keep FILE; vouch takes sign FILE or check FILE\n\
+     leave takes an id and a destination directory\n\
      host says whether the store's layout lists the host signing key, and exits 1 when it does not\n\
-     host accept adds the host signing key to the layout as a signer, and leaves every other line\n"
+     host accept adds the host signing key to the layout as a signer, and leaves every other line\n\
+     url prints the store this command resolved\n"
         .into()
 }
 

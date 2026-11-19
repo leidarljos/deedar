@@ -21,7 +21,7 @@ Verb                                                                            
 ``evidence ID... | -``                                                              the bytes are intact; one line each; non-zero on any failure
 ``current ID... | -``                                                               the tip of each supersede chain; non-zero when any citation is stale or missing
 ``delete ID``                                                                       tombstone
-``leave ID``                                                                        a left-behind marker for a deed that moved store
+``leave ID DIR``                                                                    a left-behind marker for a deed that moved store, written under DIR
 ``timestamp ID``                                                                    a timestamp token over the deed
 ``export --into DIR ID... | -``                                                     deed, bytes, evidence, receipt (and signed head) into a satchel
 ``import DIR [--allow-unsigned-head]``                                              check a satchel and hold its deeds here with the receipt fields they travelled with; nothing is written unless every deed can be held, ``--allow-unsigned-head`` waives a missing or unlisted signature, and ``attestation = required`` warns and still imports

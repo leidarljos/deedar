@@ -49,7 +49,7 @@ fn line(text: &str, expected: &str) {
 }
 
 const USAGE: &str = "\
-usage: deedar [--url FILE] create|get|list|trail|evidence|delete|leave|timestamp|current|log|export|import|check|vouch|migrate|host
+usage: deedar [--url FILE] create|get|list|trail|evidence|delete|leave|timestamp|current|log|export|import|check|vouch|migrate|host|url
 deedar --help            this page
 deedar create --help     kinds and flags, including --path
 evidence, current and export take one id, several ids, or - to read them from stdin
@@ -57,8 +57,10 @@ list takes --kind KIND, --agent ID and --text WORDS
 log takes head, list, audit, backfill, prove ID, or bridge SIZE
 import takes a satchel directory, and --allow-unsigned-head for a missing or unlisted signature
 check takes a satchel directory, --since KEPT_HEAD, --bridge FILE and --keep FILE; vouch takes sign FILE or check FILE
+leave takes an id and a destination directory
 host says whether the store's layout lists the host signing key, and exits 1 when it does not
 host accept adds the host signing key to the layout as a signer, and leaves every other line
+url prints the store this command resolved
 ";
 
 const CREATE_HELP: &str = "\
@@ -160,6 +162,34 @@ fn a_step_equal_to_version_is_stored() {
         "id=deed-procedure-version kind=procedure name=procedure",
     );
     line(&got, "steps=1");
+}
+
+/// No verb is the usage page, and it does not create a store on the way there.
+#[test]
+fn no_verb_prints_usage_and_does_not_make_a_store() {
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    let seat = home.join(".local/share/deedar/store");
+    let out = deedar(home, &[]);
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(String::from_utf8_lossy(&out.stdout).as_ref(), "");
+    let err = String::from_utf8(out.stderr).expect("stderr is utf8");
+    assert!(err.starts_with("deedar: usage: deedar"), "{err}");
+    assert!(
+        err.contains("leave takes an id and a destination directory"),
+        "{err}"
+    );
+    assert!(
+        err.contains("url prints the store this command resolved"),
+        "{err}"
+    );
+    assert!(!seat.exists(), "usage created the seat store");
+
+    let named = home.join("named-store");
+    let url = format!("file://{}", named.display());
+    let out = deedar(home, &["--url", &url]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(!named.exists(), "usage created the named store");
 }
 
 #[test]

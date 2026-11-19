@@ -154,7 +154,7 @@ the ``list`` flags.
    $ deedar --version
    deedar 0.7.0
    $ deedar --help
-   usage: deedar [--url FILE] create|get|list|trail|evidence|delete|leave|timestamp|current|log|export|import|check|vouch|migrate|host
+   usage: deedar [--url FILE] create|get|list|trail|evidence|delete|leave|timestamp|current|log|export|import|check|vouch|migrate|host|url
    deedar --help            this page
    deedar create --help     kinds and flags, including --path
    evidence, current and export take one id, several ids, or - to read them from stdin
@@ -162,8 +162,10 @@ the ``list`` flags.
    log takes head, list, audit, backfill, prove ID, or bridge SIZE
    import takes a satchel directory, and --allow-unsigned-head for a missing or unlisted signature
    check takes a satchel directory, --since KEPT_HEAD, --bridge FILE and --keep FILE; vouch takes sign FILE or check FILE
+   leave takes an id and a destination directory
    host says whether the store's layout lists the host signing key, and exits 1 when it does not
    host accept adds the host signing key to the layout as a signer, and leaves every other line
+   url prints the store this command resolved
 
 Where next
 ==========
