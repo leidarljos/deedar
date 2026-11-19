@@ -23,7 +23,7 @@
 # import versions
 # cog.out(f"This site documents deedar {versions.version()}.\n")
 # ]]]
-This site documents deedar 0.7.0.
+This site documents deedar 0.7.1.
 # [[[end]]]
 
 * Why

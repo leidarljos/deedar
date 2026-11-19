@@ -1,3 +1,49 @@
+0.7.1 (2026-11-18)
+------------------
+
+Fixes
+~~~~~
+
+-  A create that is missing a flag names that flag and ``deedar create --help``.
+   A path that is not a regular file says so, instead of a store io line.
+-  ``DEEDAR_HOST_SIGNING_KEY`` set to 32 bytes is the seed.
+   A path that is not a file is refused, and the line names how to write one.
+-  ``DEEDAR_HOST_SIGNING_KEY`` takes a seed written ``seed:`` then 32 bytes, or ``hex:`` then 64 hex digits.
+   A seed with ``/`` or ``\`` in it is now writable, where bare it was refused as a path.
+   A bare 32-byte value with a separator is still a path, and its refusal names both forms.
+   The reference lists the forms in the order they are read.
+-  ``deedar VERB --help`` and ``deedar help VERB`` print a page for that verb, with its arguments and exit status.
+   It was the top-level usage for every verb except ``create``.
+-  ``deedar create --help`` spells the kind ``mailDraft`` and lists the flags each kind reads.
+   An unknown kind names the tokens and that page.
+   An event ``--title`` is the deed name when ``--name`` is omitted.
+-  ``deedar help`` prints the same pages as ``deedar --help``, and does not open a store.
+   An unknown command, log verb, or vouch verb names the page that lists the real ones.
+   An unknown command does not create a store.
+-  ``deedar host accept`` with no key names the command that writes a 32-byte seed.
+   It no longer names ``ljos onboard``.
+-  ``deedar list`` at a ``--url`` or ``DEEDAR_URL`` path with no store no longer makes the store.
+   It prints one stderr line that there is no store yet and how to make one, and exits 0 with an empty list.
+   Every other read exits 1 with that line, and ``deedar url`` prints the URL without opening it.
+   ``create``, ``import`` and ``host accept`` still make the store.
+-  ``deedar log`` with no command prints the log usage on stderr and exits 2.
+   It printed the head and exited 0, which no page documents; ``deedar log head`` is the command.
+-  ``deedar timestamp`` with ``DEEDAR_TSA`` unset names the query file and the variable to set for a ``.tsr``.
+-  ``deedar-mcp --help`` and ``deedar-mcp --version`` print and exit.
+   An argument is refused with that page, instead of a protocol error.
+-  ``deedar-mcp`` started with no client on standard input prints one line that it expects an MCP client there, and exits 1.
+   It ended on ``connection closed: initialize request``.
+-  ``deedar`` with no verb prints usage and does not create a store.
+   Usage names ``url`` and ``leave ID DIR``.
+
+Documentation
+~~~~~~~~~~~~~
+
+-  The getting-started page shows the sender key file, the ``deedar host`` line, and the ``signer`` line the receiver adds.
+   ``deedar host accept`` adds the key on the machine that runs it.
+-  The install page names no release.
+   Its download commands read the version and target from two variables, and ``docs/scripts/check_org.py`` refuses a typed version there.
+
 0.7.0 (2026-11-18)
 ------------------
 
