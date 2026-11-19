@@ -27,6 +27,15 @@ fn main() -> ExitCode {
 /// which is a check that did finish on a signer the reader does not accept.
 const EXIT_FAILED: u8 = 1;
 
+/// A command line that names a verb and leaves out what it has to be given,
+/// where the answer is the verb's usage and no store was read. Also the code
+/// of [`deedar::EXIT_UNTRUSTED_SIGNER`], which only `check` and `vouch check`
+/// return.
+const EXIT_USAGE: u8 = 2;
+
+/// What `log` takes, in the words usage and every refusal use.
+const LOG_TAKES: &str = "log takes head, list, audit, backfill, prove ID, or bridge SIZE";
+
 /// What a verb produced: text to print, and the status when it is not success.
 ///
 /// `code` is `None` for success. `Some(EXIT_FAILED)` is a command that did
@@ -77,6 +86,13 @@ fn dispatch(args: Vec<String>) -> Result<Report, String> {
             }
             if !is_verb(verb) {
                 return Err(format!("unknown command {verb}; `deedar --help`"));
+            }
+            if verb == "log" && split.rest.len() == 1 {
+                eprintln!("deedar: {}", log_needs_a_command());
+                return Ok(Report {
+                    text: String::new(),
+                    code: Some(EXIT_USAGE),
+                });
             }
         }
     }
@@ -420,7 +436,8 @@ fn cmd_import(client: &mut Client, args: &[String]) -> Result<String, String> {
 /// kept head to this one, `audit` of the log against the shelves.
 fn cmd_log(client: &mut Client, url: &str, args: &[String]) -> Result<String, String> {
     match args.first().map(String::as_str) {
-        Some("head") | None => {
+        None => Err(log_needs_a_command()),
+        Some("head") => {
             // Signed when this store holds a key, because the head is the one
             // thing a reader keeps between visits and an unsigned one is two
             // numbers they were handed.
@@ -494,11 +511,14 @@ fn cmd_log(client: &mut Client, url: &str, args: &[String]) -> Result<String, St
                 added.len()
             ))
         }
-        Some(other) => Err(format!(
-            "unknown log command {other}; \
-             log takes head, list, audit, backfill, prove ID, or bridge SIZE"
-        )),
+        Some(other) => Err(format!("unknown log command {other}; {LOG_TAKES}")),
     }
+}
+
+/// `deedar log` alone. Which of its commands was meant is not a guess to make
+/// for the seat: `head` is one of six, and `backfill` writes.
+fn log_needs_a_command() -> String {
+    format!("log needs a command; {LOG_TAKES}; `deedar log --help`")
 }
 
 fn finish(args: Vec<String>) -> Result<(String, Option<u8>), String> {
@@ -782,7 +802,8 @@ fn verb_help(verb: &str) -> Option<&'static str> {
              audit checks the log against the shelves, and exits 1 when they differ\n\
              backfill logs the deeds already on the shelves that the log lacks\n\
              prove ID prints the receipt that exports write beside a deed\n\
-             bridge SIZE prints what joins a head of that size to this one\n"
+             bridge SIZE prints what joins a head of that size to this one\n\
+             a bare `deedar log` is refused: it prints this list on stderr and exits 2\n"
         }
         "export" => {
             "deedar export --into DIR ID...\n\

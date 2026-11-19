@@ -343,6 +343,36 @@ fn verb_pages_name_what_the_verb_takes() {
     }
 }
 
+/// A bare `log` used to print the head and exit 0. No page or doc says it
+/// does, and `head` is one of six commands, so it is a usage error: stderr,
+/// exit 2, nothing on stdout, and no store made for it.
+#[test]
+fn a_bare_log_prints_the_log_usage_and_exits_2() {
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    let url = store_url(home);
+    create_quote(home, &url, "deed-quote-bare-log", &["--excerpt", "x"]);
+    let head = ok(home, &["--url", &url, "log", "head"]);
+    assert!(head.starts_with("size=1 root="), "{head}");
+
+    let usage = "deedar: log needs a command; \
+        log takes head, list, audit, backfill, prove ID, or bridge SIZE; `deedar log --help`\n";
+    for args in [
+        vec!["--url", url.as_str(), "log"],
+        vec!["log", "--url", url.as_str()],
+    ] {
+        let out = deedar(home, &args);
+        assert_eq!(out.status.code(), Some(2), "{args:?}");
+        assert_eq!(String::from_utf8_lossy(&out.stdout).as_ref(), "");
+        assert_eq!(String::from_utf8_lossy(&out.stderr).as_ref(), usage);
+    }
+
+    let elsewhere = format!("file://{}", home.join("not-made").display());
+    let out = deedar(home, &["--url", &elsewhere, "log"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(!home.join("not-made").exists(), "log made a store");
+}
+
 #[test]
 fn list_url_after_the_verb_selects_that_store() {
     let home = tempfile::tempdir().unwrap();
