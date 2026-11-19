@@ -33,7 +33,7 @@ A read names the missing path and stops.
 | =host= | whether the store's layout lists the host signing key; exits 1 when it does not |
 | =host accept= | add the host signing key to the layout as a signer, and leave every other line. Refuses when the layout says =attestation = required=. With no key, the refusal names the command that writes one. |
 | =url= | print the store URL this command resolved: =--url=, else =DEEDAR_URL=, else the seat store when that directory is already there |
-| =help= | this page; =help create= is the create page. =deedar help= does not open a store |
+| =help= | this page; =help VERB= and =VERB --help= are the page for that verb, each with its own arguments and exit status. =deedar help= does not open a store |
 
 * Exit codes
 

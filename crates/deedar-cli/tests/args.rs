@@ -52,8 +52,8 @@ const USAGE: &str = "\
 usage: deedar [--url FILE] create|get|list|trail|evidence|delete|leave|timestamp|current|log|export|import|check|vouch|migrate|host|url
 deedar --help            this page
 deedar help              this page
-deedar create --help     kinds and flags, including --path
-deedar help create       kinds and flags, including --path
+deedar VERB --help       the page for one verb, with its flags
+deedar help VERB         the same page
 evidence, current and export take one id, several ids, or - to read them from stdin
 list takes --kind KIND, --agent ID and --text WORDS
 log takes head, list, audit, backfill, prove ID, or bridge SIZE
@@ -265,6 +265,82 @@ fn help_and_version_print_the_same_pages() {
     let version = format!("deedar {}\n", env!("CARGO_PKG_VERSION"));
     assert_eq!(ok(home, &["-V"]), version);
     assert_eq!(ok(home, &["--version"]), version);
+}
+
+const VERBS: [&str; 16] = [
+    "create",
+    "get",
+    "list",
+    "trail",
+    "evidence",
+    "delete",
+    "leave",
+    "timestamp",
+    "current",
+    "log",
+    "export",
+    "import",
+    "check",
+    "vouch",
+    "migrate",
+    "host",
+];
+
+/// Every verb has its own page, `--help` and `help VERB` print the same one,
+/// and neither opens a store.
+#[test]
+fn each_verb_prints_its_own_help() {
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    let seat = home.join(".local/share/deedar/store");
+    let mut pages = Vec::new();
+    for verb in VERBS.into_iter().chain(["url"]) {
+        let page = ok(home, &[verb, "--help"]);
+        assert_ne!(page, USAGE, "{verb} --help is the top-level page");
+        assert!(
+            page.starts_with(&format!("deedar {verb}")),
+            "{verb} --help does not start with its own line:\n{page}"
+        );
+        assert_eq!(ok(home, &["help", verb]), page, "help {verb}");
+        assert_eq!(ok(home, &[verb, "-h"]), page, "{verb} -h");
+        assert!(!pages.contains(&page), "{verb} repeats another page");
+        pages.push(page);
+    }
+    assert!(!seat.exists(), "a help page created the seat store");
+}
+
+#[test]
+fn verb_pages_name_what_the_verb_takes() {
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    line(
+        &ok(home, &["list", "--help"]),
+        "deedar list [--kind KIND] [--agent ID] [--text WORDS]",
+    );
+    line(
+        &ok(home, &["export", "--help"]),
+        "deedar export --into DIR ID...",
+    );
+    line(
+        &ok(home, &["import", "--help"]),
+        "deedar import DIR [--allow-unsigned-head]",
+    );
+    line(
+        &ok(home, &["check", "--help"]),
+        "deedar check DIR [--since KEPT_HEAD] [--bridge FILE] [--keep FILE]",
+    );
+    line(&ok(home, &["leave", "--help"]), "deedar leave ID DIR");
+    let log = ok(home, &["log", "--help"]);
+    for word in [
+        "head",
+        "list",
+        "audit",
+        "backfill",
+        "prove ID",
+        "bridge SIZE",
+    ] {
+        assert!(log.contains(&format!("deedar log {word}")), "{log}");
+    }
 }
 
 #[test]
