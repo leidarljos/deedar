@@ -50,6 +50,14 @@ fn url(home: &Path, name: &str) -> String {
     format!("file://{}", home.join(name).display())
 }
 
+/// A store with no deeds and the layout a first open writes. A read does not
+/// make one, so a test that edits the layout first has to.
+fn empty_store(home: &Path, name: &str) {
+    let dir = home.join(name);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("layout"), "1\n").unwrap();
+}
+
 fn quote(home: &Path, store: &str, signing: &str, id: &str, extra: &[&str]) {
     let mut args = vec![
         "--url",
@@ -198,7 +206,7 @@ fn a_head_signed_by_a_listed_key_needs_no_flag() {
         ],
     );
 
-    ok(home, "off", &["--url", &receiver, "list"]);
+    empty_store(home, "receiver");
     std::fs::write(
         home.join("receiver/layout"),
         format!("1\nattestation = required\nsigner = {public}\n"),
@@ -250,7 +258,7 @@ fn allow_unsigned_head_takes_an_unlisted_signature() {
         ],
     );
 
-    ok(home, "off", &["--url", &receiver, "list"]);
+    empty_store(home, "receiver");
     let host = fails(home, &other, &["--url", &receiver, "host"]);
     let public = host
         .split_whitespace()
@@ -319,7 +327,7 @@ fn attestation_required_imports_an_unsigned_head_with_the_flag_and_warns() {
             "deed-quote-plain",
         ],
     );
-    ok(home, "off", &["--url", &receiver, "list"]);
+    empty_store(home, "receiver");
     std::fs::write(
         home.join("receiver/layout"),
         format!("1\nattestation = required\nsigner = {public}\n"),
@@ -373,7 +381,7 @@ fn host_accept_on_a_required_store_refuses() {
     std::fs::write(&key_path, [7u8; 32]).unwrap();
     let key = key_path.display().to_string();
     let store = url(home, "store");
-    ok(home, "off", &["--url", &store, "list"]);
+    empty_store(home, "store");
     let layout_path = home.join("store/layout");
     let layout_text = "1\nattestation = required\n";
     std::fs::write(&layout_path, layout_text).unwrap();
@@ -402,7 +410,7 @@ fn vouch_check_reports_an_unlisted_key_and_warns() {
     let key = key_path.display().to_string();
     let other = other_path.display().to_string();
     let store = url(home, "store");
-    ok(home, "off", &["--url", &store, "list"]);
+    empty_store(home, "store");
     std::fs::write(home.join("manifest-sha256.txt"), "abc  data/one\n").unwrap();
     ok(
         home,

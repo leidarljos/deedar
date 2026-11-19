@@ -476,6 +476,8 @@ def howto_attest() -> str:
         session.step("export DEEDAR_URL=file:///tmp/deeds")
         session.step("export DEEDAR_HOST_SIGNING_KEY=/tmp/host.key")
         session.step(f"head -c {SEED_BYTES} /dev/zero > /tmp/host.key")
+        # A read makes no store, so the key is reported from one that is there.
+        mint(session)
         reported = session.step("deedar host")
         found = _SIGNER.search(reported)
         if not found:

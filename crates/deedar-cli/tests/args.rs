@@ -388,8 +388,115 @@ fn list_url_after_the_verb_selects_that_store() {
     let listed = ok(home, &["list", "--url", &url]);
     assert!(listed.contains("deed-quote-listed"), "{listed}");
     line(&listed, "excerpt=kept in this store");
-    let empty = ok(home, &["list", "--url", &other]);
-    assert_eq!(empty, "");
+    let out = deedar(home, &["list", "--url", &other]);
+    assert!(out.status.success());
+    assert_eq!(String::from_utf8_lossy(&out.stdout).as_ref(), "");
+}
+
+fn no_store_note(path: &Path) -> String {
+    format!(
+        "deedar: no store at {} yet; `deedar create --help` shows how to make the first deed, \
+         and create makes the store\n",
+        path.display()
+    )
+}
+
+/// `list` at a path with no store used to make the store and print nothing.
+/// It leaves the path alone, prints the note on stderr, and exits 0 with an
+/// empty list. The first `create` makes the store, and then `list` is quiet.
+#[test]
+fn list_at_a_new_path_says_there_is_no_store_and_makes_none() {
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    let at = home.join("fresh");
+    let url = format!("file://{}", at.display());
+    for args in [
+        vec!["--url", url.as_str(), "list"],
+        vec!["list", "--url", url.as_str()],
+    ] {
+        let out = deedar(home, &args);
+        assert_eq!(out.status.code(), Some(0), "{args:?}");
+        assert_eq!(String::from_utf8_lossy(&out.stdout).as_ref(), "");
+        assert_eq!(
+            String::from_utf8_lossy(&out.stderr).as_ref(),
+            no_store_note(&at)
+        );
+        assert!(!at.exists(), "{args:?} made the store");
+    }
+
+    let mut envs = Command::new(env!("CARGO_BIN_EXE_deedar"));
+    let out = envs
+        .args(["list"])
+        .env("HOME", home)
+        .env("XDG_DATA_HOME", home.join(".local/share"))
+        .env("DEEDAR_HOST_SIGNING_KEY", "off")
+        .env("DEEDAR_URL", &url)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    assert_eq!(
+        String::from_utf8_lossy(&out.stderr).as_ref(),
+        no_store_note(&at)
+    );
+    assert!(!at.exists(), "DEEDAR_URL made the store");
+
+    create_quote(home, &url, "deed-quote-first", &["--excerpt", "x"]);
+    assert!(at.is_dir(), "create did not make the store");
+    let listed = deedar(home, &["--url", &url, "list"]);
+    assert!(listed.status.success());
+    assert!(String::from_utf8_lossy(&listed.stdout).contains("deed-quote-first"));
+    assert_eq!(String::from_utf8_lossy(&listed.stderr).as_ref(), "");
+}
+
+/// A read that needs a deed refuses with the same line, exit 1, and no store.
+/// `url` only prints, so it needs none; `check` and `vouch` never open one.
+#[test]
+fn the_other_reads_refuse_a_missing_store_and_make_none() {
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    let at = home.join("fresh");
+    let url = format!("file://{}", at.display());
+    let cases: [&[&str]; 9] = [
+        &["get", "deed-quote-x"],
+        &["trail", "deed-quote-x"],
+        &["evidence", "deed-quote-x"],
+        &["evidence", "deed-quote-x", "deed-quote-y"],
+        &["current", "deed-quote-x", "deed-quote-y"],
+        &["log", "head"],
+        &["log", "audit"],
+        &["host"],
+        &["migrate"],
+    ];
+    for case in cases {
+        let mut args = vec!["--url", url.as_str()];
+        args.extend_from_slice(case);
+        let out = deedar(home, &args);
+        assert_eq!(out.status.code(), Some(1), "{case:?}");
+        assert_eq!(String::from_utf8_lossy(&out.stdout).as_ref(), "");
+        assert_eq!(
+            String::from_utf8_lossy(&out.stderr).as_ref(),
+            no_store_note(&at),
+            "{case:?}"
+        );
+        assert!(!at.exists(), "{case:?} made the store");
+    }
+    assert_eq!(ok(home, &["--url", &url, "url"]), format!("{url}\n"));
+    assert!(!at.exists(), "url made the store");
+}
+
+/// The writes still make the store: `create`, `import` and `host accept`.
+#[test]
+fn host_accept_still_makes_a_store() {
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    let at = home.join("fresh");
+    let url = format!("file://{}", at.display());
+    let out = deedar(home, &["--url", &url, "host", "accept"]);
+    assert!(
+        at.is_dir(),
+        "host accept made no store: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 }
 
 /// `create --help` used to spell the kind `maildraft`, which `create` refuses.

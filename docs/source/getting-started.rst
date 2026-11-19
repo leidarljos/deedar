@@ -10,14 +10,16 @@ on the :doc:`concepts <concepts>` page.
 1. Point at a store
 ===================
 
-A store is a directory. It is created on first write. With no deeds,
-``list`` prints nothing.
+A store is a directory. The first ``create`` or ``import`` makes it, and a
+read does not. Until then, ``list`` prints one line on standard error that
+there is no store yet and how to make one, and nothing else.
 
 .. code:: console
 
    $ export DEEDAR_URL=file:///tmp/deeds
    $ export DEEDAR_HOST_SIGNING_KEY=off
    $ deedar list
+   deedar: no store at /tmp/deeds yet; `deedar create --help` shows how to make the first deed, and create makes the store
 
 2. Mint a deed
 ==============

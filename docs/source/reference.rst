@@ -9,7 +9,11 @@ Command line
 ``deedar [--url FILE] VERB ...``.
 The store is ``--url``, else ``DEEDAR_URL``, else the seat's own store under the user's data directory (``$XDG_DATA_HOME/deedar/store``).
 ``create`` and ``import`` make that store on the first write, and print ``deedar: created the store at PATH`` on stderr.
-A read names the missing path and stops.
+A read makes no store.
+With no URL set and no seat store, it names the seat path and stops.
+At a ``--url`` or ``DEEDAR_URL`` path with no store, ``list`` prints ``deedar: no store at PATH yet`` and how to create one on stderr, prints nothing else, and exits 0.
+Every other read prints the same line and exits 1.
+``url``, ``check`` and ``vouch`` need no store.
 
 =================================================================================== ===============================================================================================================================================================================================================================================================
 Verb                                                                                Does

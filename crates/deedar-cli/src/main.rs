@@ -97,6 +97,23 @@ fn dispatch(args: Vec<String>) -> Result<Report, String> {
         }
     }
     let (url, rest) = take_url(&args)?;
+    if let Some(dir) = no_store_yet(&url, &rest) {
+        let note = format!(
+            "no store at {} yet; `deedar create --help` shows how to make the first deed, \
+             and create makes the store",
+            dir.display()
+        );
+        // An empty list is the answer for a store with no deeds; every other
+        // read needs a deed that is not there.
+        if rest.first().map(String::as_str) == Some("list") {
+            eprintln!("deedar: {note}");
+            return Ok(Report {
+                text: String::new(),
+                code: None,
+            });
+        }
+        return Err(note);
+    }
     if rest.first().map(String::as_str) == Some("evidence") && is_many(&rest[1..]) {
         return evidence_many(&url, &rest[1..]);
     }
@@ -532,6 +549,14 @@ fn finish(args: Vec<String>) -> Result<(String, Option<u8>), String> {
         return Err(usage().trim_end().to_string());
     }
     let (url, rest) = take_url(&args)?;
+    // `url` names the store this command resolved and has nothing to read in
+    // it, so it does not open it: opening makes a store that is not there.
+    if rest.first().map(String::as_str) == Some("url") {
+        return succeeded(Ok(format!(
+            "{}\n",
+            StoreUrl::parse(&url).map_err(|e| e.to_string())?.as_url()
+        )));
+    }
     // Before open: open is what creates the directory.
     let created_seat = creating_the_seat_store(&args, &rest);
     let mut client = open_client(&url)?;
@@ -1023,6 +1048,23 @@ fn take_url(args: &[String]) -> Result<(String, Vec<String>), String> {
 /// It is not a directory this write should try to create.
 fn may_make_missing_seat(dir: &Path, rest: &[String]) -> bool {
     !dir.exists() && makes_the_seat_store(rest)
+}
+
+/// The directory a read named that is not there. `Client::open` makes a
+/// missing store, so a read that opened it would leave one behind.
+///
+/// `create`, `import` and `host accept` write and make the store. `check`,
+/// `vouch` and `url` do not open one. A path blocked by a file is left to
+/// [`open_client`], which names it.
+fn no_store_yet(url: &str, rest: &[String]) -> Option<PathBuf> {
+    let verb = rest.first().map(String::as_str)?;
+    let makes_it = matches!(verb, "create" | "import")
+        || (verb == "host" && rest.get(1).map(String::as_str) == Some("accept"));
+    if makes_it || matches!(verb, "check" | "vouch" | "url") {
+        return None;
+    }
+    let dir = deedar::store_dir(url).ok()?;
+    (!dir.exists() && !blocked_by_a_file(&dir)).then_some(dir)
 }
 
 /// The writes that open the seat store on first use.

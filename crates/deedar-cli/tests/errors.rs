@@ -484,7 +484,7 @@ fn a_missing_signing_key_path_names_the_file_and_exits_1() {
     let file = home.join("seed.key");
     std::fs::write(&file, [0x11; 32]).unwrap();
     let from_file = Command::new(env!("CARGO_BIN_EXE_deedar"))
-        .args(["--url", &format!("{url}-file"), "host"])
+        .args(["--url", &url, "host"])
         .env("HOME", home)
         .env("XDG_CONFIG_HOME", home.join(".config"))
         .env("XDG_DATA_HOME", home.join(".local/share"))

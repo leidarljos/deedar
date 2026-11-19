@@ -44,7 +44,9 @@ $ export DEEDAR_URL=file://$HOME/.local/share/deedar/store
 ```
 
 `deedar-mcp` is the read-only MCP surface. There is no daemon: each command
-opens the store. Release archives, crates.io, and a checkout install are
+opens the store. The first `create` makes it. A read does not: until then,
+`deedar list` prints one line saying there is no store yet and how to make one.
+Release archives, crates.io, and a checkout install are
 on the installation page, including `DEEDAR_HOST_SIGNING_KEY`.
 
 ## First minute
