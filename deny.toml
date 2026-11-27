@@ -12,12 +12,13 @@ ignore = [
 [bans]
 multiple-versions = "warn"
 
-# crates.io is the only source. Every locked crate comes from that
-# registry, so another registry or a git source fails the check.
+# crates.io is the registry. The deed log calls the rfc9162 crate at
+# tag v0.8.1, which is the one git source allowed here.
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = ["https://github.com/stackhands/rfc9162"]
 
 # Licenses this workspace may depend on.
 [licenses]

@@ -4,8 +4,9 @@
 //! consistency proofs catch a rewritten log. Signatures alone bind neither.
 //! Gossip lives outside this file. Two consistent logs shown to two readers
 //! both verify here.
-
-use sha2::{Digest, Sha256};
+//!
+//! The hash, root and proof functions call the `rfc9162` crate. The entry
+//! line and the signed head stay in this file.
 
 use deed::{Error, Result};
 
@@ -59,20 +60,13 @@ impl Entry {
 /// Leaf hash, `SHA-256(0x00 || entry)`.
 #[must_use]
 pub fn leaf_hash(material: &[u8]) -> [u8; 32] {
-    let mut hasher = Sha256::new();
-    hasher.update([0x00]);
-    hasher.update(material);
-    hasher.finalize().into()
+    rfc9162::leaf_hash(material)
 }
 
 /// Interior hash, `SHA-256(0x01 || left || right)`.
 #[must_use]
 pub fn node_hash(left: &[u8; 32], right: &[u8; 32]) -> [u8; 32] {
-    let mut hasher = Sha256::new();
-    hasher.update([0x01]);
-    hasher.update(left);
-    hasher.update(right);
-    hasher.finalize().into()
+    rfc9162::node_hash(left, right)
 }
 
 /// The Merkle root over `leaves`, RFC 9162 section 2.1: the tree splits at
@@ -80,24 +74,7 @@ pub fn node_hash(left: &[u8; 32], right: &[u8; 32]) -> [u8; 32] {
 /// below are sound over.
 #[must_use]
 pub fn root(leaves: &[[u8; 32]]) -> [u8; 32] {
-    match leaves {
-        [] => Sha256::digest([]).into(),
-        [one] => *one,
-        _ => {
-            let split = split_point(leaves.len());
-            node_hash(&root(&leaves[..split]), &root(&leaves[split..]))
-        }
-    }
-}
-
-/// The largest power of two strictly below `width`, which is where a tree of
-/// that width divides.
-fn split_point(width: usize) -> usize {
-    let mut split = 1usize;
-    while split * 2 < width {
-        split *= 2;
-    }
-    split
+    rfc9162::root(leaves)
 }
 
 /// What a store publishes: how many entries it has, and the root over them.
@@ -130,22 +107,7 @@ impl Head {
 /// subtree roots, innermost first.
 #[must_use]
 pub fn inclusion_proof(leaves: &[[u8; 32]], index: usize) -> Option<Vec<[u8; 32]>> {
-    if index >= leaves.len() {
-        return None;
-    }
-    if leaves.len() == 1 {
-        return Some(Vec::new());
-    }
-    let split = split_point(leaves.len());
-    Some(if index < split {
-        let mut path = inclusion_proof(&leaves[..split], index)?;
-        path.push(root(&leaves[split..]));
-        path
-    } else {
-        let mut path = inclusion_proof(&leaves[split..], index - split)?;
-        path.push(root(&leaves[..split]));
-        path
-    })
+    rfc9162::inclusion_proof(leaves, index)
 }
 
 /// Whether `leaf` sits at `index` of a tree of `size` leaves with that root.
@@ -157,31 +119,7 @@ pub fn verify_inclusion(
     path: &[[u8; 32]],
     root_hex: &str,
 ) -> bool {
-    if index >= size {
-        return false;
-    }
-    let mut hash = *leaf;
-    let (mut at, mut last) = (index, size - 1);
-    let mut steps = path.iter();
-    while last > 0 {
-        let Some(step) = steps.next() else {
-            return false;
-        };
-        // A right-hand node, or the last node at this level, joins from the
-        // left; anything else joins from the right.
-        if at % 2 == 1 || at == last {
-            hash = node_hash(step, &hash);
-            while at != 0 && at % 2 == 0 {
-                at /= 2;
-                last /= 2;
-            }
-        } else {
-            hash = node_hash(&hash, step);
-        }
-        at /= 2;
-        last /= 2;
-    }
-    steps.next().is_none() && hex(&hash) == root_hex
+    rfc9162::verify_inclusion(leaf, index, size, path, root_hex)
 }
 
 /// The consistency proof that a tree of `old` leaves is a prefix of these,
@@ -190,33 +128,7 @@ pub fn verify_inclusion(
 /// than the tree.
 #[must_use]
 pub fn consistency_proof(leaves: &[[u8; 32]], old: usize) -> Option<Vec<[u8; 32]>> {
-    if old == 0 || old > leaves.len() {
-        return None;
-    }
-    Some(subproof(leaves, old, true))
-}
-
-/// The RFC's SUBPROOF. `known` is whether the reader already holds the root of
-/// the subtree being described, which is true exactly when it is the old tree
-/// itself and so never needs sending.
-fn subproof(leaves: &[[u8; 32]], old: usize, known: bool) -> Vec<[u8; 32]> {
-    if old == leaves.len() {
-        return if known {
-            Vec::new()
-        } else {
-            vec![root(leaves)]
-        };
-    }
-    let split = split_point(leaves.len());
-    if old <= split {
-        let mut path = subproof(&leaves[..split], old, known);
-        path.push(root(&leaves[split..]));
-        path
-    } else {
-        let mut path = subproof(&leaves[split..], old - split, false);
-        path.push(root(&leaves[..split]));
-        path
-    }
+    rfc9162::consistency_proof(leaves, old)
 }
 
 /// Whether the tree of `old` leaves with `old_root` is a prefix of the tree of
@@ -229,265 +141,25 @@ pub fn verify_consistency(
     new_root: &str,
     path: &[[u8; 32]],
 ) -> bool {
-    if old == 0 || old > new {
-        return false;
-    }
-    if old == new {
-        // Nothing was added, so there is nothing to send and the two heads
-        // have to be the same head.
-        return path.is_empty() && old_root == new_root;
-    }
-    // When the old tree is a whole subtree its root was never sent, because
-    // the reader is the one holding it.
-    let (seed, rest) = if old.is_power_of_two() {
-        let Some(seed) = from_hex(old_root) else {
-            return false;
-        };
-        (seed, path)
-    } else {
-        let Some((head, rest)) = path.split_first() else {
-            return false;
-        };
-        (*head, rest)
-    };
-
-    let (mut at, mut last) = (old - 1, new - 1);
-    while at % 2 == 1 {
-        at /= 2;
-        last /= 2;
-    }
-    let (mut from_old, mut from_new) = (seed, seed);
-    for step in rest {
-        if last == 0 {
-            return false;
-        }
-        if at % 2 == 1 || at == last {
-            from_old = node_hash(step, &from_old);
-            from_new = node_hash(step, &from_new);
-            while at != 0 && at % 2 == 0 {
-                at /= 2;
-                last /= 2;
-            }
-        } else {
-            from_new = node_hash(&from_new, step);
-        }
-        at /= 2;
-        last /= 2;
-    }
-    last == 0 && hex(&from_old) == old_root && hex(&from_new) == new_root
+    rfc9162::verify_consistency(old, old_root, new, new_root, path)
 }
 
 /// A 32 byte hash from the lower-case hex [`hex`] writes. Any other text
 /// yields nothing.
 #[must_use]
 pub fn from_hex(text: &str) -> Option<[u8; 32]> {
-    // `from_str_radix` alone also reads `+b` as `0b` and `B` as `b`, so a
-    // proof with a changed byte would still check.
-    if text.len() != 64 || !text.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')) {
-        return None;
-    }
-    let mut out = [0u8; 32];
-    for (slot, pair) in out.iter_mut().zip(text.as_bytes().chunks_exact(2)) {
-        let pair = std::str::from_utf8(pair).ok()?;
-        *slot = u8::from_str_radix(pair, 16).ok()?;
-    }
-    Some(out)
+    rfc9162::from_hex(text)
 }
 
 /// Hex, lower case, fixed width.
 #[must_use]
 pub fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
+    rfc9162::hex(bytes)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn leaves(n: usize) -> Vec<[u8; 32]> {
-        (0..n)
-            .map(|i| leaf_hash(format!("deed-{i}").as_bytes()))
-            .collect()
-    }
-
-    /// A leaf and a node hash differently over the same bytes, which is what
-    /// stops a leaf being presented as an interior node.
-    #[test]
-    fn a_leaf_is_not_a_node() {
-        let left = leaf_hash(b"a");
-        let right = leaf_hash(b"b");
-        let parent = node_hash(&left, &right);
-        let mut joined = Vec::new();
-        joined.extend_from_slice(&left);
-        joined.extend_from_slice(&right);
-        assert_ne!(parent, leaf_hash(&joined));
-    }
-
-    /// Every leaf proves in, at every tree size, including the odd ones where
-    /// a node is carried up a level with no sibling.
-    #[test]
-    fn every_leaf_proves_in() {
-        for size in 1..=33usize {
-            let set = leaves(size);
-            let head = Head::over(&set);
-            assert_eq!(head.size, size);
-            for index in 0..size {
-                let path = inclusion_proof(&set, index).expect("a path");
-                assert!(
-                    verify_inclusion(&set[index], index, size, &path, &head.root),
-                    "size {size} index {index}"
-                );
-            }
-        }
-    }
-
-    /// The proof is for one leaf at one place. A verifier that accepted it for
-    /// another would be checking nothing.
-    #[test]
-    fn a_proof_does_not_travel() {
-        let set = leaves(8);
-        let head = Head::over(&set);
-        let path = inclusion_proof(&set, 3).expect("a path");
-        assert!(verify_inclusion(&set[3], 3, 8, &path, &head.root));
-        // Same path, different leaf.
-        assert!(!verify_inclusion(&set[4], 3, 8, &path, &head.root));
-        // Same leaf, different place.
-        assert!(!verify_inclusion(&set[3], 4, 8, &path, &head.root));
-        // Same everything, a root the store did not publish.
-        assert!(!verify_inclusion(&set[3], 3, 8, &path, &"0".repeat(64)));
-        // A truncated path leaves the hash short of the root.
-        assert!(!verify_inclusion(&set[3], 3, 8, &path[..2], &head.root));
-    }
-
-    /// Every prefix of every tree up to the bound proves it is a prefix.
-    #[test]
-    fn every_prefix_proves_it_is_one() {
-        for new in 1..=33usize {
-            let all = leaves(new);
-            let later = Head::over(&all);
-            for old in 1..=new {
-                let earlier = Head::over(&all[..old]);
-                let path = consistency_proof(&all, old).expect("a proof");
-                assert!(
-                    verify_consistency(old, &earlier.root, new, &later.root, &path),
-                    "size {old} is not proving a prefix of {new}"
-                );
-            }
-        }
-    }
-
-    /// A log rewritten wholesale passes inclusion and fails consistency.
-    #[test]
-    fn a_rewritten_log_cannot_extend_the_head_it_replaced() {
-        let honest = leaves(8);
-        let published = Head::over(&honest);
-
-        // The store drops what it published at index 2 and appends two more,
-        // so the tree is the same width it would honestly have been.
-        let mut rewritten: Vec<[u8; 32]> = honest.clone();
-        rewritten.remove(2);
-        rewritten.push(leaf_hash(b"deed-8"));
-        rewritten.push(leaf_hash(b"deed-9"));
-        let now = Head::over(&rewritten);
-
-        // Inclusion against the new head is fine for everything in it, which
-        // is exactly why inclusion alone does not answer this.
-        let path = inclusion_proof(&rewritten, 0).expect("a path");
-        assert!(verify_inclusion(
-            &rewritten[0],
-            0,
-            now.size,
-            &path,
-            &now.root
-        ));
-
-        // Consistency is not: no proof the store can offer makes the head it
-        // published an ancestor of the one it publishes now.
-        let offered = consistency_proof(&rewritten, published.size).expect("a proof");
-        assert!(
-            !verify_consistency(
-                published.size,
-                &published.root,
-                now.size,
-                &now.root,
-                &offered
-            ),
-            "a rewritten log passed as an extension"
-        );
-    }
-
-    /// A proof for one pair of heads does not check another, and a shortened
-    /// or padded one does not check at all.
-    #[test]
-    fn a_consistency_proof_does_not_travel() {
-        let all = leaves(12);
-        let later = Head::over(&all);
-        let earlier = Head::over(&all[..5]);
-        let path = consistency_proof(&all, 5).expect("a proof");
-        assert!(verify_consistency(5, &earlier.root, 12, &later.root, &path));
-
-        // A different old size.
-        let other = Head::over(&all[..6]);
-        assert!(!verify_consistency(6, &other.root, 12, &later.root, &path));
-        // A root nobody published.
-        assert!(!verify_consistency(
-            5,
-            &"0".repeat(64),
-            12,
-            &later.root,
-            &path
-        ));
-        // Truncated, and padded.
-        assert!(!verify_consistency(
-            5,
-            &earlier.root,
-            12,
-            &later.root,
-            &path[..1]
-        ));
-        let mut padded = path.clone();
-        padded.push([0u8; 32]);
-        assert!(!verify_consistency(
-            5,
-            &earlier.root,
-            12,
-            &later.root,
-            &padded
-        ));
-        // Backwards is not a prefix.
-        assert!(!verify_consistency(
-            12,
-            &later.root,
-            5,
-            &earlier.root,
-            &path
-        ));
-        // And an empty tree has no prefix to speak of.
-        assert!(consistency_proof(&all, 0).is_none());
-        assert!(consistency_proof(&all, 13).is_none());
-    }
-
-    /// Dropping a deed changes the root, which is the whole point: a store
-    /// that removes one cannot publish a head that still covers it.
-    #[test]
-    fn removing_an_entry_moves_the_root() {
-        let set = leaves(6);
-        let full = Head::over(&set);
-        let mut short = set.clone();
-        short.remove(2);
-        let missing = Head::over(&short);
-        assert_ne!(full.root, missing.root);
-        assert_ne!(full.size, missing.size);
-        // And the proof the store issued before the removal no longer checks.
-        let path = inclusion_proof(&set, 2).expect("a path");
-        assert!(!verify_inclusion(
-            &set[2],
-            2,
-            short.len(),
-            &path,
-            &missing.root
-        ));
-    }
 
     /// An entry round-trips through the line the log stores it as, and a line
     /// that is not an entry is refused rather than skipped.
@@ -503,6 +175,174 @@ mod tests {
         assert!(Entry::parse("two\tfields\n").is_err());
         assert!(Entry::parse("a\tb\tnot-a-time\n").is_err());
         assert!(Entry::parse("a\tb\t1\tc\n").is_err());
+    }
+
+    fn proof(text: &str) -> Vec<[u8; 32]> {
+        text.split_whitespace()
+            .map(|part| from_hex(part).expect("a vector hash"))
+            .collect()
+    }
+
+    fn ct_leaves() -> Vec<[u8; 32]> {
+        let inputs: [&[u8]; 8] = [
+            b"",
+            &[0x00],
+            &[0x10],
+            &[0x20, 0x21],
+            &[0x30, 0x31],
+            &[0x40, 0x41, 0x42, 0x43],
+            &[0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57],
+            &[
+                0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69, 0x6a, 0x6b, 0x6c, 0x6d,
+                0x6e, 0x6f,
+            ],
+        ];
+        inputs.iter().copied().map(leaf_hash).collect()
+    }
+
+    const EMPTY_ROOT: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+
+    const ROOTS: [&str; 8] = [
+        "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+        "fac54203e7cc696cf0dfcb42c92a1d9dbaf70ad9e621f4bd8d98662f00e3c125",
+        "aeb6bcfe274b70a14fb067a5e5578264db0fa9b51af5e0ba159158f329e06e77",
+        "d37ee418976dd95753c1c73862b9398fa2a2cf9b4ff0fdfe8b30cd95209614b7",
+        "4e3bbb1f7b478dcfe71fb631631519a3bca12c9aefca1612bfce4c13a86264d4",
+        "76e67dadbcdf1e10e1b74ddc608abd2f98dfb16fbce75277b5232a127f2087ef",
+        "ddb89be403809e325750d3d263cd78929c2942b7942a34b77e122c9594a74c8c",
+        "5dc9da79a70659a9ad559cb701ded9a2ab9d823aad2f4960cfe370eff4604328",
+    ];
+
+    const INCLUSION: [&[&str]; 8] = [
+        &[
+            "",
+        ],
+        &[
+            "96a296d224f285c67bee93c30f8a309157f0daa35dc5b87e410b78630a09cfc7",
+            "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+        ],
+        &[
+            "96a296d224f285c67bee93c30f8a309157f0daa35dc5b87e410b78630a09cfc7 0298d122906dcfc10892cb53a73992fc5b9f493ea4c9badb27b791b4127a7fe7",
+            "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d 0298d122906dcfc10892cb53a73992fc5b9f493ea4c9badb27b791b4127a7fe7",
+            "fac54203e7cc696cf0dfcb42c92a1d9dbaf70ad9e621f4bd8d98662f00e3c125",
+        ],
+        &[
+            "96a296d224f285c67bee93c30f8a309157f0daa35dc5b87e410b78630a09cfc7 5f083f0a1a33ca076a95279832580db3e0ef4584bdff1f54c8a360f50de3031e",
+            "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d 5f083f0a1a33ca076a95279832580db3e0ef4584bdff1f54c8a360f50de3031e",
+            "07506a85fd9dd2f120eb694f86011e5bb4662e5c415a62917033d4a9624487e7 fac54203e7cc696cf0dfcb42c92a1d9dbaf70ad9e621f4bd8d98662f00e3c125",
+            "0298d122906dcfc10892cb53a73992fc5b9f493ea4c9badb27b791b4127a7fe7 fac54203e7cc696cf0dfcb42c92a1d9dbaf70ad9e621f4bd8d98662f00e3c125",
+        ],
+        &[
+            "96a296d224f285c67bee93c30f8a309157f0daa35dc5b87e410b78630a09cfc7 5f083f0a1a33ca076a95279832580db3e0ef4584bdff1f54c8a360f50de3031e bc1a0643b12e4d2d7c77918f44e0f4f79a838b6cf9ec5b5c283e1f4d88599e6b",
+            "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d 5f083f0a1a33ca076a95279832580db3e0ef4584bdff1f54c8a360f50de3031e bc1a0643b12e4d2d7c77918f44e0f4f79a838b6cf9ec5b5c283e1f4d88599e6b",
+            "07506a85fd9dd2f120eb694f86011e5bb4662e5c415a62917033d4a9624487e7 fac54203e7cc696cf0dfcb42c92a1d9dbaf70ad9e621f4bd8d98662f00e3c125 bc1a0643b12e4d2d7c77918f44e0f4f79a838b6cf9ec5b5c283e1f4d88599e6b",
+            "0298d122906dcfc10892cb53a73992fc5b9f493ea4c9badb27b791b4127a7fe7 fac54203e7cc696cf0dfcb42c92a1d9dbaf70ad9e621f4bd8d98662f00e3c125 bc1a0643b12e4d2d7c77918f44e0f4f79a838b6cf9ec5b5c283e1f4d88599e6b",
+            "d37ee418976dd95753c1c73862b9398fa2a2cf9b4ff0fdfe8b30cd95209614b7",
+        ],
+        &[
+            "96a296d224f285c67bee93c30f8a309157f0daa35dc5b87e410b78630a09cfc7 5f083f0a1a33ca076a95279832580db3e0ef4584bdff1f54c8a360f50de3031e 0ebc5d3437fbe2db158b9f126a1d118e308181031d0a949f8dededebc558ef6a",
+            "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d 5f083f0a1a33ca076a95279832580db3e0ef4584bdff1f54c8a360f50de3031e 0ebc5d3437fbe2db158b9f126a1d118e308181031d0a949f8dededebc558ef6a",
+            "07506a85fd9dd2f120eb694f86011e5bb4662e5c415a62917033d4a9624487e7 fac54203e7cc696cf0dfcb42c92a1d9dbaf70ad9e621f4bd8d98662f00e3c125 0ebc5d3437fbe2db158b9f126a1d118e308181031d0a949f8dededebc558ef6a",
+            "0298d122906dcfc10892cb53a73992fc5b9f493ea4c9badb27b791b4127a7fe7 fac54203e7cc696cf0dfcb42c92a1d9dbaf70ad9e621f4bd8d98662f00e3c125 0ebc5d3437fbe2db158b9f126a1d118e308181031d0a949f8dededebc558ef6a",
+            "4271a26be0d8a84f0bd54c8c302e7cb3a3b5d1fa6780a40bcce2873477dab658 d37ee418976dd95753c1c73862b9398fa2a2cf9b4ff0fdfe8b30cd95209614b7",
+            "bc1a0643b12e4d2d7c77918f44e0f4f79a838b6cf9ec5b5c283e1f4d88599e6b d37ee418976dd95753c1c73862b9398fa2a2cf9b4ff0fdfe8b30cd95209614b7",
+        ],
+        &[
+            "96a296d224f285c67bee93c30f8a309157f0daa35dc5b87e410b78630a09cfc7 5f083f0a1a33ca076a95279832580db3e0ef4584bdff1f54c8a360f50de3031e 837dbb152e9b079010717e84e865da4ebc0fa198a806d59d31bf15accef22d0e",
+            "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d 5f083f0a1a33ca076a95279832580db3e0ef4584bdff1f54c8a360f50de3031e 837dbb152e9b079010717e84e865da4ebc0fa198a806d59d31bf15accef22d0e",
+            "07506a85fd9dd2f120eb694f86011e5bb4662e5c415a62917033d4a9624487e7 fac54203e7cc696cf0dfcb42c92a1d9dbaf70ad9e621f4bd8d98662f00e3c125 837dbb152e9b079010717e84e865da4ebc0fa198a806d59d31bf15accef22d0e",
+            "0298d122906dcfc10892cb53a73992fc5b9f493ea4c9badb27b791b4127a7fe7 fac54203e7cc696cf0dfcb42c92a1d9dbaf70ad9e621f4bd8d98662f00e3c125 837dbb152e9b079010717e84e865da4ebc0fa198a806d59d31bf15accef22d0e",
+            "4271a26be0d8a84f0bd54c8c302e7cb3a3b5d1fa6780a40bcce2873477dab658 b08693ec2e721597130641e8211e7eedccb4c26413963eee6c1e2ed16ffb1a5f d37ee418976dd95753c1c73862b9398fa2a2cf9b4ff0fdfe8b30cd95209614b7",
+            "bc1a0643b12e4d2d7c77918f44e0f4f79a838b6cf9ec5b5c283e1f4d88599e6b b08693ec2e721597130641e8211e7eedccb4c26413963eee6c1e2ed16ffb1a5f d37ee418976dd95753c1c73862b9398fa2a2cf9b4ff0fdfe8b30cd95209614b7",
+            "0ebc5d3437fbe2db158b9f126a1d118e308181031d0a949f8dededebc558ef6a d37ee418976dd95753c1c73862b9398fa2a2cf9b4ff0fdfe8b30cd95209614b7",
+        ],
+        &[
+            "96a296d224f285c67bee93c30f8a309157f0daa35dc5b87e410b78630a09cfc7 5f083f0a1a33ca076a95279832580db3e0ef4584bdff1f54c8a360f50de3031e 6b47aaf29ee3c2af9af889bc1fb9254dabd31177f16232dd6aab035ca39bf6e4",
+            "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d 5f083f0a1a33ca076a95279832580db3e0ef4584bdff1f54c8a360f50de3031e 6b47aaf29ee3c2af9af889bc1fb9254dabd31177f16232dd6aab035ca39bf6e4",
+            "07506a85fd9dd2f120eb694f86011e5bb4662e5c415a62917033d4a9624487e7 fac54203e7cc696cf0dfcb42c92a1d9dbaf70ad9e621f4bd8d98662f00e3c125 6b47aaf29ee3c2af9af889bc1fb9254dabd31177f16232dd6aab035ca39bf6e4",
+            "0298d122906dcfc10892cb53a73992fc5b9f493ea4c9badb27b791b4127a7fe7 fac54203e7cc696cf0dfcb42c92a1d9dbaf70ad9e621f4bd8d98662f00e3c125 6b47aaf29ee3c2af9af889bc1fb9254dabd31177f16232dd6aab035ca39bf6e4",
+            "4271a26be0d8a84f0bd54c8c302e7cb3a3b5d1fa6780a40bcce2873477dab658 ca854ea128ed050b41b35ffc1b87b8eb2bde461e9e3b5596ece6b9d5975a0ae0 d37ee418976dd95753c1c73862b9398fa2a2cf9b4ff0fdfe8b30cd95209614b7",
+            "bc1a0643b12e4d2d7c77918f44e0f4f79a838b6cf9ec5b5c283e1f4d88599e6b ca854ea128ed050b41b35ffc1b87b8eb2bde461e9e3b5596ece6b9d5975a0ae0 d37ee418976dd95753c1c73862b9398fa2a2cf9b4ff0fdfe8b30cd95209614b7",
+            "46f6ffadd3d06a09ff3c5860d2755c8b9819db7df44251788c7d8e3180de8eb1 0ebc5d3437fbe2db158b9f126a1d118e308181031d0a949f8dededebc558ef6a d37ee418976dd95753c1c73862b9398fa2a2cf9b4ff0fdfe8b30cd95209614b7",
+            "b08693ec2e721597130641e8211e7eedccb4c26413963eee6c1e2ed16ffb1a5f 0ebc5d3437fbe2db158b9f126a1d118e308181031d0a949f8dededebc558ef6a d37ee418976dd95753c1c73862b9398fa2a2cf9b4ff0fdfe8b30cd95209614b7",
+        ],
+    ];
+
+    const CONSISTENCY: [&[&str]; 8] = [
+        &[
+            "",
+        ],
+        &[
+            "96a296d224f285c67bee93c30f8a309157f0daa35dc5b87e410b78630a09cfc7",
+            "",
+        ],
+        &[
+            "96a296d224f285c67bee93c30f8a309157f0daa35dc5b87e410b78630a09cfc7 0298d122906dcfc10892cb53a73992fc5b9f493ea4c9badb27b791b4127a7fe7",
+            "0298d122906dcfc10892cb53a73992fc5b9f493ea4c9badb27b791b4127a7fe7",
+            "",
+        ],
+        &[
+            "96a296d224f285c67bee93c30f8a309157f0daa35dc5b87e410b78630a09cfc7 5f083f0a1a33ca076a95279832580db3e0ef4584bdff1f54c8a360f50de3031e",
+            "5f083f0a1a33ca076a95279832580db3e0ef4584bdff1f54c8a360f50de3031e",
+            "0298d122906dcfc10892cb53a73992fc5b9f493ea4c9badb27b791b4127a7fe7 07506a85fd9dd2f120eb694f86011e5bb4662e5c415a62917033d4a9624487e7 fac54203e7cc696cf0dfcb42c92a1d9dbaf70ad9e621f4bd8d98662f00e3c125",
+            "",
+        ],
+        &[
+            "96a296d224f285c67bee93c30f8a309157f0daa35dc5b87e410b78630a09cfc7 5f083f0a1a33ca076a95279832580db3e0ef4584bdff1f54c8a360f50de3031e bc1a0643b12e4d2d7c77918f44e0f4f79a838b6cf9ec5b5c283e1f4d88599e6b",
+            "5f083f0a1a33ca076a95279832580db3e0ef4584bdff1f54c8a360f50de3031e bc1a0643b12e4d2d7c77918f44e0f4f79a838b6cf9ec5b5c283e1f4d88599e6b",
+            "0298d122906dcfc10892cb53a73992fc5b9f493ea4c9badb27b791b4127a7fe7 07506a85fd9dd2f120eb694f86011e5bb4662e5c415a62917033d4a9624487e7 fac54203e7cc696cf0dfcb42c92a1d9dbaf70ad9e621f4bd8d98662f00e3c125 bc1a0643b12e4d2d7c77918f44e0f4f79a838b6cf9ec5b5c283e1f4d88599e6b",
+            "bc1a0643b12e4d2d7c77918f44e0f4f79a838b6cf9ec5b5c283e1f4d88599e6b",
+            "",
+        ],
+        &[
+            "96a296d224f285c67bee93c30f8a309157f0daa35dc5b87e410b78630a09cfc7 5f083f0a1a33ca076a95279832580db3e0ef4584bdff1f54c8a360f50de3031e 0ebc5d3437fbe2db158b9f126a1d118e308181031d0a949f8dededebc558ef6a",
+            "5f083f0a1a33ca076a95279832580db3e0ef4584bdff1f54c8a360f50de3031e 0ebc5d3437fbe2db158b9f126a1d118e308181031d0a949f8dededebc558ef6a",
+            "0298d122906dcfc10892cb53a73992fc5b9f493ea4c9badb27b791b4127a7fe7 07506a85fd9dd2f120eb694f86011e5bb4662e5c415a62917033d4a9624487e7 fac54203e7cc696cf0dfcb42c92a1d9dbaf70ad9e621f4bd8d98662f00e3c125 0ebc5d3437fbe2db158b9f126a1d118e308181031d0a949f8dededebc558ef6a",
+            "0ebc5d3437fbe2db158b9f126a1d118e308181031d0a949f8dededebc558ef6a",
+            "bc1a0643b12e4d2d7c77918f44e0f4f79a838b6cf9ec5b5c283e1f4d88599e6b 4271a26be0d8a84f0bd54c8c302e7cb3a3b5d1fa6780a40bcce2873477dab658 d37ee418976dd95753c1c73862b9398fa2a2cf9b4ff0fdfe8b30cd95209614b7",
+            "",
+        ],
+        &[
+            "96a296d224f285c67bee93c30f8a309157f0daa35dc5b87e410b78630a09cfc7 5f083f0a1a33ca076a95279832580db3e0ef4584bdff1f54c8a360f50de3031e 837dbb152e9b079010717e84e865da4ebc0fa198a806d59d31bf15accef22d0e",
+            "5f083f0a1a33ca076a95279832580db3e0ef4584bdff1f54c8a360f50de3031e 837dbb152e9b079010717e84e865da4ebc0fa198a806d59d31bf15accef22d0e",
+            "0298d122906dcfc10892cb53a73992fc5b9f493ea4c9badb27b791b4127a7fe7 07506a85fd9dd2f120eb694f86011e5bb4662e5c415a62917033d4a9624487e7 fac54203e7cc696cf0dfcb42c92a1d9dbaf70ad9e621f4bd8d98662f00e3c125 837dbb152e9b079010717e84e865da4ebc0fa198a806d59d31bf15accef22d0e",
+            "837dbb152e9b079010717e84e865da4ebc0fa198a806d59d31bf15accef22d0e",
+            "bc1a0643b12e4d2d7c77918f44e0f4f79a838b6cf9ec5b5c283e1f4d88599e6b 4271a26be0d8a84f0bd54c8c302e7cb3a3b5d1fa6780a40bcce2873477dab658 b08693ec2e721597130641e8211e7eedccb4c26413963eee6c1e2ed16ffb1a5f d37ee418976dd95753c1c73862b9398fa2a2cf9b4ff0fdfe8b30cd95209614b7",
+            "0ebc5d3437fbe2db158b9f126a1d118e308181031d0a949f8dededebc558ef6a b08693ec2e721597130641e8211e7eedccb4c26413963eee6c1e2ed16ffb1a5f d37ee418976dd95753c1c73862b9398fa2a2cf9b4ff0fdfe8b30cd95209614b7",
+            "",
+        ],
+        &[
+            "96a296d224f285c67bee93c30f8a309157f0daa35dc5b87e410b78630a09cfc7 5f083f0a1a33ca076a95279832580db3e0ef4584bdff1f54c8a360f50de3031e 6b47aaf29ee3c2af9af889bc1fb9254dabd31177f16232dd6aab035ca39bf6e4",
+            "5f083f0a1a33ca076a95279832580db3e0ef4584bdff1f54c8a360f50de3031e 6b47aaf29ee3c2af9af889bc1fb9254dabd31177f16232dd6aab035ca39bf6e4",
+            "0298d122906dcfc10892cb53a73992fc5b9f493ea4c9badb27b791b4127a7fe7 07506a85fd9dd2f120eb694f86011e5bb4662e5c415a62917033d4a9624487e7 fac54203e7cc696cf0dfcb42c92a1d9dbaf70ad9e621f4bd8d98662f00e3c125 6b47aaf29ee3c2af9af889bc1fb9254dabd31177f16232dd6aab035ca39bf6e4",
+            "6b47aaf29ee3c2af9af889bc1fb9254dabd31177f16232dd6aab035ca39bf6e4",
+            "bc1a0643b12e4d2d7c77918f44e0f4f79a838b6cf9ec5b5c283e1f4d88599e6b 4271a26be0d8a84f0bd54c8c302e7cb3a3b5d1fa6780a40bcce2873477dab658 ca854ea128ed050b41b35ffc1b87b8eb2bde461e9e3b5596ece6b9d5975a0ae0 d37ee418976dd95753c1c73862b9398fa2a2cf9b4ff0fdfe8b30cd95209614b7",
+            "0ebc5d3437fbe2db158b9f126a1d118e308181031d0a949f8dededebc558ef6a ca854ea128ed050b41b35ffc1b87b8eb2bde461e9e3b5596ece6b9d5975a0ae0 d37ee418976dd95753c1c73862b9398fa2a2cf9b4ff0fdfe8b30cd95209614b7",
+            "b08693ec2e721597130641e8211e7eedccb4c26413963eee6c1e2ed16ffb1a5f 46f6ffadd3d06a09ff3c5860d2755c8b9819db7df44251788c7d8e3180de8eb1 0ebc5d3437fbe2db158b9f126a1d118e308181031d0a949f8dededebc558ef6a d37ee418976dd95753c1c73862b9398fa2a2cf9b4ff0fdfe8b30cd95209614b7",
+            "",
+        ],
+    ];
+
+    /// The eight Certificate Transparency leaves. RFC 9162 keeps that
+    /// hashing. The empty root, each prefix root, and every inclusion and
+    /// consistency proof are the values this log returns for them.
+    #[test]
+    fn the_ct_vectors_keep_their_roots_and_proofs() {
+        let all = ct_leaves();
+        assert_eq!(hex(&root(&[])), EMPTY_ROOT);
+        for size in 1..=8 {
+            let leaves = &all[..size];
+            assert_eq!(hex(&root(leaves)), ROOTS[size - 1], "root of {size}");
+            for (index, want) in INCLUSION[size - 1].iter().enumerate() {
+                let path = inclusion_proof(leaves, index).expect("an inclusion proof");
+                assert_eq!(path, proof(want), "inclusion of {index} in {size}");
+            }
+            for (before, want) in CONSISTENCY[size - 1].iter().enumerate() {
+                let old = before + 1;
+                let path = consistency_proof(leaves, old).expect("a consistency proof");
+                assert_eq!(path, proof(want), "consistency of {old} into {size}");
+            }
+        }
     }
 
     /// The empty tree has a defined root rather than a panic, because a store

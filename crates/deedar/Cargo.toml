@@ -20,6 +20,7 @@ libc = "0.2"
 deed.workspace = true
 ed25519-dalek = "2"
 sha2.workspace = true
+rfc9162 = { git = "https://github.com/stackhands/rfc9162", tag = "v0.8.1" }
 hmac.workspace = true
 ureq.workspace = true
 
